@@ -21,7 +21,8 @@ Smoke coverage: health; auth required; first-run setup; second setup refused; wr
 
 - **Docker build and `docker compose up`: UNVERIFIED.** The Docker CLI exists but the daemon socket was absent.
 - **Live services: UNVERIFIED.** No real TMDb, indexer, qBittorrent, Sonarr or Radarr was contacted, by design.
-- **Fresh clone build: partially verified.** Restore, build and tests ran in the working tree; a clean clone and `npm ci` were not run separately.
+- **Fresh clone build: partially verified.** Restore, build and tests ran on Linux in the working tree; a clean clone and `npm ci` were not run separately.
+- **Windows: NOT VERIFIED by this environment.** The build commands were corrected for PowerShell. The smoke script is bash-only (run it from Git Bash or WSL). One symlink-refusal test returns early when symlink creation is not permitted, so that case is not verified on such Windows hosts. The importer hardlink path is Linux-only; Windows uses verified copy.
 - **Automatic grabbing and wanted-search automation: NOT IMPLEMENTED.** Manual only. The background scheduler runs queue sync and import only.
 - **Prowlarr bridge, Cardigann, Usenet, music, books, subtitles, requests: NOT IMPLEMENTED** (out of scope for this run).
 - **Fail-closed root-folder check** (item root outside the media root) is implemented in `DownloadService` but has no dedicated automated test; it is covered by code review only.

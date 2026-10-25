@@ -24,18 +24,32 @@ A self-hosted movie and TV manager built as one ASP.NET Core 10 process with a R
 
 ## Build and run from a fresh clone
 
-```bash
-# 1. Frontend: compile into src/OneArr.Api/wwwroot (served by ASP.NET Core)
-cd web && npm ci && npm run build && cd ..
+Commands below are for **Windows PowerShell 5.1 or PowerShell 7**. PowerShell 5.1 does not accept `&&`, so run each line separately (or use `;`). The `VAR=value command` form does not work in PowerShell; use `$env:VAR = "value"` instead.
+
+```powershell
+# 1. Frontend: compile into src\OneArr.Api\wwwroot (served by ASP.NET Core)
+cd web
+npm ci
+npm run build
+cd ..
 
 # 2. Backend: restore, build, test
 dotnet restore OneArr.slnx
 dotnet build OneArr.slnx -c Release
 dotnet test OneArr.slnx -c Release
 
-# 3. Run (SQLite database and token key are created in ./config)
-ONEARR_CONFIG_DIR=./config dotnet run --project src/OneArr.Api
+# 3. Run (SQLite database and token key are created in .\config)
+$env:ONEARR_CONFIG_DIR = ".\config"
+dotnet run --project src\OneArr.Api
 # open http://127.0.0.1:8780 and create the admin password (12+ characters)
+```
+
+macOS or Linux (bash, zsh):
+
+```bash
+(cd web && npm ci && npm run build)
+dotnet restore OneArr.slnx && dotnet build OneArr.slnx -c Release && dotnet test OneArr.slnx -c Release
+ONEARR_CONFIG_DIR=./config dotnet run --project src/OneArr.Api
 ```
 
 Optional environment variables (see `.env.example`):
@@ -51,8 +65,8 @@ Without a TMDb key the app runs, and search shows a setup message instead of res
 
 ## Docker (not verified in this environment)
 
-```bash
-cp .env.example .env
+```powershell
+Copy-Item .env.example .env
 docker compose up --build
 ```
 
@@ -60,12 +74,15 @@ The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtim
 
 ## Tests and smoke
 
-```bash
+```powershell
 dotnet test OneArr.slnx                 # 53 unit/integration tests, no network
-bash tools/smoke/smoke.sh              # starts the API and local fake TMDb/Torznab/qBittorrent/Radarr; 27 checks
 ```
 
-The smoke test uses fixture credentials and a scratch directory. It never contacts real trackers, TMDb or qBittorrent.
+`tools/smoke/smoke.sh` is a **bash** script. On Windows run it from Git Bash or WSL, and it also needs `jq` and `python3` on that shell's PATH. It starts the API and local fake TMDb/Torznab/qBittorrent/Radarr services and runs 27 checks. Use it with fixture credentials only; it never contacts real trackers, TMDb or qBittorrent.
+
+```bash
+bash tools/smoke/smoke.sh
+```
 
 ## Security notes
 

@@ -125,7 +125,15 @@ public class SafeImporterTests
         using var t = new TempTree();
         var real = t.WriteFile("torrents/movie/real.mkv", "x");
         var link = Path.Combine(t.Torrents, "movie", "link.mkv");
-        File.CreateSymbolicLink(link, real);
+        try
+        {
+            File.CreateSymbolicLink(link, real);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            // Windows without symlink privilege: this refusal path cannot be exercised here. Not counted as verified.
+            return;
+        }
         var outcome = await _importer.ImportAsync(Req(t, link), CancellationToken.None);
         Assert.False(outcome.Success);
         Assert.Contains("symbolic link", outcome.Message);
@@ -134,10 +142,15 @@ public class SafeImporterTests
     [Fact]
     public void PlanDestinationStaysUnderRoot()
     {
-        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination("/data/media", "../x", "a.mkv"));
-        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination("/data/media", "/abs", "a.mkv"));
-        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination("/data/media", "ok", "../../a.mkv"));
-        Assert.Equal("/data/media/Show/Season 01/e.mkv", SafeImporter.PlanDestination("/data/media", "Show/Season 01", "e.mkv"));
+        // Built from the temp dir so the test behaves the same on Linux and Windows (no hard-coded "/data" paths).
+        var root = Path.Combine(Path.GetTempPath(), "onearr-media");
+        var absoluteElsewhere = Path.Combine(Path.GetPathRoot(root)!, "etc");
+        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination(root, "../x", "a.mkv"));
+        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination(root, absoluteElsewhere, "a.mkv"));
+        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.PlanDestination(root, "ok", "../../a.mkv"));
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(root, "Show", "Season 01", "e.mkv")),
+            SafeImporter.PlanDestination(root, Path.Combine("Show", "Season 01"), "e.mkv"));
     }
 }
 
