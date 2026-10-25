@@ -7,6 +7,52 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Existing-library reconciliation (branch `library-reconciliation`)
+
+**Problem fixed:** items imported from Radarr/Sonarr showed as missing although the files existed. Nothing linked files on
+disk to catalog items, the migration dropped the original paths, and existing items could not get a Windows folder.
+
+**Built**
+
+- Additive migration `AddLibraryReconciliation`: `LibraryRoots`, `PathMappings`, `MediaFiles`, `MediaFileEpisodes`,
+  `LibraryScanPlans`, and `MediaItems.LegacyPath`/`LegacySource`. The `Up` method only adds. A test upgrades a database
+  from the previous schema and checks that existing rows survive.
+- Matcher (pure, no I/O). Rules, strongest first: the catalog's legacy folder, then a TMDb id in the path, then title and
+  year. Movies need a year. Series use the series folder plus `S01E02`, `S01E02E03`, `S01E01-03` and `1x02`. Ambiguous and
+  unmatched files are reported and never linked. Files named as samples are never linked.
+- Path rules: Windows drive and UNC validation. A Linux path on Windows is refused with guidance. Keys are case-insensitive
+  on Windows. Path mapping uses the longest matching prefix on whole segments. A stored Linux path is never used on Windows.
+- Disk reads are read-only. Junctions and symlinks are counted and skipped, never followed. Reachability checks time out
+  after 10 s. A drive that is not ready is reported as unavailable.
+- Preview changes no media. It only stores the reviewed plan.
+- Apply runs a fresh scan and writes only entries that still match the reviewed plan (same file, size and links). Excluded
+  entries are skipped. Apply never moves, renames, copies, links or deletes a file.
+- `HasFile` turns on for a verified link. It turns off only when every linked file is confirmed missing on an online
+  folder and no completed download import exists for that item. An offline folder marks files `Inaccessible`, never missing.
+- Automatic grabbing pauses until every enabled folder has been scanned and applied, and is reachable at the time of the
+  search.
+- API: `GET /api/library/status`, `POST/DELETE /api/library/roots`, `PUT /api/library/mappings`,
+  `POST /api/library/preview`, `POST /api/library/plans/{id}/apply`, and `PATCH /api/media/{id}` accepts `rootFolder`.
+  Migration import keeps the legacy path. An existing value is never overwritten.
+- UI: Settings → Library panel (folders, path mappings, preview, apply with confirmation). Linux placeholders on Windows
+  paths are replaced. The migration page sends the original path.
+
+**Verified locally (Linux sandbox)**
+
+- 185 non-Windows tests pass. These include the matcher, path rules, the reconciler on a fake disk, the library endpoints,
+  and the upgrade test.
+- Frontend: type check, build, and 8 Settings tests pass.
+
+**Not verified yet**
+
+- `LibraryWindowsTests` (real NTFS scan, byte-for-byte unchanged check, junctions, unavailable drive, case-insensitive
+  folder) are written but can only run on the Windows CI job. Result: pending the CI run for this branch.
+- A real Radarr/Sonarr migration with TMDb lookups (needs your credentials).
+- An offline UNC share on a real network. The code path is tested with a fake disk.
+- Scan speed on a large library (not measured).
+- Folder picker: not built. Folders are typed.
+- Changing a movie's folder from the Movies page: API only, no UI yet.
+
 ## VERIFIED
 
 ### CI on GitHub (`drathaxie/OneArr`, run 40162471451, commit d7f0ea6)
@@ -65,13 +111,17 @@ attached to releases; they are not yet read back from a release.
 - Hardlinks only on the same NTFS volume. Other filesystems fall back to a verified copy.
 - Mount points and junctions in the media or torrent root are refused; the root itself must be a real folder.
 - Imports wait 30 s after a file's last write before taking it.
-- Automatic grabbing is off by default; it can be turned on with `PUT /api/settings {"automaticGrabbing": true}`.
+- Automatic grabbing is off by default; it can be turned on with `PUT /api/settings {"automaticGrabbing": true}`. It also
+  waits for the library scan described above.
+- Movies without a year in their folder or file name are not matched automatically.
+- Junction and symlink folders in a library root are not scanned, so files behind them are not linked.
 - Upgrades (replacing a file below the quality cutoff) are not searched.
 - The tray does not update itself. To update the tray, run the installer from the newer release folder while the old tray
   is closed.
 
 ## Next
 
+0. Library: check that the Windows CI job ran `LibraryWindowsTests`, then preview a real library folder before applying.
 1. Run the release workflow for 0.2.0 from the Actions page, then check the assets and checksum.
 2. Install the released zip on a clean Windows machine: run the tray, check the Start Menu entry, autostart, the update
    check, install, rollback, and uninstall with `--uninstall`.

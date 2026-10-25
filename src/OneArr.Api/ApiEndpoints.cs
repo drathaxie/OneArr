@@ -4,6 +4,7 @@ using OneArr.Domain;
 using OneArr.Infrastructure;
 using OneArr.Infrastructure.Files;
 using OneArr.Infrastructure.Http;
+using OneArr.Infrastructure.Library;
 using OneArr.Infrastructure.Legacy;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Security;
@@ -15,7 +16,7 @@ public static class ApiEndpoints
 {
     public sealed record SetupRequest(string Password);
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
-    public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId);
+    public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId);
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash);
     public sealed record IndexerBody(string Name, string BaseUrl, string ApiKey, bool Enabled);
@@ -24,8 +25,10 @@ public static class ApiEndpoints
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
-    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored);
-    public sealed record ScanBody(string? Root);
+    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null);
+    public sealed record LibraryRootBody(string Type, string Path, string? Label);
+    public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
+    public sealed record ApplyBody(List<string>? ExcludePaths);
 
     public static void Map(WebApplication app)
     {
@@ -116,7 +119,7 @@ public static class ApiEndpoints
             await media.GetAsync(id, ct) is { } item ? Results.Ok(item) : Results.NotFound());
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
-            await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, ct) ? Results.NoContent() : Results.NotFound());
+            await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
 
         api.MapDelete("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
             await media.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound());
@@ -242,11 +245,87 @@ public static class ApiEndpoints
             return Results.Ok(await c.ImportRecords.AsNoTracking().OrderByDescending(r => r.Id).Take(200).ToListAsync(ct));
         });
 
-        api.MapPost("/library/scan", async (ScanBody? body, ILibraryScanner scanner, SettingsStore settings, CancellationToken ct) =>
+        api.MapGet("/library/status", async (LibraryReconciler library, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
-            var root = body?.Root ?? await settings.GetAsync(SettingKeys.MediaRoot, ct) ?? throw new ArgumentException("Set the media root in Settings first");
-            var count = await scanner.ScanAsync(root, ct);
-            return Results.Ok(new { files = count, mode = "read-only" });
+            await using var c = await db.CreateDbContextAsync(ct);
+            return Results.Ok(new
+            {
+                windows = OperatingSystem.IsWindows(),
+                automation = await library.CheckAutomationAsync(ct),
+                roots = await c.LibraryRoots.AsNoTracking().OrderBy(r => r.Id).ToListAsync(ct),
+                mappings = await c.PathMappings.AsNoTracking().OrderBy(m => m.Id).ToListAsync(ct),
+            });
+        });
+
+        // Removes OneArr's record of the folder only. No file in it is touched.
+        api.MapPost("/library/roots", async (LibraryRootBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            var type = ParseType(body.Type);
+            var windows = OperatingSystem.IsWindows();
+            var problem = LibraryPaths.ValidateRoot(body.Path, windows);
+            if (problem is not null) return Results.BadRequest(new { error = problem });
+
+            var path = body.Path.Trim();
+            var key = LibraryPaths.Key(path, windows);
+            await using var c = await db.CreateDbContextAsync(ct);
+            if (await c.LibraryRoots.AnyAsync(r => r.MediaType == type && r.PathKey == key, ct))
+                return Results.Conflict(new { error = "That folder is already a library root for this media type" });
+
+            var root = new LibraryRoot { MediaType = type, Path = path, PathKey = key, Label = string.IsNullOrWhiteSpace(body.Label) ? null : body.Label.Trim() };
+            c.LibraryRoots.Add(root);
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(root);
+        });
+
+        api.MapDelete("/library/roots/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var root = await c.LibraryRoots.FindAsync([id], ct);
+            if (root is null) return Results.NotFound();
+            c.LibraryRoots.Remove(root);
+            await c.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Replaces the full mapping list. Mappings translate Sonarr/Radarr paths for this PC; they never change files.
+        api.MapPut("/library/mappings", async (List<PathMappingBody> body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            var windows = OperatingSystem.IsWindows();
+            var rows = new List<PathMapping>();
+            foreach (var m in body.Take(100))
+            {
+                var type = ParseType(m.Type);
+                var problem = LibraryPaths.ValidateMapping(m.SourcePrefix, m.TargetPrefix, windows);
+                if (problem is not null) return Results.BadRequest(new { error = problem, source = m.SourcePrefix });
+                if (rows.Any(r => r.MediaType == type && r.SourcePrefix == m.SourcePrefix.Trim()))
+                    return Results.BadRequest(new { error = $"Two mappings use the same source path: {m.SourcePrefix}" });
+                rows.Add(new PathMapping { MediaType = type, SourcePrefix = m.SourcePrefix.Trim(), TargetPrefix = m.TargetPrefix.Trim() });
+            }
+
+            await using var c = await db.CreateDbContextAsync(ct);
+            await c.PathMappings.ExecuteDeleteAsync(ct);
+            c.PathMappings.AddRange(rows);
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(rows);
+        });
+
+        // Read-only preview. It stores the reviewed result and changes no media rows or files.
+        api.MapPost("/library/preview", async (LibraryReconciler library, CancellationToken ct) => Results.Ok(await library.PreviewAsync(ct)));
+
+        api.MapPost("/library/plans/{id:int}/apply", async (int id, ApplyBody? body, LibraryReconciler library, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await library.ApplyAsync(id, body?.ExcludePaths, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
         });
 
         api.MapPost("/automation/wanted-search", async (WantedSearchService search, JobRunner runner, CancellationToken ct) =>
@@ -308,7 +387,7 @@ public static class ApiEndpoints
             });
         });
 
-        api.MapPost("/migration/import", async (MigrationImportBody body, MediaService media, CancellationToken ct) =>
+        api.MapPost("/migration/import", async (MigrationImportBody body, MediaService media, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             var results = new List<object>();
             foreach (var sel in body.Items.Take(500))
@@ -321,6 +400,18 @@ public static class ApiEndpoints
                 try
                 {
                     var r = await media.AddAsync(new AddMediaRequest(ParseType(sel.Type), tmdb.ToString(), body.QualityProfileId, body.RootFolder, sel.Monitored, null, true), ct);
+                    // Keep the original path so existing files can be matched. An existing value is never overwritten.
+                    if (sel.LegacyPath is { Length: > 0 } legacy)
+                    {
+                        await using var c = await db.CreateDbContextAsync(ct);
+                        var item = await c.MediaItems.FindAsync([r.Item.Id], ct);
+                        if (item is { LegacyPath: null })
+                        {
+                            item.LegacyPath = legacy.Trim();
+                            item.LegacySource = sel.LegacySource;
+                            await c.SaveChangesAsync(ct);
+                        }
+                    }
                     results.Add(new { sel.Title, status = r.Created ? "added" : "exists", id = r.Item.Id });
                 }
                 catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException)

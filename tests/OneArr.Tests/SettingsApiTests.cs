@@ -54,6 +54,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 /// Settings endpoint behaviour: defaults, persistence, secrets never returned, path validation, and authentication.
 /// Each test starts from a fresh config directory unless it is deliberately testing persistence.
 /// </summary>
+[Collection(ApiHostCollection.Name)]
 public class SettingsApiTests
 {
     private const string Password = "correct horse battery";

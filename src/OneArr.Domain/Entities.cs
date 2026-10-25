@@ -22,6 +22,9 @@ public class MediaItem
     public QualityProfile? QualityProfile { get; set; }
     public string RootFolder { get; set; } = "";
     public bool HasFile { get; set; }
+    /// <summary>Path exactly as the migrated application stored it (may be a Linux container path). Never used as a Windows path directly.</summary>
+    public string? LegacyPath { get; set; }
+    public string? LegacySource { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<Season> Seasons { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();
@@ -159,4 +162,67 @@ public class SearchAttempt
     public int ConsecutiveFailures { get; set; }
     public SearchOutcome LastOutcome { get; set; }
     public string? LastMessage { get; set; }
+}
+
+public enum LibraryRootState { Unknown = 0, Accessible = 1, Unavailable = 2, Invalid = 3 }
+
+public enum MediaFileStatus { Present = 0, Missing = 1, Inaccessible = 2 }
+
+/// <summary>A folder OneArr scans for existing media. A media type can have several roots.</summary>
+public class LibraryRoot
+{
+    public int Id { get; set; }
+    public MediaType MediaType { get; set; }
+    public string Path { get; set; } = "";
+    /// <summary>Case-folded on Windows so C:\Media and c:\media are one root.</summary>
+    public string PathKey { get; set; } = "";
+    public string? Label { get; set; }
+    public bool Enabled { get; set; } = true;
+    public LibraryRootState LastState { get; set; } = LibraryRootState.Unknown;
+    public string? LastMessage { get; set; }
+    public DateTimeOffset? LastCheckedUtc { get; set; }
+    public DateTimeOffset? LastSuccessfulScanUtc { get; set; }
+}
+
+/// <summary>Maps a path as Sonarr/Radarr saw it (often a Linux container path) to where the same folder is on this PC.</summary>
+public class PathMapping
+{
+    public int Id { get; set; }
+    public MediaType MediaType { get; set; }
+    public string SourcePrefix { get; set; } = "";
+    public string TargetPrefix { get; set; } = "";
+}
+
+/// <summary>A media file OneArr has verified on disk, linked to one movie or to one or more episodes.</summary>
+public class MediaFile
+{
+    public int Id { get; set; }
+    public string Path { get; set; } = "";
+    /// <summary>Lookup key: the path, case-folded on Windows. Unique, so rescanning never duplicates a file.</summary>
+    public string PathKey { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public MediaFileStatus Status { get; set; } = MediaFileStatus.Present;
+    public int? LibraryRootId { get; set; }
+    public int? MediaItemId { get; set; }
+    public int? Resolution { get; set; }
+    public string MatchMethod { get; set; } = "";
+    public DateTimeOffset FirstSeenUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastVerifiedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public List<MediaFileEpisode> EpisodeLinks { get; set; } = new();
+}
+
+public class MediaFileEpisode
+{
+    public int MediaFileId { get; set; }
+    public MediaFile? MediaFile { get; set; }
+    public int EpisodeId { get; set; }
+}
+
+/// <summary>A reviewed, read-only scan result. Applying it is a separate, explicit step that revalidates each file.</summary>
+public class LibraryScanPlan
+{
+    public int Id { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? AppliedUtc { get; set; }
+    public string PlanJson { get; set; } = "";
 }

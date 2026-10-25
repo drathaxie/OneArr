@@ -41,11 +41,6 @@ public interface IReleaseRanker
     ReleaseDecision Evaluate(ReleaseCandidate candidate, ReleaseTarget target);
 }
 
-public interface ILibraryScanner
-{
-    Task<int> ScanAsync(string root, CancellationToken ct);
-}
-
 public interface IImporter
 {
     Task<ImportOutcome> ImportAsync(ImportRequest request, CancellationToken ct);

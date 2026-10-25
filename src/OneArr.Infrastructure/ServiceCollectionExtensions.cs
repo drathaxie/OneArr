@@ -4,6 +4,7 @@ using OneArr.Application;
 using OneArr.Domain;
 using OneArr.Infrastructure.Files;
 using OneArr.Infrastructure.Http;
+using OneArr.Infrastructure.Library;
 using OneArr.Infrastructure.Legacy;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Providers;
@@ -28,7 +29,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIndexerClient, TorznabClient>();
         services.AddSingleton<IDownloadClient, QBittorrentClient>();
         services.AddSingleton<IImporter, SafeImporter>();
-        services.AddSingleton<ILibraryScanner, LibraryScanner>();
+        services.AddSingleton<ILibraryFileSystem, LocalLibraryFileSystem>();
+        services.AddSingleton<LibraryReconciler>();
         services.AddSingleton<ILegacyArrReader, LegacyArrReader>();
         services.AddSingleton<IClock, SystemClock>();
 

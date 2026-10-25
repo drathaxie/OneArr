@@ -123,7 +123,7 @@ bash tools/smoke/smoke.sh
 
 ```
 src/OneArr.Domain          entities, enums, settings keys
-src/OneArr.Application     contracts (IMetadataProvider, IIndexerClient, IDownloadClient, IReleaseParser, IReleaseRanker, ILibraryScanner, IImporter, ILegacyArrReader), release parser, ranker
+src/OneArr.Application     contracts (IMetadataProvider, IIndexerClient, IDownloadClient, IReleaseParser, IReleaseRanker, IImporter, ILegacyArrReader), release parser, ranker
 src/OneArr.Infrastructure  EF Core (SQLite + migrations), TMDb / Torznab / qBittorrent adapters, SafeImporter, scanner, legacy reader, services, background scheduler
 src/OneArr.Api             ASP.NET Core host, /api endpoints, static UI
 web/                       React + TypeScript + Vite UI

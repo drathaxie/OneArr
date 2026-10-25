@@ -112,7 +112,8 @@ public sealed class MediaService
         return await db.MediaItems.AsNoTracking().Include(m => m.Seasons).Include(m => m.Episodes).FirstOrDefaultAsync(m => m.Id == id, ct);
     }
 
-    public async Task<bool> UpdateAsync(int id, bool? monitored, int? qualityProfileId, CancellationToken ct)
+    /// <summary>Changing RootFolder only affects where future downloads go. It never moves or re-checks files already on disk.</summary>
+    public async Task<bool> UpdateAsync(int id, bool? monitored, int? qualityProfileId, string? rootFolder, CancellationToken ct)
     {
         await using var db = await _db.CreateDbContextAsync(ct);
         var item = await db.MediaItems.FindAsync([id], ct);
@@ -122,6 +123,11 @@ public sealed class MediaService
         {
             if (!await db.QualityProfiles.AnyAsync(q => q.Id == p, ct)) throw new ArgumentException("Quality profile does not exist");
             item.QualityProfileId = p;
+        }
+        if (rootFolder is not null)
+        {
+            ValidateRoot(rootFolder);
+            item.RootFolder = rootFolder.Trim();
         }
         await db.SaveChangesAsync(ct);
         return true;
@@ -155,9 +161,8 @@ public sealed class MediaService
 
     public static void ValidateRoot(string rootFolder)
     {
-        if (string.IsNullOrWhiteSpace(rootFolder)) throw new ArgumentException("Root folder is required");
-        if (!Path.IsPathRooted(rootFolder) || rootFolder.Contains("..", StringComparison.Ordinal))
-            throw new ArgumentException("Root folder must be an absolute path without '..'");
+        var problem = OneArr.Infrastructure.Library.LibraryPaths.ValidateRoot(rootFolder, OperatingSystem.IsWindows());
+        if (problem is not null) throw new ArgumentException(problem);
     }
 
     /// <summary>Sanitised folder name for a title, e.g. "Dune: Part Two" becomes "Dune Part Two".</summary>
