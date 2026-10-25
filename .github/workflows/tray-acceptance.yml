@@ -1,14 +1,23 @@
 name: tray-acceptance
 
-# Runs the published release on a disposable Windows runner: install, tray, sign-in in a browser, update, rollback,
-# uninstall and purge. Never runs against a real OneArr installation. Uses a controlled feed on 127.0.0.1.
+# Runs the tray release flow on a disposable Windows runner: install, tray, sign-in in a browser, update, rollback,
+# uninstall and purge. Never runs against a real OneArr installation. Updates are served from 127.0.0.1 only.
+#   mode = published       : tests a release already on GitHub (release_tag)
+#   mode = current-commit  : builds the same artifacts from this commit as version 0.9.0 and tests those
+#                            (use this before a release exists; the results say which mode was used)
 
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Published release tag to test, for example v0.2.0'
+      mode:
+        description: 'published or current-commit'
         required: true
+        default: 'current-commit'
+        type: choice
+        options: [published, current-commit]
+      release_tag:
+        description: 'Tag to test when mode is published, for example v0.3.0'
+        required: false
         default: 'v0.2.0'
 
 permissions:
@@ -32,6 +41,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download the published release exactly as a user would
+        if: inputs.mode == 'published'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,17 +49,34 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build/published | Out-Null
           gh release download $env:TAG --repo ${{ github.repository }} --dir build/published --pattern "*-win-x64.zip" --pattern "*-win-x64.zip.sha256"
-          Get-ChildItem build/published | ForEach-Object { $_.Name }
+
+      - name: Build the same artifacts from this commit (test version 0.9.0)
+        if: inputs.mode == 'current-commit'
+        shell: pwsh
+        run: |
+          cd web; npm ci; npm run build; cd ..
+          $v = "0.9.0"
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=$v -p:DebugType=None -p:DebugSymbols=false -o build/stage/app
+          Set-Content -NoNewline -Encoding ascii -Path build/stage/app/version.txt -Value $v
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$v -p:DebugType=None -p:DebugSymbols=false -o build/stage
+          New-Item -ItemType Directory -Force -Path build/published | Out-Null
+          $name = "OneArr-$v-win-x64"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("build/stage", "build/published/$name.zip", [System.IO.Compression.CompressionLevel]::Optimal, $false)
+          $hash = (Get-FileHash -Algorithm SHA256 "build/published/$name.zip").Hash.ToLower()
+          "$hash  $name.zip" | Set-Content -Encoding ascii "build/published/$name.zip.sha256"
 
       - name: Run tray acceptance
         shell: pwsh
         env:
+          MODE: ${{ inputs.mode }}
           TAG: ${{ inputs.release_tag }}
         run: |
-          $version = $env:TAG -replace '^v', ''
+          $version = if ($env:MODE -eq 'published') { $env:TAG -replace '^v', '' } else { '0.9.0' }
           $zip = Get-ChildItem build/published -Filter "OneArr-$version-win-x64.zip" | Select-Object -First 1
           $sha = Get-ChildItem build/published -Filter "OneArr-$version-win-x64.zip.sha256" | Select-Object -First 1
-          if (-not $zip -or -not $sha) { throw "Release $env:TAG has no $version artifact" }
+          if (-not $zip -or -not $sha) { throw "No $version artifact found for mode $env:MODE" }
+          Write-Host "Testing mode=$env:MODE version=$version zip=$($zip.Name)"
           ./tools/windows/tray-acceptance.ps1 -ReleaseZip $zip.FullName -ReleaseSha256File $sha.FullName -ReleaseVersion $version -OutDir build/tray-acceptance
 
       - name: Keep results

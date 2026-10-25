@@ -21,6 +21,10 @@ $ProgressPreference = 'SilentlyContinue'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $results = New-Object System.Collections.Generic.List[object]
 $measure = [ordered]@{ version = $ReleaseVersion }
+# Candidate updates are the next two patch versions, so the test works for any installed version.
+$vp = $ReleaseVersion.Split('.')
+$cand1 = "$($vp[0]).$($vp[1]).$([int]$vp[2] + 1)"
+$cand2 = "$($vp[0]).$($vp[1]).$([int]$vp[2] + 2)"
 $root = Join-Path $env:LOCALAPPDATA 'OneArr'
 $tray = Join-Path $root 'OneArr.Tray.exe'
 $app = Join-Path $root 'app'
@@ -192,11 +196,11 @@ try {
 
     # ---- 5. Controlled test feed on 127.0.0.1. The real GitHub feed is never used here.
     $cand = Join-Path $work 'cand-source'
-    dotnet publish (Join-Path $SourceDir 'src\OneArr.Api\OneArr.Api.csproj') -c Release -r win-x64 --self-contained true -p:Version=0.2.1 -p:DebugType=None -p:DebugSymbols=false -o $cand | Out-Null
-    $zip21 = 'OneArr-0.2.1-win-x64.zip'
+    dotnet publish (Join-Path $SourceDir 'src\OneArr.Api\OneArr.Api.csproj') -c Release -r win-x64 --self-contained true -p:Version=$cand1 -p:DebugType=None -p:DebugSymbols=false -o $cand | Out-Null
+    $zip21 = "OneArr-$cand1-win-x64.zip"
     $wrongSha = ('0' * 64)
-    $realSha21 = Make-Candidate '0.2.1' $zip21 $cand
-    Write-Feed '0.2.1' $zip21 "$wrongSha  $zip21"
+    $realSha21 = Make-Candidate $cand1 $zip21 $cand
+    Write-Feed $cand1 $zip21 "$wrongSha  $zip21"
     $feedProc = Start-Process -FilePath 'python' -ArgumentList @('-m', 'http.server', "$feedPort", '--bind', '127.0.0.1', '--directory', $feed) -PassThru -WindowStyle Hidden
     Check 'controlled feed serves on 127.0.0.1 only' (Wait-Until { try { (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$feedPort/dl/$zip21.sha256").StatusCode -eq 200 } catch { $false } } 30)
     Write-TrayConfig
@@ -206,25 +210,25 @@ try {
 
     # ---- 6. Update discovery and checksum enforcement.
     Send-TrayCommand 'check'
-    $seen = Wait-Until { (Get-TrayStatus).latestVersion -eq '0.2.1' } 60
-    Check 'update discovery sees the test release 0.2.1' $seen
+    $seen = Wait-Until { (Get-TrayStatus).latestVersion -eq $cand1 } 60
+    Check "update discovery sees the test release $cand1" $seen
     Send-TrayCommand 'install'
     $refused = Wait-Until { (Get-TrayStatus).lastError -match 'checksum' } 120
     $status = Get-TrayStatus
     Check 'checksum mismatch is refused and nothing is applied' ($refused -and $status.installedVersion -eq $ReleaseVersion -and -not (Test-Path (Join-Path $root 'app.previous'))) ("error: " + $status.lastError)
-    Check 'refused download is cleaned up' (-not (Test-Path (Join-Path $root 'downloads\OneArr-0.2.1-win-x64.zip')))
+    Check 'refused download is cleaned up' (-not (Test-Path (Join-Path $root "downloads\OneArr-$cand1-win-x64.zip")))
 
     # ---- 7. Correct checksum: successful update, database preserved.
-    Write-Feed '0.2.1' $zip21 "$realSha21  $zip21"
+    Write-Feed $cand1 $zip21 "$realSha21  $zip21"
     $dbBefore = (Get-Item (Join-Path $config 'onearr.db')).Length
     Send-TrayCommand 'check'
-    Wait-Until { (Get-TrayStatus).latestVersion -eq '0.2.1' } 60 | Out-Null
+    Wait-Until { (Get-TrayStatus).latestVersion -eq $cand1 } 60 | Out-Null
     Send-TrayCommand 'install'
-    $updated = Wait-Until { (Get-TrayStatus).installedVersion -eq '0.2.1' } 240
+    $updated = Wait-Until { (Get-TrayStatus).installedVersion -eq $cand1 } 240
     $h = Get-Health
-    Check 'successful update activates 0.2.1 and it answers /health' ($updated -and $h.version -eq '0.2.1') ("health " + $h.version)
+    Check "successful update activates $cand1 and it answers /health" ($updated -and $h.version -eq $cand1) ("health " + $h.version)
     Check 'previous version kept for rollback' ((Get-Content (Join-Path $root 'app.previous\version.txt') -Raw).Trim() -eq $ReleaseVersion)
-    Check 'database backed up before the update' (@(Get-ChildItem $backups -Filter 'onearr-0.2.0-*.db').Count -ge 1)
+    Check 'database backed up before the update' (@(Get-ChildItem $backups -Filter "onearr-$ReleaseVersion-*.db").Count -ge 1)
     $auth = @{ Authorization = "Bearer " + (Invoke-RestMethod -Method Post -Uri "$base/api/auth/login" -ContentType 'application/json' -Body (@{ password = $password } | ConvertTo-Json)).token }
     Check 'user setting and password survive the update' ((Invoke-RestMethod -Uri "$base/api/settings" -Headers $auth).torrentRoot -eq 'C:\OneArrAcceptance\torrents-v1')
     Check 'secret key file still present after the update' (Test-Path (Join-Path $config 'secret.key'))
@@ -241,11 +245,11 @@ try {
     Check 'password still works after rollback' ([bool] (Invoke-RestMethod -Uri "$base/api/settings" -Headers $auth))
 
     # ---- 9. Update to a build that reports the wrong version: automatic rollback.
-    $zip22 = 'OneArr-0.2.2-win-x64.zip'
-    $sha22 = Make-Candidate '0.2.2' $zip22 $cand
-    Write-Feed '0.2.2' $zip22 "$sha22  $zip22"
+    $zip22 = "OneArr-$cand2-win-x64.zip"
+    $sha22 = Make-Candidate $cand2 $zip22 $cand
+    Write-Feed $cand2 $zip22 "$sha22  $zip22"
     Send-TrayCommand 'check'
-    Wait-Until { (Get-TrayStatus).latestVersion -eq '0.2.2' } 60 | Out-Null
+    Wait-Until { (Get-TrayStatus).latestVersion -eq $cand2 } 60 | Out-Null
     Send-TrayCommand 'install'
     $rb = Wait-Until { (Get-TrayStatus).lastResult -match 'rolled back' } 300
     $h = Get-Health
