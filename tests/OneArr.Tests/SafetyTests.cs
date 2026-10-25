@@ -36,9 +36,22 @@ public sealed class TempTree : IDisposable
         return path;
     }
 
-    public void Dispose()
+    public void Dispose() => RemoveLinksAndTree(Root);
+
+    /// <summary>
+    /// Deletes a tree without following links. A junction or symlink is removed as a link only; its target (which may be
+    /// outside the temp tree, in the junction tests) is never touched.
+    /// </summary>
+    public static void RemoveLinksAndTree(string path)
     {
-        if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+        if (!Directory.Exists(path)) return;
+        foreach (var dir in Directory.GetDirectories(path))
+        {
+            if (new DirectoryInfo(dir).LinkTarget is not null) Directory.Delete(dir, recursive: false);
+            else RemoveLinksAndTree(dir);
+        }
+        foreach (var file in Directory.GetFiles(path)) new FileInfo(file).Delete();
+        Directory.Delete(path, recursive: false);
     }
 }
 
