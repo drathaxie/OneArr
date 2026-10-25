@@ -1,84 +1,78 @@
 # PROGRESS
 
-Everything marked VERIFIED was executed. Everything else is labelled. Integration with real services is **not** claimed
-anywhere in this file: all upstream services were simulated with fakes that run inside the test process or on localhost.
+Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed. Everything else is labelled.
 
-## Verified (commands executed, results observed)
+## Goal
 
-| Item | Command | Result |
-|---|---|---|
-| Solution build, Release | `dotnet build OneArr.slnx -c Release --no-incremental` | 0 errors, 0 warnings |
-| Backend tests | `dotnet test OneArr.slnx -c Release` | 88 passed, 0 failed |
-| Frontend typecheck, build, Settings tests | `npm run build`, `npm test` (in `web/`) | pass (8 Settings tests) |
-| Frontend audit | `npm audit` | 0 vulnerabilities |
-| End-to-end smoke against fake upstreams | `bash tools/smoke/smoke.sh` | 27 of 27 checks passed |
-| Container image build | `docker build` (see caveat below) | image built, all three stages |
-| Container start and health | `docker run ... onearr:local` | `/health` ok, UI served, API requires token |
-| Migrations on a fresh container database | container logs | `InitialCreate` and `AddSearchAttempts` applied |
-| Data survives container restart | restart, then login and read settings | login and settings persisted |
+A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
+release artifacts, and the background backend runs without a dashboard window.
 
-### Docker caveat (read this)
+## VERIFIED
 
-- The Docker daemon was started inside the sandbox (`dockerd`, vfs storage, iptables off). Base images pull.
-- The sandbox's network proxy re-signs TLS traffic with its own CA. Containers do not trust that CA, so `npm ci`
-  and `dotnet restore` fail inside a plain `docker build`. The image that was verified was built from a temporary
-  Dockerfile that installed the sandbox CA into the build stages. The repository Dockerfile was not changed for this.
-- On a normal host with a normal network, the repository Dockerfile is the one to use.
+### CI on GitHub (`drathaxie/OneArr`, run 40162471451, commit d7f0ea6)
+| Job | Result |
+|---|---|
+| Linux: backend tests excluding Windows-only tests | 118 passed |
+| Windows: frontend build and 8 Settings tests | pass |
+| Windows: backend tests excluding Windows-only tests | 118 passed |
+| Windows: Windows filesystem regression tests (junctions, hardlinks, case, shared reads) | 9 passed |
+| Windows: publish self-contained win-x64 build (API and tray) | pass |
+| Windows: acceptance script against the published build | 16 of 16 checks passed |
 
-### Bugs found and fixed in this run
+Acceptance checks on Windows: backend starts and answers `/health` (startup 1.83 s); health reports the build version;
+database ok; web UI served; dashboard requires sign-in (401); first-run setup issues a token; dashboard loads with the
+token; settings save and read back; second instance on the same configuration refuses to start (exit 3); graceful stop
+exits with code 0 (1.04 s); stop-request file consumed; restart works; password and settings persist across restart.
 
-- **Dockerfile could not build at all.** It copied `OneArr.sln` (the file is `OneArr.slnx`) and `tests/`, which
-  `.dockerignore` excludes. Both lines were removed. The earlier "Docker not verified" status was correct, but the
-  Dockerfile itself was also broken.
-- **Importer followed symlinked directories.** Only a symlink as the final file was refused. A symlinked folder in the
-  torrent or media tree could lead outside the root. Every component below the root is now checked, including dangling links.
+### Measured on the GitHub Windows runner (idle backend, no tray, no UI open)
+| Measure | Result |
+|---|---|
+| Startup to healthy | 1.83 s |
+| Background CPU, 60 s window after 30 s warm-up | 0.16 % |
+| Private memory after warm-up | 37.5 MB |
+| Graceful stop | 1.04 s |
 
-## Automation (added in this run)
+The first run measured 8.36 % CPU because the sample started during startup. The warm-up is therefore part of the method.
+Working set, thread count, footprint and database size are written to `measurements.json` by the acceptance script and are
+attached to releases; they are not yet read back from a release.
 
-- **Wanted detection:** monitored movies without a file, and monitored aired episodes without a file. Items with an
-  active download (queued, downloading, completed but not imported) are skipped.
-- **Scheduled Torznab search:** runs every 15 minutes in the scheduler, only when `automation.grab` is on. It is off by default.
-- **Grab selection:** the best accepted release from the existing ranker. Grabs go through the same `ReleaseService` as manual grabs.
-- **Duplicate-grab prevention:** a second grab for the same movie or episode is refused while one is active. Info-hash dedupe still applies.
-- **Bounded runs:** at most 10 items per pass (`SearchPolicy.MaxSearchesPerRun`).
-- **Backoff and retry:** no acceptable release waits 6 hours. Indexer or download-client failures back off 15 min, doubling to a 24 h cap. A grab waits 24 h before the item is looked at again.
-- **Persistent state:** `SearchAttempt` rows survive restarts (migration `AddSearchAttempts`). Existing migrations are unchanged.
-- **Endpoints:** `POST /api/automation/wanted-search` (manual run, shares the scheduler's lock) and `GET /api/automation/search-attempts`.
+### Bugs found by CI and fixed
+- Three Windows junction tests failed in *cleanup* (recursive delete cannot remove a junction). Cleanup now removes links only.
+- Acceptance CPU sampling was taken during startup. Now warmed up first.
 
-## Filesystem containment (added in this run)
+### Local
+- `dotnet build` of the solution: 0 warnings. Non-Windows tests: 118 passed.
 
-Covered by `FilesystemContainmentTests`:
-sibling directories that share a name prefix (`torrents` vs `torrents-evil`), traversal in source and destination,
-symlinked directories in the source and destination trees, symlinked files as source, pre-existing symlinks at the
-destination (never followed), dangling symlinks (cannot create a file outside the root), dry-run still refusing symlinks.
+## NOT VERIFIED
 
-Symlink cases return early on hosts that cannot create symlinks (Windows without the privilege). Those cases are **not
-verified** on such hosts. Generic reparse points are allowed on purpose, so OneDrive placeholder files still import.
+- **Release artifact: not published.** Creating a tag from this environment is refused by the sandbox git proxy (both
+  annotated and lightweight tags fail with "remote end hung up"). Branch pushes work. The release workflow can be started
+  manually: GitHub → Actions → `release` → Run workflow → version `0.2.0`. That workflow gates on the same tests and
+  acceptance run, then publishes `OneArr-0.2.0-win-x64.zip`, its `.sha256`, and `…-measurements.json` to a GitHub release.
+- **Tray application end to end: not run in CI.** The WinForms tray, its Start Menu shortcut, the Run-key autostart, the
+  release-check and install flow, rollback from the tray menu, and `--uninstall` are compiled but have not been exercised on
+  Windows. The update and rollback state machine is covered by 13 cross-platform tests with fake release and process doubles.
+- **Real GitHub release download:** the updater's download and checksum path is tested with fake HTTP only.
+- **Resource numbers for the tray process** (WinForms, about 40 MB expected but not measured) and the installed footprint of
+  the self-contained release (not measured; the release run will report it).
+- **Real imports against a real torrent client or indexer:** not tested. Import logic is tested against local fixtures.
+- **Docker:** the Dockerfile is kept as an optional path and is no longer required. Its last verified build needed a
+  sandbox CA workaround (see previous history).
+- **Single-file tray publish:** built in CI, but the released exe has not been launched on a clean machine.
 
-## Integration tests (fakes only)
+## Known limits
 
-`EndToEndTests.MissingMovieIsSearchedSubmittedCompletedAndImported` runs the full chain: wanted detection, scheduled
-Torznab search (GET only), accepted release, qBittorrent submission with category, downloading then completed,
-safe import into the media root, no second search after import, idempotent re-import, and no delete or pause calls.
+- Hardlinks only on the same NTFS volume. Other filesystems fall back to a verified copy.
+- Mount points and junctions in the media or torrent root are refused; the root itself must be a real folder.
+- Imports wait 30 s after a file's last write before taking it.
+- Automatic grabbing is off by default; it can be turned on with `PUT /api/settings {"automaticGrabbing": true}`.
+- Upgrades (replacing a file below the quality cutoff) are not searched.
+- The tray does not update itself. To update the tray, run the installer from the newer release folder while the old tray
+  is closed.
 
-Also covered: episode targeting (only the matching episode is grabbed and imported into `Season 01`), dry-run changing
-nothing, and the scheduler lock preventing overlapping search runs.
+## Next
 
-The download is simulated by writing a file into the temporary torrent root. Nothing is fetched. `RoutingHandler`
-throws for any host not explicitly routed, so tests cannot reach the network or a real indexer or client.
-
-## Not verified / not implemented
-
-- **Real Torznab indexers, Prowlarr, real qBittorrent, real TMDb: NOT TESTED.** Only fake servers were used.
-- **Upgrades** (replacing a file below the quality cutoff) are not searched. Only missing items are.
-- **Missing-status jobs** (not found in the client for 15 minutes) do not block a new grab, by design. A stuck release could be grabbed again.
-- **Season packs, specials, anime numbering, subtitles, music, books, requests:** out of scope.
-- **Windows:** the test suite was run on Windows earlier (59 backend tests); the new containment and search tests have
-  not been run on Windows yet. Symlink tests may return early there.
-- **Container networking inside the sandbox:** verified with the CA workaround only (see caveat above).
-- **Container as the non-root user with a bind-mounted host folder:** not tested. The verified run used a named volume.
-
-## Next highest-value change
-
-Run the wanted search against a real Torznab indexer and a real qBittorrent instance on a staging host, with dry-run
-imports and a synthetic `/data`, and record the results here. Then add upgrade searching for items below the cutoff.
+1. Run the release workflow for 0.2.0 from the Actions page, then check the assets and checksum.
+2. Install the released zip on a clean Windows machine: run the tray, check the Start Menu entry, autostart, the update
+   check, install, rollback, and uninstall with `--uninstall`.
+3. Read the released measurements file and record the tray's own memory and the installed footprint here.
