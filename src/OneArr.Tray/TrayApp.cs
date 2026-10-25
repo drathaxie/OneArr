@@ -1,117 +1,209 @@
 using System.Diagnostics;
+using OneArr.Updates;
 
 namespace OneArr.Tray;
 
-/// <summary>Notification-area icon: status, open UI, manual update, restart, autostart, logs and quit.</summary>
+/// <summary>
+/// Notification-area icon. Shows status, opens the UI, checks for and (on request) installs releases, restarts or rolls
+/// back OneArr, and quits gracefully. Runs without any window.
+/// </summary>
 internal sealed class TrayApp : ApplicationContext
 {
-    private static readonly TimeSpan UpdateInterval = TimeSpan.FromMinutes(60);
+    private const int Port = 8780;
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
     private const int MaxRestartsPerFiveMinutes = 3;
 
-    private readonly NotifyIcon _icon;
-    private readonly ApiProcess _api = new();
-    private readonly Updater _updater = new();
+    private readonly InstallLayout _layout;
+    private readonly TraySettings _settings;
+    private readonly ApiProcess _api;
+    private readonly TrayUpdateService _update;
     private readonly SynchronizationContext _ui;
+    private readonly NotifyIcon _icon;
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
-    private readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = (int)UpdateInterval.TotalMilliseconds };
+    private readonly System.Windows.Forms.Timer _checkTimer = new() { Interval = (int)CheckInterval.TotalMilliseconds };
     private readonly ToolStripMenuItem _statusItem = new() { Enabled = false };
+    private readonly ToolStripMenuItem _installItem = new() { Visible = false };
+    private readonly ToolStripMenuItem _rollbackItem = new("Roll back to previous version") { Visible = false };
     private readonly ToolStripMenuItem _autostartItem = new("Start with Windows") { CheckOnClick = true };
+    private readonly ToolStripMenuItem _checkAutoItem = new("Check for updates automatically") { CheckOnClick = true };
+    private readonly ToolStripMenuItem _installAutoItem = new("Install updates automatically") { CheckOnClick = true };
     private readonly Queue<DateTime> _recentRestarts = new();
-    private bool _updating;
+    private ReleaseInfo? _available;
+    private bool _busy;
     private string _progress = "";
 
-    public TrayApp()
+    public TrayApp(InstallLayout layout, bool backgroundStart)
     {
+        _layout = layout;
+        _settings = TraySettings.Load(Path.Combine(layout.Root, "tray.json"));
+        _api = new ApiProcess(layout, Port);
+        _update = new TrayUpdateService(layout, _api, new ReleaseClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
         _ui = SynchronizationContext.Current ?? new SynchronizationContext();
 
-        _icon = new NotifyIcon
-        {
-            Icon = SystemIcons.Application,
-            Text = "OneArr",
-            Visible = true,
-            ContextMenuStrip = BuildMenu(),
-        };
+        _icon = new NotifyIcon { Icon = SystemIcons.Application, Text = "OneArr", Visible = true, ContextMenuStrip = BuildMenu() };
         _icon.DoubleClick += (_, _) => OpenUi();
 
         _api.UnexpectedExit += code => _ui.Post(_ => OnUnexpectedExit(code), null);
-        _statusTimer.Tick += (_, _) => RefreshStatus();
-        _updateTimer.Tick += async (_, _) => await UpdateAsync(notifyIfCurrent: false);
+        _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _checkTimer.Tick += async (_, _) => await CheckAsync(notifyIfCurrent: false);
         _statusTimer.Start();
-        _updateTimer.Start();
+        _checkTimer.Start();
 
-        RefreshStatus();
-        _ = StartupAsync();
+        _ = StartupAsync(backgroundStart);
     }
 
     private ContextMenuStrip BuildMenu()
     {
         _autostartItem.Checked = Installer.AutostartEnabled;
-        _autostartItem.CheckedChanged += (_, _) => Installer.SetAutostart(_autostartItem.Checked);
+        _autostartItem.CheckedChanged += (_, _) => Installer.SetAutostart(_layout, _autostartItem.Checked);
+        _checkAutoItem.Checked = _settings.CheckForUpdates;
+        _checkAutoItem.CheckedChanged += (_, _) => SaveSettings(s => s.CheckForUpdates = _checkAutoItem.Checked);
+        _installAutoItem.Checked = _settings.InstallUpdatesAutomatically;
+        _installAutoItem.CheckedChanged += (_, _) => SaveSettings(s => s.InstallUpdatesAutomatically = _installAutoItem.Checked);
+
+        _installItem.Click += async (_, _) => { if (_available is not null) await InstallAsync(_available); };
+        _rollbackItem.Click += async (_, _) => await RollBackAsync();
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open OneArr", null, (_, _) => OpenUi());
-        menu.Items.Add("Check for updates now", null, async (_, _) => await UpdateAsync(notifyIfCurrent: true));
-        menu.Items.Add("Restart OneArr", null, (_, _) => { _api.Stop(); _api.Start(); RefreshStatus(); });
+        menu.Items.Add("Restart OneArr", null, async (_, _) => await RestartAsync());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_installItem);
+        menu.Items.Add("Check for updates now", null, async (_, _) => await CheckAsync(notifyIfCurrent: true));
+        menu.Items.Add(_rollbackItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_autostartItem);
-        menu.Items.Add("Open logs folder", null, (_, _) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); });
+        menu.Items.Add(_checkAutoItem);
+        menu.Items.Add(_installAutoItem);
+        menu.Items.Add("Open logs folder", null, (_, _) => { Directory.CreateDirectory(_layout.Logs); Process.Start("explorer.exe", _layout.Logs); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
         return menu;
     }
 
-    private async Task StartupAsync()
+    private async Task StartupAsync(bool backgroundStart)
     {
-        // Check the three tools the updater needs. A missing one is reported once and nothing else runs.
-        foreach (var tool in new[] { "git", "dotnet", "npm" })
+        if (!File.Exists(_layout.ApiExe))
         {
-            try
-            {
-                var (file, args) = tool == "npm" ? ("cmd.exe", new[] { "/c", "npm", "--version" }) : (tool, new[] { "--version" });
-                await Shell.CaptureAsync(file, args, Paths.Root, CancellationToken.None);
-            }
-            catch (Exception)
-            {
-                Notify($"{tool} was not found. Install it, then restart OneArr.", ToolTipIcon.Error);
-                return;
-            }
+            Notify("OneArr is not installed correctly. Reinstall from the release folder.", ToolTipIcon.Error);
+            return;
         }
-
-        // Start the last good build right away, then check GitHub for changes.
-        if (File.Exists(Paths.ApiExe))
+        // Adopt a backend that is already running (for example after a tray restart) rather than starting a second one.
+        await _api.RefreshHealthAsync();
+        if (!_api.IsRunning)
         {
-            try { _api.Start(); } catch (Exception ex) { Log.Write("tray.log", ex.Message); }
+            try { _api.Start(); }
+            catch (Exception ex) { Log.Write("tray.log", ex.Message); Notify("OneArr could not start. See the logs folder.", ToolTipIcon.Error); }
         }
-        await UpdateAsync(notifyIfCurrent: false);
+        await Task.Delay(TimeSpan.FromMinutes(2));
+        if (_settings.CheckForUpdates) await CheckAsync(notifyIfCurrent: false);
     }
 
-    private async Task UpdateAsync(bool notifyIfCurrent)
+    private async Task CheckAsync(bool notifyIfCurrent)
     {
-        if (_updating) return;
-        _updating = true;
-        RefreshStatus();
+        if (_busy) return;
+        _busy = true;
+        SetProgress("Checking for updates…");
         try
         {
-            var changed = await _updater.UpdateAsync(_api, s => { _progress = s; RefreshStatus(); }, CancellationToken.None);
-            if (changed) Notify("OneArr was updated and restarted.", ToolTipIcon.Info);
-            else if (notifyIfCurrent) Notify("OneArr is up to date.", ToolTipIcon.Info);
+            var release = await _update.CheckAsync(CancellationToken.None);
+            if (release is null)
+            {
+                if (notifyIfCurrent) Notify("OneArr is up to date.", ToolTipIcon.Info);
+                return;
+            }
+            _available = release;
+            _installItem.Text = $"Install OneArr {release.Version.ToString(3)}";
+            _installItem.Visible = true;
+            _busy = false;
+            if (_settings.InstallUpdatesAutomatically) await InstallAsync(release);
+            else Notify($"OneArr {release.Version.ToString(3)} is available. Use \"Install\" in the tray menu.", ToolTipIcon.Info);
         }
         catch (Exception ex)
         {
-            Log.Write("tray.log", $"Update failed: {ex.Message}");
-            Notify($"Update failed: {ex.Message}", ToolTipIcon.Error);
-            if (!_api.IsRunning && File.Exists(Paths.ApiExe))
-            {
-                try { _api.Start(); } catch (Exception startEx) { Log.Write("tray.log", startEx.Message); }
-            }
+            Log.Write("tray.log", $"Update check failed: {ex.Message}");
+            if (notifyIfCurrent) Notify($"Could not check for updates: {ex.Message}", ToolTipIcon.Warning);
         }
         finally
         {
-            _updating = false;
-            _progress = "";
-            RefreshStatus();
+            _busy = false;
+            SetProgress("");
+        }
+    }
+
+    private async Task InstallAsync(ReleaseInfo release)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var outcome = await _update.InstallAsync(release, s => SetProgress(s), CancellationToken.None);
+            _available = null;
+            _installItem.Visible = false;
+            Notify(outcome == UpdateOutcome.Updated
+                ? $"Updated to OneArr {release.Version.ToString(3)}."
+                : $"OneArr {release.Version.ToString(3)} failed its startup check; the previous version was restored.",
+                outcome == UpdateOutcome.Updated ? ToolTipIcon.Info : ToolTipIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            Log.Write("tray.log", $"Install failed: {ex.Message}");
+            Notify($"Update not applied: {ex.Message}", ToolTipIcon.Error);
+        }
+        finally
+        {
+            _busy = false;
+            SetProgress("");
+            RefreshRollbackItem();
+        }
+    }
+
+    private async Task RollBackAsync()
+    {
+        if (_busy || !_update.HasPreviousVersion) return;
+        if (MessageBox.Show("Go back to the previous OneArr version? Your data is kept; the database is restored from the backup taken before the last update.",
+                "OneArr", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+        _busy = true;
+        try
+        {
+            await _update.RollBackAsync(CancellationToken.None);
+            Notify("Rolled back to the previous version.", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Log.Write("tray.log", $"Rollback failed: {ex.Message}");
+            Notify($"Rollback failed: {ex.Message}", ToolTipIcon.Error);
+        }
+        finally
+        {
+            _busy = false;
+            RefreshRollbackItem();
+        }
+    }
+
+    private async Task RestartAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            if (!await _api.StopGracefullyAsync(TimeSpan.FromSeconds(20), CancellationToken.None))
+            {
+                Notify("OneArr is still running and was not stopped, so it was not restarted.", ToolTipIcon.Warning);
+                return;
+            }
+            _api.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Write("tray.log", $"Restart failed: {ex.Message}");
+            Notify($"Restart failed: {ex.Message}", ToolTipIcon.Error);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
@@ -123,7 +215,6 @@ internal sealed class TrayApp : ApplicationContext
         if (_recentRestarts.Count >= MaxRestartsPerFiveMinutes)
         {
             Notify("OneArr keeps stopping. Check api.log in the logs folder.", ToolTipIcon.Error);
-            RefreshStatus();
             return;
         }
         _recentRestarts.Enqueue(now);
@@ -133,33 +224,51 @@ internal sealed class TrayApp : ApplicationContext
         {
             retry.Stop();
             retry.Dispose();
-            try { _api.Start(); } catch (Exception ex) { Log.Write("tray.log", ex.Message); }
-            RefreshStatus();
+            try { _api.Start(); }
+            catch (Exception ex) { Log.Write("tray.log", ex.Message); }
         };
         retry.Start();
-        RefreshStatus();
     }
 
-    private void RefreshStatus()
+    private async Task RefreshStatusAsync()
     {
-        var state = _updating ? (_progress.Length > 0 ? _progress : "Updating…")
-                  : _api.IsRunning ? "Running"
-                  : "Stopped";
+        await _api.RefreshHealthAsync();
+        _ui.Post(_ => UpdateStatusText(), null);
+    }
+
+    private void UpdateStatusText()
+    {
+        var state = _busy ? (_progress.Length > 0 ? _progress : "Working…") : _api.IsRunning ? "Running" : "Stopped";
         _statusItem.Text = $"OneArr: {state}";
-        _icon.Text = $"OneArr: {state}";  // NotifyIcon tooltips are limited to 63 characters
+        _icon.Text = $"OneArr: {state}";
         if (_icon.Text.Length > 63) _icon.Text = _icon.Text[..63];
+        RefreshRollbackItem();
+    }
+
+    private void RefreshRollbackItem() => _rollbackItem.Visible = _update.HasPreviousVersion;
+
+    private void SetProgress(string text)
+    {
+        _progress = text;
+        _ui.Post(_ => UpdateStatusText(), null);
+    }
+
+    private void SaveSettings(Action<TraySettings> change)
+    {
+        change(_settings);
+        _settings.Save(Path.Combine(_layout.Root, "tray.json"));
     }
 
     private void Notify(string text, ToolTipIcon icon) =>
-        _icon.ShowBalloonTip(6000, "OneArr", text, icon);
+        _ui.Post(_ => _icon.ShowBalloonTip(6000, "OneArr", text, icon), null);
 
-    private static void OpenUi() =>
-        Process.Start(new ProcessStartInfo(Paths.Url) { UseShellExecute = true });
+    private void OpenUi() =>
+        Process.Start(new ProcessStartInfo($"http://127.0.0.1:{Port}") { UseShellExecute = true });
 
     private void Quit()
     {
         _statusTimer.Stop();
-        _updateTimer.Stop();
+        _checkTimer.Stop();
         _api.Stop();
         _icon.Visible = false;
         _icon.Dispose();

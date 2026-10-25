@@ -44,7 +44,7 @@ public sealed class TempTree : IDisposable
 
 public class SafeImporterTests
 {
-    private readonly SafeImporter _importer = new();
+    private readonly SafeImporter _importer = new(TimeSpan.Zero);
 
     private static ImportRequest Req(TempTree t, string source, string rel = "The Matrix (1999)", bool dry = false) =>
         new(source, t.Media, rel, t.Torrents, dry, null);

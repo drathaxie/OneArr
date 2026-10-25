@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Tests that run on any OS
+        run: dotnet test OneArr.slnx -c Release --filter "Platform!=Windows"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Frontend build and tests
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Backend tests (cross-platform)
+        run: dotnet test OneArr.slnx -c Release --filter "Platform!=Windows"
+
+      # Fails if no Windows test runs, so the Windows-only security tests cannot be silently skipped.
+      - name: Backend tests (Windows filesystem regressions)
+        run: dotnet test OneArr.slnx -c Release --filter "Platform=Windows"
+
+      - name: Publish release-shaped build
+        shell: pwsh
+        run: |
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=0.0.0-ci -o build/release/app
+          "0.0.0-ci" | Set-Content -NoNewline -Encoding ascii build/release/app/version.txt
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=0.0.0-ci -o build/release
+
+      - name: Acceptance run on Windows
+        shell: pwsh
+        run: ./tools/windows/acceptance.ps1 -ReleaseDir build/release -ExpectedVersion 0.0.0-ci -OutFile build/measurements.json
+
+      - name: Keep measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-measurements
+          path: build/measurements.json
+          if-no-files-found: ignore

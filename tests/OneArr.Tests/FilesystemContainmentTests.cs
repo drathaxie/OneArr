@@ -12,22 +12,22 @@ namespace OneArr.Tests;
 /// </summary>
 public class FilesystemContainmentTests
 {
-    private readonly SafeImporter _importer = new();
+    private readonly SafeImporter _importer = new(TimeSpan.Zero);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
     private static ImportRequest Req(TempTree t, string source, string relative = "The Matrix (1999)", bool dryRun = false) =>
         new(source, t.Media, relative, t.Torrents, dryRun, null);
 
-    private static bool TryLink(string link, string target)
+    /// <summary>Creates a symlink or fails the test. A containment test that silently passes without its precondition proves nothing.</summary>
+    private static void Link(string link, string target)
     {
         try
         {
             Directory.CreateSymbolicLink(link, target);
-            return true;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
         {
-            return false;
+            Assert.Fail($"Symbolic link could not be created on this host ({ex.GetType().Name}); the containment test cannot run");
         }
     }
 
@@ -89,7 +89,7 @@ public class FilesystemContainmentTests
         using var t = new TempTree();
         var outside = Outside(t);
         File.WriteAllText(Path.Combine(outside, "secret.mkv"), "secret");
-        if (!TryLink(Path.Combine(t.Torrents, "link"), outside)) return; // unverified on hosts without symlink rights
+        Link(Path.Combine(t.Torrents, "link"), outside);
 
         var outcome = await _importer.ImportAsync(Req(t, Path.Combine(t.Torrents, "link", "secret.mkv")), Ct);
 
@@ -104,7 +104,7 @@ public class FilesystemContainmentTests
     {
         using var t = new TempTree();
         var real = t.WriteFile("torrents/movie/real.mkv", "x");
-        if (!TryLink(Path.Combine(t.Torrents, "movie", "link.mkv"), real)) return;
+        Link(Path.Combine(t.Torrents, "movie", "link.mkv"), real);
 
         var outcome = await _importer.ImportAsync(Req(t, Path.Combine(t.Torrents, "movie", "link.mkv")), Ct);
 
@@ -118,7 +118,7 @@ public class FilesystemContainmentTests
         using var t = new TempTree();
         var outside = Outside(t);
         var src = t.WriteFile("torrents/movie/a.mkv", "x");
-        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)"), outside)) return;
+        Link(Path.Combine(t.Media, "The Matrix (1999)"), outside);
 
         var outcome = await _importer.ImportAsync(Req(t, src), Ct);
 
@@ -136,7 +136,7 @@ public class FilesystemContainmentTests
         File.WriteAllText(target, "keep me");
         var src = t.WriteFile("torrents/movie/a.mkv", "new");
         Directory.CreateDirectory(Path.Combine(t.Media, "The Matrix (1999)"));
-        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), target)) return;
+        Link(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), target);
 
         var outcome = await _importer.ImportAsync(Req(t, src), Ct);
 
@@ -152,7 +152,7 @@ public class FilesystemContainmentTests
         var missing = Path.Combine(outside, "created-by-import.mkv");
         var src = t.WriteFile("torrents/movie/a.mkv", "new");
         Directory.CreateDirectory(Path.Combine(t.Media, "The Matrix (1999)"));
-        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), missing)) return;
+        Link(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), missing);
 
         var outcome = await _importer.ImportAsync(Req(t, src), Ct);
 
@@ -166,11 +166,25 @@ public class FilesystemContainmentTests
         using var t = new TempTree();
         var outside = Outside(t);
         var src = t.WriteFile("torrents/movie/a.mkv", "x");
-        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)"), outside)) return;
+        Link(Path.Combine(t.Media, "The Matrix (1999)"), outside);
 
         var outcome = await _importer.ImportAsync(Req(t, src, dryRun: true), Ct);
 
         Assert.Equal(ImportAction.Failed, outcome.Action);
+    }
+
+    [Fact]
+    public async Task FileStillBeingWrittenIsDeferredNotFailed()
+    {
+        using var t = new TempTree();
+        var src = t.WriteFile("torrents/movie/a.mkv", "partial");
+
+        // Default quiet period: a file written just now may still be downloading.
+        var outcome = await new SafeImporter().ImportAsync(Req(t, src), Ct);
+
+        Assert.Equal(ImportAction.Deferred, outcome.Action);
+        Assert.False(outcome.Success);
+        Assert.Empty(Directory.GetFiles(t.Media, "*", SearchOption.AllDirectories));
     }
 
     [Fact]

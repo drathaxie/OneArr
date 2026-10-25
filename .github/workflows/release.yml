@@ -1,0 +1,95 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, for example 0.2.0 (no leading v)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out version
+        id: version
+        shell: pwsh
+        run: |
+          $raw = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.version }}" } else { "${{ github.ref_name }}" }
+          $version = $raw -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version '$version' must be Major.Minor.Patch" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Frontend build and tests
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Backend tests (all, including Windows filesystem regressions)
+        shell: pwsh
+        run: |
+          dotnet test OneArr.slnx -c Release --filter "Platform!=Windows"
+          dotnet test OneArr.slnx -c Release --filter "Platform=Windows"
+
+      - name: Publish self-contained artifacts
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=$env:VERSION -o build/stage/app
+          $env:VERSION | Set-Content -NoNewline -Encoding ascii build/stage/app/version.txt
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$env:VERSION -o build/stage
+          Copy-Item tools/windows/INSTALL.txt build/stage/INSTALL.txt
+
+      - name: Acceptance run on the exact release folder
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./tools/windows/acceptance.ps1 -ReleaseDir build/stage -ExpectedVersion $env:VERSION -OutFile build/measurements.json
+
+      - name: Package artifact and checksum
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $name = "OneArr-$env:VERSION-win-x64"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = "build/$name.zip"
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("build/stage", $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          "$hash  $name.zip" | Set-Content -Encoding ascii "$zip.sha256"
+          Copy-Item build/measurements.json "build/$name-measurements.json"
+          Get-ChildItem build/*.zip, build/*.sha256, build/*-measurements.json | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $files = Get-ChildItem build/*.zip, build/*.zip.sha256, build/*-measurements.json | ForEach-Object FullName
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "OneArr $env:VERSION" --notes "Windows x64 build. Install: extract the zip, run OneArr.Tray.exe. See INSTALL.txt inside the zip."
+          }

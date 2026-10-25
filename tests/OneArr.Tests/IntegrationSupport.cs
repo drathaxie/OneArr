@@ -157,7 +157,7 @@ public sealed class TestWorld : IDisposable
         Settings = new SettingsStore(Db);
         var ranker = new ReleaseRanker(new ReleaseParser());
         Releases = new ReleaseService(Db, new TorznabClient(factory), ranker, new QBittorrentClient(factory), Time);
-        Downloads = new DownloadService(Db, new QBittorrentClient(factory), new SafeImporter(), Settings, Time);
+        Downloads = new DownloadService(Db, new QBittorrentClient(factory), new SafeImporter(TimeSpan.Zero), Settings, Time);
         Search = new WantedSearchService(Db, Releases, Settings, Time, Policy);
         Runner = new JobRunner(Db, Time);
     }

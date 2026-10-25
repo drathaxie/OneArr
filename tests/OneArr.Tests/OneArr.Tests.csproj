@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\OneArr.Domain\OneArr.Domain.csproj" />
     <ProjectReference Include="..\..\src\OneArr.Application\OneArr.Application.csproj" />
     <ProjectReference Include="..\..\src\OneArr.Infrastructure\OneArr.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\OneArr.Updates\OneArr.Updates.csproj" />
     <ProjectReference Include="..\..\src\OneArr.Api\OneArr.Api.csproj" />
   </ItemGroup>
 

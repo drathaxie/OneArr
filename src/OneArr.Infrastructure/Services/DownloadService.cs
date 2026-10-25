@@ -104,6 +104,7 @@ public sealed class DownloadService
             var relFolder = RelativeFolder(media, job, db);
             var files = ListFiles(job.ContentPath!, torrentRoot);
             var jobFailed = false;
+            var jobDeferred = false;
 
             foreach (var file in files)
             {
@@ -123,13 +124,19 @@ public sealed class DownloadService
                         CreatedAt = _time.GetUtcNow(),
                     });
                 }
+                if (outcome.Action == ImportAction.Deferred)
+                {
+                    // Still changing on disk: leave the job Completed so the next pass retries it.
+                    jobDeferred = true;
+                    continue;
+                }
                 if (!outcome.Success) jobFailed = true;
                 if (outcome.Action == ImportAction.DryRun) planned++;
                 if (outcome.Success && outcome.Action is ImportAction.Hardlink or ImportAction.Copy or ImportAction.Skipped) imported++;
                 if (!outcome.Success) failed++;
             }
 
-            if (!dryRun && files.Count > 0)
+            if (!dryRun && files.Count > 0 && !jobDeferred)
             {
                 var tracked = await db.DownloadJobs.FirstAsync(j => j.Id == job.Id, ct);
                 tracked.Status = jobFailed ? DownloadStatus.Failed : DownloadStatus.Imported;

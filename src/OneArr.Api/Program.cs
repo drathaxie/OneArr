@@ -14,6 +14,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 var configDir = Environment.GetEnvironmentVariable("ONEARR_CONFIG_DIR") ?? Path.Combine(Directory.GetCurrentDirectory(), "config");
 Directory.CreateDirectory(configDir);
+// Refuse a second backend on the same configuration before touching the database.
+if (!OneArr.Api.InstanceLock.TryAcquire(configDir))
+{
+    Console.Error.WriteLine("Another OneArr instance is already using this configuration folder. Not starting.");
+    return 3;
+}
+builder.Services.AddHostedService(sp => new OneArr.Api.StopRequestWatcher(configDir, sp.GetRequiredService<IHostApplicationLifetime>()));
 var dbPath = Path.Combine(configDir, "onearr.db");
 var tokens = new TokenService(TokenService.LoadOrCreateKey(Path.Combine(configDir, "secret.key")));
 var port = Environment.GetEnvironmentVariable("ONEARR_PORT") ?? "8780";
@@ -30,6 +37,7 @@ builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 var app = builder.Build();
+app.Lifetime.ApplicationStopped.Register(OneArr.Api.InstanceLock.Release);
 
 // Schema is created by EF Core migrations at startup; the database file lives in /config and survives restarts.
 using (var scope = app.Services.CreateScope())
@@ -95,7 +103,7 @@ app.MapGet("/health", async (IDbContextFactory<OneArrDbContext> db) =>
 {
     await using var ctx = await db.CreateDbContextAsync();
     var dbOk = await ctx.Database.CanConnectAsync();
-    return Results.Ok(new { status = dbOk ? "ok" : "degraded", database = dbOk ? "ok" : "unreachable", version = "0.1.0" });
+    return Results.Ok(new { status = dbOk ? "ok" : "degraded", database = dbOk ? "ok" : "unreachable", version = BuildVersion });
 });
 
 ApiEndpoints.Map(app);
@@ -103,6 +111,7 @@ ApiEndpoints.Map(app);
 app.MapFallbackToFile("index.html");
 
 app.Run();
+return 0;
 
 static async Task WriteError(HttpContext ctx, int status, string message)
 {
@@ -112,4 +121,9 @@ static async Task WriteError(HttpContext ctx, int status, string message)
 }
 
 // Exposes the entry point to WebApplicationFactory in tests.
-public partial class Program { }
+// Exposes the entry point to WebApplicationFactory in tests.
+public partial class Program
+{
+    /// <summary>Build version from the assembly, e.g. 0.2.0. Shown by /health so the tray can confirm an update took effect.</summary>
+    public static string BuildVersion => typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+}

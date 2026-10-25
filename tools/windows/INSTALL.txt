@@ -1,0 +1,30 @@
+OneArr for Windows (x64)
+========================
+
+Requirements: none beyond Windows 10 or 11 (x64). The .NET runtime is included.
+You do NOT need Docker, WSL, Git, Node.js, or the .NET SDK.
+
+Install
+  1. Extract this folder anywhere (for example Downloads).
+  2. Run OneArr.Tray.exe.
+     It copies itself and the app to %LOCALAPPDATA%\OneArr, adds a Start Menu
+     entry, starts OneArr in the background, and adds a notification-area icon.
+  3. Open http://127.0.0.1:8780 (or the tray icon's "Open OneArr") and create your password.
+
+Where things live (all under %LOCALAPPDATA%\OneArr)
+  app\           program files (replaced by updates)
+  config\        database and secret key (never removed by updates)
+  backups\       database copies taken before each update (the newest 3 are kept)
+  logs\          bounded text logs (each file rotates at 2 MB)
+  tray.json      tray preferences
+
+Updates
+  The tray checks GitHub for a newer release every 6 hours and only notifies you.
+  Install it from the tray menu. Set "Install updates automatically" to let it install.
+  Updates verify the download checksum, back up the database, stop OneArr cleanly,
+  and roll back automatically if the new version does not start.
+  "Roll back to previous version" in the tray menu restores the last version.
+
+Remove
+  Run:  "%LOCALAPPDATA%\OneArr\OneArr.Tray.exe" --uninstall
+  Keeps config\ and backups\ (your data). Add --purge to delete everything.

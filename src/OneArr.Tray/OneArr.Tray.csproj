@@ -10,6 +10,13 @@
     <AssemblyName>OneArr.Tray</AssemblyName>
     <!-- Lets the Windows-only project compile on Linux CI as well; publishing still targets win-x64. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneArr.Updates\OneArr.Updates.csproj" />
+  </ItemGroup>
 
 </Project>

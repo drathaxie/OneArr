@@ -4,7 +4,7 @@ public enum MediaType { Movie = 1, Series = 2 }
 
 public enum DownloadStatus { Queued = 0, Downloading = 1, Completed = 2, Imported = 3, Failed = 4, Unknown = 5, Missing = 6 }
 
-public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4 }
+public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4, Deferred = 5 }
 
 /// <summary>Movie or series. Identity is (MediaType, Provider, ProviderId) so IDs never collide across media types.</summary>
 public class MediaItem
