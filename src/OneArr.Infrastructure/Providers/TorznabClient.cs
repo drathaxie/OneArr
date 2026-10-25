@@ -1,0 +1,101 @@
+using System.Globalization;
+using System.Xml.Linq;
+using OneArr.Application;
+using OneArr.Domain;
+using OneArr.Infrastructure.Http;
+using OneArr.Infrastructure.Security;
+
+namespace OneArr.Infrastructure.Providers;
+
+/// <summary>Generic Torznab client (also works for Newznab-style RSS with enclosure links). Parses RSS and torznab:attr fields.</summary>
+public sealed class TorznabClient : IIndexerClient
+{
+    private static readonly XNamespace Torznab = "http://torznab.com/schemas/2015/feed";
+    private readonly IHttpClientFactory _factory;
+
+    public TorznabClient(IHttpClientFactory factory)
+    {
+        _factory = factory;
+    }
+
+    public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
+    {
+        var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
+        var parameters = new List<string>
+        {
+            "t=" + (search.Type == MediaType.Series && search.Season is not null ? "tvsearch" : "search"),
+            "q=" + Uri.EscapeDataString(search.Title),
+            "cat=" + Uri.EscapeDataString(search.Category),
+            "apikey=" + Uri.EscapeDataString(indexer.ApiKey)
+        };
+        if (search.Type == MediaType.Series && search.Season is int s) parameters.Add("season=" + s);
+        if (search.Type == MediaType.Series && search.Episode is int ep) parameters.Add("ep=" + ep);
+
+        var relative = "api?" + string.Join("&", parameters);
+        var client = _factory.CreateClient(OutboundHttp.TorznabClient);
+        client.BaseAddress = new Uri(baseUri, "/");
+
+        using var response = await OutboundHttp.SendWithRetryAsync(client, () => new HttpRequestMessage(HttpMethod.Get, relative), ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            throw new ExternalServiceException($"Indexer '{indexer.Name}' is rate limiting; try again later");
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalServiceException($"Indexer '{indexer.Name}' returned HTTP {(int)response.StatusCode}");
+
+        return Parse(body, indexer.Name);
+    }
+
+    /// <summary>Parses a Torznab/Newznab RSS feed. Throws ExternalServiceException on invalid XML or an indexer error element.</summary>
+    public static IReadOnlyList<ReleaseCandidate> Parse(string xml, string indexerName)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(xml, LoadOptions.None);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException)
+        {
+            throw new ExternalServiceException($"Indexer '{indexerName}' returned invalid XML");
+        }
+
+        if (doc.Root?.Name.LocalName == "error")
+        {
+            var desc = doc.Root.Attribute("description")?.Value ?? "unknown error";
+            throw new ExternalServiceException($"Indexer '{indexerName}' error: {OutboundHttp.Redact(desc)}");
+        }
+        if (doc.Root?.Name.LocalName != "rss")
+            throw new ExternalServiceException($"Indexer '{indexerName}' did not return an RSS feed");
+
+        var results = new List<ReleaseCandidate>();
+        foreach (var item in doc.Root.Descendants("item"))
+        {
+            var title = item.Element("title")?.Value?.Trim();
+            if (string.IsNullOrEmpty(title)) continue;
+
+            var attrs = item.Elements(Torznab + "attr")
+                .GroupBy(a => a.Attribute("name")?.Value ?? "")
+                .ToDictionary(g => g.Key, g => g.Last().Attribute("value")?.Value ?? "", StringComparer.OrdinalIgnoreCase);
+
+            long size = 0;
+            var sizeText = attrs.GetValueOrDefault("size") ?? item.Element("size")?.Value ?? item.Element("enclosure")?.Attribute("length")?.Value;
+            long.TryParse(sizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out size);
+
+            int seeders = 0;
+            int.TryParse(attrs.GetValueOrDefault("seeders"), NumberStyles.Integer, CultureInfo.InvariantCulture, out seeders);
+
+            var categories = item.Elements("category").Select(c => c.Value).Concat(attrs.Where(kv => kv.Key == "category").Select(kv => kv.Value))
+                .Select(v => int.TryParse(v, out var n) ? n : -1).Where(n => n >= 0).Distinct().ToList();
+
+            var link = attrs.GetValueOrDefault("magneturl")
+                       ?? item.Element("enclosure")?.Attribute("url")?.Value
+                       ?? item.Element("link")?.Value
+                       ?? "";
+            if (!UrlGuard.IsAllowedDownloadLink(link)) link = "";
+
+            var hash = attrs.GetValueOrDefault("infohash");
+            results.Add(new ReleaseCandidate(title, link, size, seeders, string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(), indexerName, categories));
+        }
+        return results;
+    }
+}
