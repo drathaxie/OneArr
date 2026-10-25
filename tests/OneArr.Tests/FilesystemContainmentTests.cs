@@ -1,0 +1,201 @@
+using OneArr.Application;
+using OneArr.Domain;
+using OneArr.Infrastructure.Files;
+using Xunit;
+
+namespace OneArr.Tests;
+
+/// <summary>
+/// Import containment: traversal, sibling prefixes and symlinks in source or destination must fail closed, and nothing
+/// may be written outside the media root. Symlink tests return early on hosts that cannot create symlinks; such a case is
+/// reported as unverified, not as passing.
+/// </summary>
+public class FilesystemContainmentTests
+{
+    private readonly SafeImporter _importer = new();
+    private static readonly CancellationToken Ct = CancellationToken.None;
+
+    private static ImportRequest Req(TempTree t, string source, string relative = "The Matrix (1999)", bool dryRun = false) =>
+        new(source, t.Media, relative, t.Torrents, dryRun, null);
+
+    private static bool TryLink(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static string Outside(TempTree t)
+    {
+        var dir = Path.Combine(t.Root, "outside");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    [Fact]
+    public async Task SourceInSiblingDirectoryWithSharedPrefixIsRefused()
+    {
+        using var t = new TempTree();
+        var sibling = Path.Combine(t.Root, "torrents-evil");
+        Directory.CreateDirectory(sibling);
+        var src = Path.Combine(sibling, "a.mkv");
+        File.WriteAllText(src, "x");
+
+        var outcome = await _importer.ImportAsync(Req(t, src), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Contains("outside", outcome.Message);
+        Assert.Empty(Directory.GetFiles(t.Media, "*", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData("../media-evil")]
+    [InlineData("../../escape")]
+    [InlineData("x/../../media-evil")]
+    public async Task DestinationFolderThatEscapesOrNamesASiblingIsRefused(string relative)
+    {
+        using var t = new TempTree();
+        var src = t.WriteFile("torrents/movie/a.mkv", "x");
+
+        var outcome = await _importer.ImportAsync(Req(t, src, relative), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.DoesNotContain(Directory.GetFiles(t.Root, "a.mkv", SearchOption.AllDirectories), p => !p.StartsWith(t.Torrents, StringComparison.Ordinal));
+        Assert.False(Directory.Exists(Path.Combine(t.Root, "media-evil")));
+    }
+
+    [Fact]
+    public async Task SourceTraversalOutOfTorrentRootIsRefused()
+    {
+        using var t = new TempTree();
+        t.WriteFile("media/secret.mkv", "s");
+        var src = Path.Combine(t.Torrents, "..", "media", "secret.mkv");
+
+        var outcome = await _importer.ImportAsync(Req(t, src), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Empty(Directory.GetDirectories(t.Media));
+    }
+
+    [Fact]
+    public async Task SourceThroughSymlinkedDirectoryIsRefused()
+    {
+        using var t = new TempTree();
+        var outside = Outside(t);
+        File.WriteAllText(Path.Combine(outside, "secret.mkv"), "secret");
+        if (!TryLink(Path.Combine(t.Torrents, "link"), outside)) return; // unverified on hosts without symlink rights
+
+        var outcome = await _importer.ImportAsync(Req(t, Path.Combine(t.Torrents, "link", "secret.mkv")), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Contains("symbolic link", outcome.Message);
+        Assert.Empty(Directory.GetFiles(t.Media, "*", SearchOption.AllDirectories));
+        Assert.Equal("secret", File.ReadAllText(Path.Combine(outside, "secret.mkv")));
+    }
+
+    [Fact]
+    public async Task SymlinkedFileAsSourceIsRefused()
+    {
+        using var t = new TempTree();
+        var real = t.WriteFile("torrents/movie/real.mkv", "x");
+        if (!TryLink(Path.Combine(t.Torrents, "movie", "link.mkv"), real)) return;
+
+        var outcome = await _importer.ImportAsync(Req(t, Path.Combine(t.Torrents, "movie", "link.mkv")), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Empty(Directory.GetFiles(t.Media, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task DestinationDirectoryThatIsASymlinkIsRefused()
+    {
+        using var t = new TempTree();
+        var outside = Outside(t);
+        var src = t.WriteFile("torrents/movie/a.mkv", "x");
+        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)"), outside)) return;
+
+        var outcome = await _importer.ImportAsync(Req(t, src), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Contains("symbolic link", outcome.Message);
+        Assert.Empty(Directory.GetFiles(outside));
+    }
+
+    [Fact]
+    public async Task PreexistingSymlinkAtDestinationFileIsNeverFollowed()
+    {
+        using var t = new TempTree();
+        var outside = Outside(t);
+        var target = Path.Combine(outside, "victim.mkv");
+        File.WriteAllText(target, "keep me");
+        var src = t.WriteFile("torrents/movie/a.mkv", "new");
+        Directory.CreateDirectory(Path.Combine(t.Media, "The Matrix (1999)"));
+        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), target)) return;
+
+        var outcome = await _importer.ImportAsync(Req(t, src), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.Equal("keep me", File.ReadAllText(target));
+    }
+
+    [Fact]
+    public async Task DanglingSymlinkAtDestinationCannotCreateFileOutsideRoot()
+    {
+        using var t = new TempTree();
+        var outside = Outside(t);
+        var missing = Path.Combine(outside, "created-by-import.mkv");
+        var src = t.WriteFile("torrents/movie/a.mkv", "new");
+        Directory.CreateDirectory(Path.Combine(t.Media, "The Matrix (1999)"));
+        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)", "a.mkv"), missing)) return;
+
+        var outcome = await _importer.ImportAsync(Req(t, src), Ct);
+
+        Assert.False(outcome.Success);
+        Assert.False(File.Exists(missing));
+    }
+
+    [Fact]
+    public async Task DryRunStillRefusesSymlinkedDestination()
+    {
+        using var t = new TempTree();
+        var outside = Outside(t);
+        var src = t.WriteFile("torrents/movie/a.mkv", "x");
+        if (!TryLink(Path.Combine(t.Media, "The Matrix (1999)"), outside)) return;
+
+        var outcome = await _importer.ImportAsync(Req(t, src, dryRun: true), Ct);
+
+        Assert.Equal(ImportAction.Failed, outcome.Action);
+    }
+
+    [Fact]
+    public void RootItselfIsNotAContainedChild()
+    {
+        using var t = new TempTree();
+        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.RequireNoLinksBelow(t.Torrents, t.Torrents));
+    }
+
+    [Fact]
+    public void OrdinaryNestedDirectoriesPassTheLinkCheck()
+    {
+        // Positive control: the check must not reject normal trees, or every import would fail.
+        using var t = new TempTree();
+        var file = t.WriteFile("torrents/a/b/c/file.mkv", "x");
+
+        SafeImporter.RequireNoLinksBelow(t.Torrents, file);
+    }
+
+    [Fact]
+    public void PathCheckRejectsEmptyAndSiblingRoots()
+    {
+        using var t = new TempTree();
+        var sibling = Path.Combine(t.Root, "torrents2", "x.mkv");
+
+        Assert.Throws<UnauthorizedAccessException>(() => SafeImporter.CanonicalUnder(t.Torrents, sibling));
+    }
+}
