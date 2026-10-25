@@ -1,5 +1,27 @@
 # OneArr
 
+## Windows (recommended)
+
+Install from a release. You need nothing else installed: no Docker, WSL, Git, Node.js or .NET SDK.
+
+1. Download `OneArr-<version>-win-x64.zip` from the GitHub Releases page and check its `.sha256` file.
+2. Extract the zip and run `OneArr.Tray.exe`. It installs to `%LOCALAPPDATA%\OneArr`, starts OneArr in the background, and adds a notification-area icon.
+3. Open http://127.0.0.1:8780 and create your password.
+
+See `INSTALL.txt` inside the zip for where data lives, how updates and rollbacks work, and how to uninstall.
+
+## Building from source (developers)
+
+Only needed to change OneArr itself. Requires the .NET 10 SDK and Node.js 22.
+
+```powershell
+cd web; npm ci; npm run build; cd ..
+dotnet test OneArr.slnx -c Release --filter "Platform!=Windows"
+dotnet test OneArr.slnx -c Release --filter "Platform=Windows"   # Windows only
+```
+
+Releases are built by `.github/workflows/release.yml` on a Windows runner, after all tests and the acceptance script pass.
+
 A self-hosted movie and TV manager built as one ASP.NET Core 10 process with a React + TypeScript UI, SQLite storage in `/config`, and one web port (`8780`).
 
 **Status: vertical slice, not a Sonarr/Radarr replacement yet.** See `PROGRESS.md` for exactly what is verified and what is not. Do not point OneArr at production media until you have read `docs/MIGRATION.md`.

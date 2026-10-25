@@ -20,6 +20,8 @@ if (!OneArr.Api.InstanceLock.TryAcquire(configDir))
     Console.Error.WriteLine("Another OneArr instance is already using this configuration folder. Not starting.");
     return 3;
 }
+// A stop request left by an earlier tray session is stale: this process is starting, not stopping.
+try { File.Delete(Path.Combine(configDir, "stop.request")); } catch (IOException) { }
 builder.Services.AddHostedService(sp => new OneArr.Api.StopRequestWatcher(configDir, sp.GetRequiredService<IHostApplicationLifetime>()));
 var dbPath = Path.Combine(configDir, "onearr.db");
 var tokens = new TokenService(TokenService.LoadOrCreateKey(Path.Combine(configDir, "secret.key")));

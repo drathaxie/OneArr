@@ -85,7 +85,11 @@ internal sealed class ApiProcess : IApiController
             {
                 if (owned is not null) owned.Dispose();
                 _owned = null;
-                if (await Probe() is null) return true;
+                if (await Probe() is null)
+                {
+                    RemoveStopRequest();
+                    return true;
+                }
             }
             await Task.Delay(250, ct);
         }
@@ -101,10 +105,13 @@ internal sealed class ApiProcess : IApiController
             catch (InvalidOperationException) { }
             owned.Dispose();
             _owned = null;
+            RemoveStopRequest();
             return true;
         }
         // A backend this tray did not start is never killed; the caller treats this as "still running".
-        return await Probe() is null;
+        var stillUp = await Probe() is not null;
+        if (!stillUp) RemoveStopRequest();
+        return !stillUp;
     }
 
     /// <summary>Stops without waiting for a clean shutdown; used only when the tray itself is quitting.</summary>
@@ -124,6 +131,11 @@ internal sealed class ApiProcess : IApiController
         {
             owned.Dispose();
         }
+    }
+
+    private void RemoveStopRequest()
+    {
+        try { File.Delete(_layout.StopRequest); } catch (IOException) { }
     }
 
     public async Task<bool> WaitForVersionAsync(string expectedVersion, TimeSpan timeout, CancellationToken ct)
