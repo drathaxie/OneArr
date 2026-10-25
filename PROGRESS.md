@@ -7,6 +7,76 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Windows validation (branch `library-validation`, verified at 064ab97)
+
+**GitHub state.** PR #1 (library reconciliation) was merged by `drathaxie` into `main` at `6ee76f8`. No release has been
+published since `v0.2.0`, so no installed copy contains the reconciliation work. Nothing was merged or released in this step.
+
+**CI at 064ab97 (run 40205398175): success.** Windows job: 214 cross-platform tests and 18 Windows filesystem tests, 0 failed.
+Library benchmark step and acceptance run passed. Linux job passed.
+
+**Defects found by validation and fixed (each with a regression test)**
+
+- A folder that went offline during a scan could leave its files "missing", which clears `HasFile` and sends items back to search.
+  Fixed: every accessible folder is re-checked after probing. Missing and unknown decisions under a folder that dropped are withheld.
+- Review lists grew with the library. Fixed: lists are capped at 1,000 and the counts are exact.
+- Apply tracked every entity it wrote, so change detection grew quadratically. Fixed: tracking is cleared after bulk writes and
+  after each recalculation batch. Found while doing this: switching off automatic change detection silently dropped updates.
+  Fixed by requesting an explicit change scan before every save, and a multi-batch test reads the database back.
+- The earlier benchmark asserted only the planned count, so an apply that wrote nothing would have passed. It now reads the
+  database back, and the same check runs in the Windows job.
+- Validation script: `Read-Host` ignores redirected input and returns an empty answer. Prompts now refuse anything except the typed
+  word. Repeated mapping parameters and REST array responses were mishandled. Both fixed and re-run.
+
+**Scripted validation, sandbox run (Linux, real API, generated media, seeded Docker-path catalog).** Not the user's library.
+
+| Check | Result |
+|---|---|
+| Automatic grabbing checked, not changed | off before and after |
+| Catalog checked | 7 items (6 movies, 1 series), 0 with a file before |
+| Files discovered | 6 |
+| Confirmed matches (after mapping `/data/media/...`) | 4, applied after typed confirmation |
+| Ambiguous (two catalog entries, same title and year) | 1, not linked |
+| Unmatched (no year in name) | 1, acknowledged, not linked |
+| Items Missing → Available | 4 |
+| Wanted movies before → after | 6 → 3 (the three with no file remain wanted) |
+| Second run | 0 links, 4 already linked, rows unchanged |
+| File deleted, then re-validated | item marked Missing only after typed `MISSING`; returned to wanted |
+| Root folders reassigned (6 entries) | mappings kept |
+| Original media files (SHA-256, before/after) | identical in every run |
+
+**Benchmark, synthetic library of 20,000 movies with real folders and a file-backed SQLite database.** Measured, not claimed for
+any real library. Figures are one run each.
+
+| Phase | Windows (GitHub runner, 4 logical CPUs) | Linux sandbox (4 logical CPUs) |
+|---|---|---|
+| Enumerate folders and files | 987 ms wall, 1,109 ms CPU, 32 MB allocated | 396 ms wall, 571 ms CPU, 37 MB |
+| Match files (indexed) | 179 ms wall, 92 MB allocated | 534 ms wall, 72 MB |
+| Preview (enumerate, match, probe, store plan) | 1,796 ms wall, 227 MB allocated | 1,361 ms wall, 184 MB |
+| Apply (re-scan, writes, recalculation) | 4,937 ms wall, 5,766 ms CPU, 965 MB allocated | 4,013 ms wall, 934 MB |
+| Second preview, no changes | 820 ms wall, 191 MB allocated | 382 ms wall, 167 MB |
+| Cancel a preview 50 ms in: stopped after | 163 ms | 301 ms |
+| Peak working set of test process | 338 MB | 561 MB |
+
+Apply's memory is the largest cost and it grows linearly: at 40,000 movies (Linux sandbox) it allocated 1.86 GB, against 934 MB at
+20,000. Before this change, apply allocated 2.2 GB at 20,000 files. The remaining cost is spread across the re-scan, the inserts,
+and the recalculation. Reduce it further only with a measured profile.
+
+**What is fake and what is real.** Reconciler tests use an in-memory disk (`FakeLibraryFs`) and in-memory SQLite. The benchmark and the
+scripted run use real folders and a file database, but synthetic or seeded data. The scripted run used the real API.
+
+**Not verified.**
+
+- The user's real Windows installation and real library. No file on that machine has been touched by this work.
+- Radarr and Sonarr metadata migration, and TMDb lookups. No credentials or services were available, so no live results are claimed.
+- A real network share going offline. The mid-scan case is tested with a fake disk only.
+- Permission-denied folders on a real Windows ACL.
+- Duplicate-download behaviour under live automation. Automatic grabbing stayed off in every run.
+
+**Procedure for the user.** `tools/windows/library/README.md` covers backup (stop OneArr, then `backup-onearr.ps1`), mapping and
+root-folder setup, the read-only preview, the typed confirmations, verification, and rollback. Upgrading to a build of this branch
+needs a release, which has not been authorised.
+
 ## Library safety hardening (branch `library-reconciliation`, verified at b8117a7)
 
 **Verified on GitHub Actions (run 40202436157, commit b8117a7):** both jobs pass. Windows: 211 cross-platform tests
