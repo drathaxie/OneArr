@@ -21,6 +21,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 ENV ONEARR_CONFIG_DIR=/config \
     ONEARR_PORT=8780 \
+    ONEARR_LISTEN_ADDRESS=0.0.0.0 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_EnableDiagnostics=0
 COPY --from=build /out ./

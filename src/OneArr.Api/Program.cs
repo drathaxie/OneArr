@@ -17,7 +17,9 @@ Directory.CreateDirectory(configDir);
 var dbPath = Path.Combine(configDir, "onearr.db");
 var tokens = new TokenService(TokenService.LoadOrCreateKey(Path.Combine(configDir, "secret.key")));
 var port = Environment.GetEnvironmentVariable("ONEARR_PORT") ?? "8780";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+// Loopback unless told otherwise. The container image sets ONEARR_LISTEN_ADDRESS=0.0.0.0 and publishes via compose.
+var listenAddress = Environment.GetEnvironmentVariable("ONEARR_LISTEN_ADDRESS") ?? "127.0.0.1";
+builder.WebHost.UseUrls($"http://{listenAddress}:{port}");
 
 var tmdbBase = Environment.GetEnvironmentVariable("ONEARR_TMDB_BASE_URL");
 builder.Services.AddOneArrInfrastructure(dbPath, Environment.GetEnvironmentVariable("ONEARR_TMDB_API_KEY"),

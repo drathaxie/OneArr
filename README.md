@@ -58,6 +58,7 @@ Optional environment variables (see `.env.example`):
 |---|---|---|
 | `ONEARR_CONFIG_DIR` | `./config` (`/config` in the container) | Holds `onearr.db` and `secret.key` (mode 0600). |
 | `ONEARR_PORT` | `8780` | Listening port. |
+| `ONEARR_LISTEN_ADDRESS` | `127.0.0.1` | Interface to listen on. The container image uses `0.0.0.0`; compose publishes only on the host address set by `ONEARR_BIND`. |
 | `ONEARR_TMDB_API_KEY` | empty | Optional TMDb key; can also be set in Settings. Never returned by the API. |
 | `ONEARR_TMDB_BASE_URL` | TMDb production | Override for fixture/fake servers only. |
 
