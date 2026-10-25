@@ -17,3 +17,4 @@ data/
 *.key
 design-time.db
 OneArr-source.zip
+dist/
