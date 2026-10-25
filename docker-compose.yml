@@ -1,0 +1,15 @@
+# OneArr only. qBittorrent and any indexer proxy are external services you already run; OneArr talks to them over HTTP.
+# Bind to loopback by default. Put a TLS reverse proxy with authentication in front before exposing it on a LAN.
+services:
+  onearr:
+    build: .
+    image: onearr:local
+    container_name: onearr
+    ports:
+      - "${ONEARR_BIND:-127.0.0.1}:8780:8780"
+    environment:
+      ONEARR_TMDB_API_KEY: ${ONEARR_TMDB_API_KEY:-}
+    volumes:
+      - ./config:/config            # SQLite database, token signing key (created 0600)
+      - ${ONEARR_DATA_DIR:-./data}:/data   # use a SMALL synthetic sample tree until verified
+    restart: unless-stopped
