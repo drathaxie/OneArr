@@ -24,8 +24,29 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     {
         base.Dispose(disposing);
         // Only remove directories this factory created; a caller-supplied directory is cleaned up by the caller.
-        if (!_ownsConfigDir) return;
-        try { if (Directory.Exists(ConfigDir)) Directory.Delete(ConfigDir, recursive: true); } catch (IOException) { }
+        if (_ownsConfigDir) RemoveConfigDir(ConfigDir);
+    }
+
+    /// <summary>
+    /// Deletes a config directory. Windows keeps SQLite files locked while pooled connections are open, so pools are
+    /// cleared first and deletion is retried briefly. Failure is reported, not swallowed.
+    /// </summary>
+    public static void RemoveConfigDir(string dir)
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        for (var attempt = 1; ; attempt++)
+        {
+            if (!Directory.Exists(dir)) return;
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 10)
+            {
+                Thread.Sleep(100 * attempt);
+            }
+        }
     }
 }
 
@@ -137,7 +158,7 @@ public class SettingsApiTests
         }
         finally
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            ApiFactory.RemoveConfigDir(dir);
         }
     }
 
