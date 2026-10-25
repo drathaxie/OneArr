@@ -4,6 +4,7 @@
     <Project Path="src/OneArr.Application/OneArr.Application.csproj" />
     <Project Path="src/OneArr.Domain/OneArr.Domain.csproj" />
     <Project Path="src/OneArr.Infrastructure/OneArr.Infrastructure.csproj" />
+    <Project Path="src/OneArr.Tray/OneArr.Tray.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OneArr.Tests/OneArr.Tests.csproj" />
