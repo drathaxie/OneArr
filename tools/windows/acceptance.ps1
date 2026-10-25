@@ -89,20 +89,22 @@ try {
     Check 'settings save and read back' ($settings.dryRunImport -eq $false)
 
     # 4. Resource use while idle (no UI open, no work queued)
+    # Warm up first (startup, migrations, the first scheduler pass), then sample a steady window.
+    Start-Sleep -Seconds 30
     $cpuBefore = $backend.Process.TotalProcessorTime
     $wallBefore = Get-Date
-    Start-Sleep -Seconds 20
+    Start-Sleep -Seconds 60
     $backend.Process.Refresh()
     $cpuSeconds = ($backend.Process.TotalProcessorTime - $cpuBefore).TotalSeconds
     $wall = ((Get-Date) - $wallBefore).TotalSeconds
     $m.idle = [ordered]@{
         working_set_mb = [math]::Round($backend.Process.WorkingSet64 / 1MB, 1)
         private_memory_mb = [math]::Round($backend.Process.PrivateMemorySize64 / 1MB, 1)
-        cpu_percent_over_20s = [math]::Round(100 * $cpuSeconds / $wall, 2)
+        cpu_percent_over_60s = [math]::Round(100 * $cpuSeconds / $wall, 2)
         threads = $backend.Process.Threads.Count
         onearr_processes = @(Get-Process -Name 'OneArr.Api' -ErrorAction SilentlyContinue).Count
     }
-    Check 'idle CPU under 5 percent' ($m.idle.cpu_percent_over_20s -lt 5) "$($m.idle.cpu_percent_over_20s)%"
+    Check 'idle CPU under 5 percent (60 s after 30 s warm-up)' ($m.idle.cpu_percent_over_60s -lt 5) "$($m.idle.cpu_percent_over_60s)%"
     Check 'idle private memory under 250 MB' ($m.idle.private_memory_mb -lt 250) "$($m.idle.private_memory_mb) MB"
 
     # 5. Second backend on the same configuration must refuse to start
