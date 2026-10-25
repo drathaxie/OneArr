@@ -2,11 +2,14 @@ name: tray-acceptance
 
 # Runs the tray release flow on a disposable Windows runner: install, tray, sign-in in a browser, update, rollback,
 # uninstall and purge. Never runs against a real OneArr installation. Updates are served from 127.0.0.1 only.
+# Starts on a push to any acceptance/** branch (current-commit mode) or on manual dispatch.
 #   mode = published       : tests a release already on GitHub (release_tag)
 #   mode = current-commit  : builds the same artifacts from this commit as version 0.9.0 and tests those
 #                            (use this before a release exists; the results say which mode was used)
 
 on:
+  push:
+    branches: ['acceptance/**']
   workflow_dispatch:
     inputs:
       mode:
@@ -41,17 +44,17 @@ jobs:
           python-version: '3.12'
 
       - name: Download the published release exactly as a user would
-        if: inputs.mode == 'published'
+        if: (inputs.mode || 'current-commit') == 'published'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag }}
+          TAG: ${{ inputs.release_tag || 'v0.2.0' }}
         run: |
           New-Item -ItemType Directory -Force -Path build/published | Out-Null
           gh release download $env:TAG --repo ${{ github.repository }} --dir build/published --pattern "*-win-x64.zip" --pattern "*-win-x64.zip.sha256"
 
       - name: Build the same artifacts from this commit (test version 0.9.0)
-        if: inputs.mode == 'current-commit'
+        if: (inputs.mode || 'current-commit') == 'current-commit'
         shell: pwsh
         run: |
           cd web; npm ci; npm run build; cd ..
@@ -69,8 +72,8 @@ jobs:
       - name: Run tray acceptance
         shell: pwsh
         env:
-          MODE: ${{ inputs.mode }}
-          TAG: ${{ inputs.release_tag }}
+          MODE: ${{ inputs.mode || 'current-commit' }}
+          TAG: ${{ inputs.release_tag || 'v0.2.0' }}
         run: |
           $version = if ($env:MODE -eq 'published') { $env:TAG -replace '^v', '' } else { '0.9.0' }
           $zip = Get-ChildItem build/published -Filter "OneArr-$version-win-x64.zip" | Select-Object -First 1
