@@ -68,18 +68,9 @@ internal static class Installer
         Directory.CreateDirectory(layout.Config);
         File.WriteAllText(requestStop, DateTime.UtcNow.ToString("O"));
         Thread.Sleep(3000);
-        foreach (var p in Process.GetProcessesByName("OneArr.Api"))
-        {
-            try
-            {
-                if (string.Equals(p.MainModule?.FileName, layout.ApiExe, StringComparison.OrdinalIgnoreCase))
-                {
-                    p.Kill(entireProcessTree: true);
-                    p.WaitForExit(5000);
-                }
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-        }
+        // Only this installation's processes: matched by executable path, never by name alone.
+        KillInstalled("OneArr.Api", layout.ApiExe);
+        KillInstalled("OneArr.Tray", Path.Combine(layout.Root, "OneArr.Tray.exe"), skipCurrent: true);
 
         SetAutostart(layout, false);
         if (File.Exists(ShortcutPath)) File.Delete(ShortcutPath);
@@ -93,6 +84,23 @@ internal static class Installer
         // A running exe cannot delete itself; wait briefly after exit, then remove the folder or the exe.
         var remove = purge ? $"rd /s /q \"{layout.Root}\"" : $"del /q \"{Path.Combine(layout.Root, "OneArr.Tray.exe")}\"";
         Process.Start(new ProcessStartInfo("cmd.exe", $"/c ping -n 3 127.0.0.1 >nul & {remove}") { CreateNoWindow = true, UseShellExecute = false });
+    }
+
+    private static void KillInstalled(string processName, string exePath, bool skipCurrent = false)
+    {
+        foreach (var p in Process.GetProcessesByName(processName))
+        {
+            if (skipCurrent && p.Id == Environment.ProcessId) continue;
+            try
+            {
+                if (string.Equals(p.MainModule?.FileName, exePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    p.Kill(entireProcessTree: true);
+                    p.WaitForExit(5000);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        }
     }
 
     private static void CopyDirectory(string source, string destination)

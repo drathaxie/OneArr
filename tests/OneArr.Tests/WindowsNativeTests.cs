@@ -53,6 +53,33 @@ public class WindowsNativeTests
     }
 
     [Fact]
+    public async Task CrossVolumeImportFallsBackToVerifiedCopyAndKeepsTheSource()
+    {
+        RequireWindows();
+        using var t = new TempTree();
+        var src = t.WriteFile("torrents/movie/The.Matrix.1999.mkv", "cross volume bytes");
+        var otherVolume = @"D:\";
+        Assert.True(Directory.Exists(otherVolume), "This test needs a second volume (D:) on the runner");
+        var mediaRoot = Path.Combine(otherVolume, "onearr-xvol-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(mediaRoot);
+        try
+        {
+            var request = new ImportRequest(src, mediaRoot, "The Matrix (1999)", t.Torrents, false, null);
+            var outcome = await new SafeImporter(TimeSpan.Zero).ImportAsync(request, Ct);
+
+            Assert.True(outcome.Success, outcome.Message);
+            Assert.Equal(ImportAction.Copy, outcome.Action);
+            Assert.Equal("cross volume bytes", File.ReadAllText(outcome.DestinationPath));
+            Assert.True(File.Exists(src), "torrent source must survive a cross-volume import");
+            Assert.Equal(1u, WindowsNative.LinkCount(src));
+        }
+        finally
+        {
+            TempTree.RemoveLinksAndTree(mediaRoot);
+        }
+    }
+
+    [Fact]
     public void HardlinkAcrossVolumesIsRefused()
     {
         RequireWindows();

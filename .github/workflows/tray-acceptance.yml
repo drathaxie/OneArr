@@ -1,0 +1,61 @@
+name: tray-acceptance
+
+# Runs the published release on a disposable Windows runner: install, tray, sign-in in a browser, update, rollback,
+# uninstall and purge. Never runs against a real OneArr installation. Uses a controlled feed on 127.0.0.1.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published release tag to test, for example v0.2.0'
+        required: true
+        default: 'v0.2.0'
+
+permissions:
+  contents: read
+
+jobs:
+  tray-acceptance:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download the published release exactly as a user would
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          New-Item -ItemType Directory -Force -Path build/published | Out-Null
+          gh release download $env:TAG --repo ${{ github.repository }} --dir build/published --pattern "*-win-x64.zip" --pattern "*-win-x64.zip.sha256"
+          Get-ChildItem build/published | ForEach-Object { $_.Name }
+
+      - name: Run tray acceptance
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          $zip = Get-ChildItem build/published -Filter "OneArr-$version-win-x64.zip" | Select-Object -First 1
+          $sha = Get-ChildItem build/published -Filter "OneArr-$version-win-x64.zip.sha256" | Select-Object -First 1
+          if (-not $zip -or -not $sha) { throw "Release $env:TAG has no $version artifact" }
+          ./tools/windows/tray-acceptance.ps1 -ReleaseZip $zip.FullName -ReleaseSha256File $sha.FullName -ReleaseVersion $version -OutDir build/tray-acceptance
+
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tray-acceptance
+          path: build/tray-acceptance
+          if-no-files-found: ignore

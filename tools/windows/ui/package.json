@@ -1,0 +1,8 @@
+{
+  "name": "onearr-ui-acceptance",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
