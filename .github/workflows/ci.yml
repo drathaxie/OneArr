@@ -49,9 +49,9 @@ jobs:
       - name: Publish release-shaped build
         shell: pwsh
         run: |
-          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=0.0.0 -o build/release/app
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=0.0.0 -p:DebugType=None -p:DebugSymbols=false -o build/release/app
           "0.0.0" | Set-Content -NoNewline -Encoding ascii build/release/app/version.txt
-          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=0.0.0 -o build/release
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=0.0.0 -p:DebugType=None -p:DebugSymbols=false -o build/release
 
       - name: Acceptance run on Windows
         shell: pwsh

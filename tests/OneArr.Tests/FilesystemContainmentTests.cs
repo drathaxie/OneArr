@@ -188,6 +188,51 @@ public class FilesystemContainmentTests
     }
 
     [Fact]
+    public async Task InterruptedImportLeavesNoTemporaryCopyBehind()
+    {
+        // A killed import leaves <name>.onearr-<32 hex>.tmp. The next import removes it once it is stale.
+        using var t = new TempTree();
+        var src = t.WriteFile("torrents/movie/a.mkv", "complete bytes");
+        var folder = Path.Combine(t.Media, "The Matrix (1999)");
+        Directory.CreateDirectory(folder);
+        var stale = Path.Combine(folder, "a.mkv.onearr-" + Guid.NewGuid().ToString("N") + ".tmp");
+        File.WriteAllText(stale, "half written");
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow - TimeSpan.FromHours(1));
+        var userFile = Path.Combine(folder, "notes.txt");
+        File.WriteAllText(userFile, "mine");
+        File.SetLastWriteTimeUtc(userFile, DateTime.UtcNow - TimeSpan.FromHours(1));
+        var similarButNotOurs = Path.Combine(folder, "a.mkv.onearr-keep.tmp");
+        File.WriteAllText(similarButNotOurs, "not ours");
+        File.SetLastWriteTimeUtc(similarButNotOurs, DateTime.UtcNow - TimeSpan.FromHours(1));
+
+        var outcome = await new SafeImporter(TimeSpan.Zero).ImportAsync(Req(t, src), Ct);
+
+        Assert.True(outcome.Success, outcome.Message);
+        Assert.False(File.Exists(stale), "a stale temp copy from an interrupted import must be removed");
+        Assert.Equal("mine", File.ReadAllText(userFile));
+        Assert.Equal("not ours", File.ReadAllText(similarButNotOurs));
+    }
+
+    [Fact]
+    public async Task ExistingMediaInTheSameFolderIsNeverTouched()
+    {
+        using var t = new TempTree();
+        var src = t.WriteFile("torrents/movie/a.mkv", "new release");
+        var folder = Path.Combine(t.Media, "The Matrix (1999)");
+        Directory.CreateDirectory(folder);
+        var existing = Path.Combine(folder, "The.Matrix.1999.720p.mkv");
+        File.WriteAllText(existing, "old release, keep");
+        var before = File.GetLastWriteTimeUtc(existing);
+
+        var outcome = await new SafeImporter(TimeSpan.Zero).ImportAsync(Req(t, src), Ct);
+
+        Assert.True(outcome.Success, outcome.Message);
+        Assert.Equal("old release, keep", File.ReadAllText(existing));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(existing));
+        Assert.Equal(2, Directory.GetFiles(folder).Length);
+    }
+
+    [Fact]
     public void RootItselfIsNotAContainedChild()
     {
         using var t = new TempTree();

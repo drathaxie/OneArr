@@ -63,6 +63,8 @@ public sealed class SafeImporter : IImporter
             return new ImportOutcome(ImportAction.DryRun, dest, true, $"Would import {info.Length} bytes (dry run, no changes made)");
 
         Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+        // Independent of the path taken below: clears copies from interrupted imports in this folder.
+        SweepStaleTemporaryCopies(Path.GetDirectoryName(dest)!);
 
         if (TryHardLink(source, dest, out var linkReason))
             return new ImportOutcome(ImportAction.Hardlink, dest, true, "Hardlinked on the same volume");
@@ -93,6 +95,28 @@ public sealed class SafeImporter : IImporter
             TryDelete(temp);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Removes temporary copies left behind by an import that was killed mid-write. Only files matching our exact temp
+    /// name pattern and older than StaleTempAge are removed, so a concurrent import or any user file is never touched.
+    /// </summary>
+    public static readonly TimeSpan StaleTempAge = TimeSpan.FromMinutes(10);
+    private static readonly System.Text.RegularExpressions.Regex TempName =
+        new(@"\.onearr-[0-9a-f]{32}\.tmp$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static int SweepStaleTemporaryCopies(string folder)
+    {
+        if (!Directory.Exists(folder)) return 0;
+        var removed = 0;
+        foreach (var file in Directory.EnumerateFiles(folder))
+        {
+            if (!TempName.IsMatch(Path.GetFileName(file))) continue;
+            var info = new FileInfo(file);
+            if (DateTime.UtcNow - info.LastWriteTimeUtc < StaleTempAge) continue;
+            try { info.Delete(); removed++; } catch (IOException) { }
+        }
+        return removed;
     }
 
     /// <summary>Resolves a path and requires it to be inside the given root. Case-insensitive on Windows.</summary>

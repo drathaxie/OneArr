@@ -19,16 +19,30 @@ public sealed class ReleaseClient
     };
 
     private readonly HttpClient _http;
+    private readonly string _apiBase;
 
-    public ReleaseClient(HttpClient http)
+    /// <param name="apiBase">
+    /// Normally https://api.github.com. A different base is a test hook (tray.json "updateApi"): then only URLs with the
+    /// same scheme and host as that base are accepted, so the feed and its downloads stay on one server you chose.
+    /// </param>
+    public ReleaseClient(HttpClient http, string? apiBase = null)
     {
         _http = http;
+        _apiBase = (apiBase ?? "https://api.github.com").TrimEnd('/');
+    }
+
+    private void EnsureAllowed(string url)
+    {
+        if (_apiBase == "https://api.github.com") { EnsureAllowedUrl(url); return; }
+        var baseUri = new Uri(_apiBase);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != baseUri.Scheme || !uri.Host.Equals(baseUri.Host, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Update URL is not on the configured update server");
     }
 
     /// <returns>The latest release with a valid artifact, or null when the repository has no release.</returns>
     public async Task<ReleaseInfo?> GetLatestAsync(CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Repo}/releases/latest");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{_apiBase}/repos/{Repo}/releases/latest");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         req.Headers.UserAgent.ParseAdd("OneArr-Updater");
         req.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
@@ -53,15 +67,15 @@ public sealed class ReleaseClient
         }
         if (zipUrl is null || shaUrl is null) return null; // an incomplete release is not offered
 
-        EnsureAllowedUrl(zipUrl);
-        EnsureAllowedUrl(shaUrl);
+        EnsureAllowed(zipUrl);
+        EnsureAllowed(shaUrl);
         return new ReleaseInfo(tag, version, zipName!, zipUrl, shaUrl);
     }
 
     /// <summary>Downloads to a file, hashing as it streams, and refuses anything over maxBytes.</summary>
     public async Task<long> DownloadAsync(string url, string destination, long maxBytes, CancellationToken ct)
     {
-        EnsureAllowedUrl(url);
+        EnsureAllowed(url);
         using var res = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         res.EnsureSuccessStatusCode();
         if (res.Content.Headers.ContentLength is long len && len > maxBytes)
@@ -87,7 +101,7 @@ public sealed class ReleaseClient
     /// <summary>Reads the expected SHA-256 from a "hash  filename" checksum file.</summary>
     public async Task<string> ReadExpectedHashAsync(string shaUrl, string zipName, CancellationToken ct)
     {
-        EnsureAllowedUrl(shaUrl);
+        EnsureAllowed(shaUrl);
         var text = await _http.GetStringAsync(shaUrl, ct);
         foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {

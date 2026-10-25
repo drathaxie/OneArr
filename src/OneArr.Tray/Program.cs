@@ -11,6 +11,28 @@ internal static class Program
         var layout = InstallLayout.Default();
         Log.Folder = layout.Logs;
 
+        if (args.Length == 2 && args[0] == "--command")
+        {
+            try
+            {
+                TrayCommands.Send(layout, args[1]);
+                Console.WriteLine($"Sent '{args[1]}' to the running tray. It acts within a few seconds.");
+                return 0;
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 2;
+            }
+        }
+
+        if (args.Contains("--status"))
+        {
+            var statusPath = Path.Combine(layout.Root, "tray-status.json");
+            Console.WriteLine(File.Exists(statusPath) ? File.ReadAllText(statusPath) : "{\"state\": \"not installed or never run\"}");
+            return 0;
+        }
+
         if (args.Contains("--uninstall"))
         {
             Installer.Uninstall(layout, purge: args.Contains("--purge"));

@@ -64,6 +64,7 @@ public sealed class UpdateApplier
 
         _log($"{newVersion} did not become healthy; rolling back to {oldVersion}");
         await _api.StopGracefullyAsync(StopTimeout, ct);
+        PreserveCurrentDatabase("failed-update-" + newVersion);
         RestoreFiles(backup);
         Swap(_layout.App, _layout.AppPrevious, _layout.App + ".failed");
         _api.Start();
@@ -78,7 +79,12 @@ public sealed class UpdateApplier
             throw new IOException("OneArr did not stop within the timeout; rollback was not applied");
 
         var marker = File.Exists(_layout.LastBackupMarker) ? File.ReadAllText(_layout.LastBackupMarker).Trim() : null;
-        if (marker is not null) RestoreFiles(marker);
+        if (marker is not null)
+        {
+            // Anything written since the update is kept in a discarded-* copy before the restore, never dropped silently.
+            PreserveCurrentDatabase("rollback");
+            RestoreFiles(marker);
+        }
         Swap(_layout.App, _layout.AppPrevious, _layout.App + ".rolledback");
         _api.Start();
     }
@@ -107,6 +113,27 @@ public sealed class UpdateApplier
             if (File.Exists(side)) File.Copy(side, target + suffix, overwrite: false);
         }
         File.WriteAllText(_layout.LastBackupMarker, target);
+        return target;
+    }
+
+    /// <summary>
+    /// Copies the live database (with its WAL and SHM files) to backups\discarded-*.db before anything is restored over it.
+    /// Returns the copy's path, or null if there was no database. These copies are never pruned automatically.
+    /// </summary>
+    public string? PreserveCurrentDatabase(string reason)
+    {
+        if (!File.Exists(_layout.Database)) return null;
+        Directory.CreateDirectory(_layout.Backups);
+        var stamp = _time.GetUtcNow().ToString("yyyyMMdd-HHmmss");
+        var target = Path.Combine(_layout.Backups, $"discarded-{reason}-{stamp}.db");
+        File.Copy(_layout.Database, target, overwrite: false);
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            var side = _layout.Database + suffix;
+            if (File.Exists(side)) File.Copy(side, target + suffix, overwrite: false);
+        }
+        _log($"Kept the database as {target} before restoring; nothing was discarded");
+        File.WriteAllText(_layout.LastDiscardedMarker, target);
         return target;
     }
 

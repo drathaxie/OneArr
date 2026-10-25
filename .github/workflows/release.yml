@@ -54,9 +54,9 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=$env:VERSION -o build/stage/app
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=$env:VERSION -p:DebugType=None -p:DebugSymbols=false -o build/stage/app
           $env:VERSION | Set-Content -NoNewline -Encoding ascii build/stage/app/version.txt
-          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$env:VERSION -o build/stage
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$env:VERSION -p:DebugType=None -p:DebugSymbols=false -o build/stage
           Copy-Item tools/windows/INSTALL.txt build/stage/INSTALL.txt
 
       - name: Acceptance run on the exact release folder

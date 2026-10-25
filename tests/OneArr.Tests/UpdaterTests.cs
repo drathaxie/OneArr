@@ -250,6 +250,40 @@ public class UpdaterTests
         Assert.Equal(before, File.ReadAllText(layout.Database));
     }
 
+    [Fact]
+    public async Task RollbackKeepsEverythingWrittenAfterTheUpdate()
+    {
+        // Data written under the new version must survive a rollback as a readable copy, not be overwritten.
+        using var t = new Scratch();
+        var layout = t.Layout();
+        t.InstallOld(layout);
+        var staged = t.Staged(layout, "0.2.0", "new build");
+        await new UpdateApplier(layout, new FakeApi(true), TimeProvider.System, _ => { }).ApplyAsync(staged, "0.2.0", Ct);
+        File.WriteAllText(layout.Database, "user added a movie after the update");
+
+        await new UpdateApplier(layout, new FakeApi(true), TimeProvider.System, _ => { }).RollBackAsync(Ct);
+
+        var kept = File.ReadAllText(layout.LastDiscardedMarker).Trim();
+        Assert.Equal("user added a movie after the update", File.ReadAllText(kept));
+        Assert.StartsWith("discarded-rollback-", Path.GetFileName(kept));
+    }
+
+    [Fact]
+    public async Task FailedUpdateKeepsTheMigratedDatabaseBeforeRestoring()
+    {
+        using var t = new Scratch();
+        var layout = t.Layout();
+        t.InstallOld(layout);
+        var staged = t.Staged(layout, "0.2.0", "new build");
+        var api = new FakeApi(healthy: false, onStart: starts => { if (starts == 1) File.WriteAllText(layout.Database, "new version data"); });
+
+        await new UpdateApplier(layout, api, TimeProvider.System, _ => { }).ApplyAsync(staged, "0.2.0", Ct);
+
+        var kept = File.ReadAllText(layout.LastDiscardedMarker).Trim();
+        Assert.Equal("new version data", File.ReadAllText(kept));
+        Assert.StartsWith("discarded-failed-update-", Path.GetFileName(kept));
+    }
+
     /// <summary>Scratch install tree in the temp directory. Deleted on dispose.</summary>
     private sealed class Scratch : IDisposable
     {

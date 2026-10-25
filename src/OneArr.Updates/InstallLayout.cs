@@ -17,6 +17,7 @@ public sealed record InstallLayout(string Root)
     public string Database => Path.Combine(Config, "onearr.db");
     public string StopRequest => Path.Combine(Config, "stop.request");
     public string LastBackupMarker => Path.Combine(Backups, "last-update.txt");
+    public string LastDiscardedMarker => Path.Combine(Backups, "last-discarded.txt");
 
     public static InstallLayout Default() =>
         new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OneArr"));

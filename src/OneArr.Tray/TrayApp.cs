@@ -21,6 +21,10 @@ internal sealed class TrayApp : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
     private readonly System.Windows.Forms.Timer _checkTimer = new() { Interval = (int)CheckInterval.TotalMilliseconds };
+    private readonly System.Windows.Forms.Timer _commandTimer = new() { Interval = 2000 };
+    private DateTime? _lastCheckUtc;
+    private string? _lastResult;
+    private string? _lastError;
     private readonly ToolStripMenuItem _statusItem = new() { Enabled = false };
     private readonly ToolStripMenuItem _installItem = new() { Visible = false };
     private readonly ToolStripMenuItem _rollbackItem = new("Roll back to previous version") { Visible = false };
@@ -37,13 +41,16 @@ internal sealed class TrayApp : ApplicationContext
         _layout = layout;
         _settings = TraySettings.Load(Path.Combine(layout.Root, "tray.json"));
         _api = new ApiProcess(layout, Port);
-        _update = new TrayUpdateService(layout, _api, new ReleaseClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
+        _update = new TrayUpdateService(layout, _api, new ReleaseClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, _settings.UpdateApi));
         _ui = SynchronizationContext.Current ?? new SynchronizationContext();
 
         _icon = new NotifyIcon { Icon = SystemIcons.Application, Text = "OneArr", Visible = true, ContextMenuStrip = BuildMenu() };
         _icon.DoubleClick += (_, _) => OpenUi();
 
         _api.UnexpectedExit += code => _ui.Post(_ => OnUnexpectedExit(code), null);
+        TrayCommands.Take(layout); // discard a command left before this tray started
+        _commandTimer.Tick += (_, _) => { var command = TrayCommands.Take(_layout); if (command is not null) _ = RunCommandAsync(command); };
+        _commandTimer.Start();
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
         _checkTimer.Tick += async (_, _) => await CheckAsync(notifyIfCurrent: false);
         _statusTimer.Start();
@@ -97,8 +104,44 @@ internal sealed class TrayApp : ApplicationContext
             try { _api.Start(); }
             catch (Exception ex) { Log.Write("tray.log", ex.Message); Notify("OneArr could not start. See the logs folder.", ToolTipIcon.Error); }
         }
+        WriteStatus("started");
         await Task.Delay(TimeSpan.FromMinutes(2));
         if (_settings.CheckForUpdates) await CheckAsync(notifyIfCurrent: false);
+    }
+
+    private async Task RunCommandAsync(string command)
+    {
+        Log.Write("tray.log", $"Command received: {command}");
+        switch (command)
+        {
+            case "check": await CheckAsync(notifyIfCurrent: true); break;
+            case "install":
+                await CheckAsync(notifyIfCurrent: false);
+                if (_available is not null) await InstallAsync(_available);
+                break;
+            case "rollback": await RollBackAsync(confirm: false); break;
+            case "quit": Quit(); break;
+        }
+    }
+
+    /// <summary>Writes tray-status.json. Holds versions and times only, never secrets.</summary>
+    private void WriteStatus(string state)
+    {
+        try
+        {
+            TrayStatus.Write(_layout, new TrayStatus(
+                State: state,
+                InstalledVersion: _layout.InstalledVersion()?.ToString(3),
+                LatestVersion: _available?.Version.ToString(3),
+                LastCheckUtc: _lastCheckUtc,
+                LastResult: _lastResult,
+                LastError: _lastError,
+                PreviousVersionAvailable: _update.HasPreviousVersion));
+        }
+        catch (IOException ex)
+        {
+            Log.Write("tray.log", $"Could not write status: {ex.Message}");
+        }
     }
 
     private async Task CheckAsync(bool notifyIfCurrent)
@@ -109,8 +152,13 @@ internal sealed class TrayApp : ApplicationContext
         try
         {
             var release = await _update.CheckAsync(CancellationToken.None);
+            _lastCheckUtc = DateTime.UtcNow;
+            _lastError = null;
+            _lastResult = release is null ? "up to date" : $"{release.Version.ToString(3)} available";
             if (release is null)
             {
+                _available = null;
+                _installItem.Visible = false;
                 if (notifyIfCurrent) Notify("OneArr is up to date.", ToolTipIcon.Info);
                 return;
             }
@@ -124,12 +172,15 @@ internal sealed class TrayApp : ApplicationContext
         catch (Exception ex)
         {
             Log.Write("tray.log", $"Update check failed: {ex.Message}");
+            _lastCheckUtc = DateTime.UtcNow;
+            _lastError = ex.Message;
             if (notifyIfCurrent) Notify($"Could not check for updates: {ex.Message}", ToolTipIcon.Warning);
         }
         finally
         {
             _busy = false;
             SetProgress("");
+            WriteStatus("idle");
         }
     }
 
@@ -142,6 +193,8 @@ internal sealed class TrayApp : ApplicationContext
             var outcome = await _update.InstallAsync(release, s => SetProgress(s), CancellationToken.None);
             _available = null;
             _installItem.Visible = false;
+            _lastError = null;
+            _lastResult = outcome == UpdateOutcome.Updated ? $"updated to {release.Version.ToString(3)}" : $"{release.Version.ToString(3)} rolled back (failed startup)";
             Notify(outcome == UpdateOutcome.Updated
                 ? $"Updated to OneArr {release.Version.ToString(3)}."
                 : $"OneArr {release.Version.ToString(3)} failed its startup check; the previous version was restored.",
@@ -150,6 +203,8 @@ internal sealed class TrayApp : ApplicationContext
         catch (Exception ex)
         {
             Log.Write("tray.log", $"Install failed: {ex.Message}");
+            _lastError = ex.Message;
+            _lastResult = "update not applied";
             Notify($"Update not applied: {ex.Message}", ToolTipIcon.Error);
         }
         finally
@@ -157,29 +212,34 @@ internal sealed class TrayApp : ApplicationContext
             _busy = false;
             SetProgress("");
             RefreshRollbackItem();
+            WriteStatus("idle");
         }
     }
 
-    private async Task RollBackAsync()
+    private async Task RollBackAsync(bool confirm = true)
     {
         if (_busy || !_update.HasPreviousVersion) return;
-        if (MessageBox.Show("Go back to the previous OneArr version? Your data is kept; the database is restored from the backup taken before the last update.",
+        if (confirm && MessageBox.Show("Go back to the previous OneArr version? The database is restored from the backup taken before the last update. Anything written since then is kept in backups\\discarded-*.db, not deleted.",
                 "OneArr", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
         _busy = true;
         try
         {
             await _update.RollBackAsync(CancellationToken.None);
+            _lastError = null;
+            _lastResult = "rolled back to previous version";
             Notify("Rolled back to the previous version.", ToolTipIcon.Info);
         }
         catch (Exception ex)
         {
             Log.Write("tray.log", $"Rollback failed: {ex.Message}");
+            _lastError = ex.Message;
             Notify($"Rollback failed: {ex.Message}", ToolTipIcon.Error);
         }
         finally
         {
             _busy = false;
             RefreshRollbackItem();
+            WriteStatus("idle");
         }
     }
 
@@ -267,8 +327,10 @@ internal sealed class TrayApp : ApplicationContext
 
     private void Quit()
     {
+        WriteStatus("stopped");
         _statusTimer.Stop();
         _checkTimer.Stop();
+        _commandTimer.Stop();
         _api.Stop();
         _icon.Visible = false;
         _icon.Dispose();

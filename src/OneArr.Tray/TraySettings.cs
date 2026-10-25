@@ -7,6 +7,8 @@ internal sealed class TraySettings
 {
     public bool CheckForUpdates { get; set; } = true;
     public bool InstallUpdatesAutomatically { get; set; } = false;
+    /// <summary>Test hook only. Null means the official GitHub release feed.</summary>
+    public string? UpdateApi { get; set; }
 
     public static TraySettings Load(string path)
     {
