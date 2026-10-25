@@ -46,6 +46,24 @@ jobs:
       - name: Backend tests (Windows filesystem regressions)
         run: dotnet test OneArr.slnx -c Release --filter "Platform=Windows"
 
+      # Synthetic library on this runner, not a user library. Reports wall time, CPU time and allocations per phase.
+      - name: Library benchmark on Windows (synthetic library)
+        shell: pwsh
+        env:
+          ONEARR_BENCH: "1"
+          ONEARR_BENCH_MOVIES: "20000"
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          dotnet test OneArr.slnx -c Release --filter "Category=Benchmark" --logger "console;verbosity=detailed" 2>&1 | Tee-Object -FilePath build/library-benchmark-windows.txt
+
+      - name: Keep library benchmark output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-library-benchmark
+          path: build/library-benchmark-windows.txt
+          if-no-files-found: ignore
+
       - name: Publish release-shaped build
         shell: pwsh
         run: |

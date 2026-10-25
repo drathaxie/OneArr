@@ -1,15 +1,18 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using OneArr.Domain;
 using OneArr.Infrastructure.Library;
+using OneArr.Infrastructure.Persistence;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace OneArr.Tests;
 
 /// <summary>
-/// Reconciliation on a synthetic library with real folders and files on disk. It runs only when ONEARR_BENCH=1, so the normal suite is unaffected.
-/// Size comes from ONEARR_BENCH_MOVIES (default 20000). Results are printed; nothing here is a claimed figure until it has been run.
+/// Reconciliation on a synthetic library with real folders and files, and a real migrated SQLite file (not in memory),
+/// so database cost is included as it is in production. Runs only when ONEARR_BENCH=1.
+/// ONEARR_BENCH_MOVIES sets the size (default 20000). Each phase reports wall time, CPU time and bytes allocated.
 /// </summary>
 [Trait("Category", "Benchmark")]
 public class LibraryBenchmarkTests
@@ -18,6 +21,20 @@ public class LibraryBenchmarkTests
 
     public LibraryBenchmarkTests(ITestOutputHelper output) => _out = output;
 
+    private sealed class Phase
+    {
+        private readonly Stopwatch _wall = Stopwatch.StartNew();
+        private readonly TimeSpan _cpu0 = Process.GetCurrentProcess().TotalProcessorTime;
+        private readonly long _alloc0 = GC.GetTotalAllocatedBytes(precise: false);
+        public string Name { get; }
+        public Phase(string name) => Name = name;
+        public (double WallMs, double CpuMs, double AllocMb) Stop()
+        {
+            var cpu = Process.GetCurrentProcess().TotalProcessorTime - _cpu0;
+            return (_wall.Elapsed.TotalMilliseconds, cpu.TotalMilliseconds, (GC.GetTotalAllocatedBytes(precise: false) - _alloc0) / 1024.0 / 1024.0);
+        }
+    }
+
     [Fact]
     public async Task Benchmark_reconciliation_on_a_synthetic_library()
     {
@@ -25,74 +42,82 @@ public class LibraryBenchmarkTests
 
         var count = int.TryParse(Environment.GetEnvironmentVariable("ONEARR_BENCH_MOVIES"), out var n) ? n : 20_000;
         var root = Path.Combine(Path.GetTempPath(), "onearr-bench-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var (db, keepAlive) = TestDb.Create();
+        var mediaRoot = Path.Combine(root, "media");
+        var dbFile = Path.Combine(root, "config", "onearr.db");
+        Directory.CreateDirectory(mediaRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(dbFile)!);
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<OneArrDbContext>(o => o.UseSqlite($"Data Source={dbFile}"));
+        var db = services.BuildServiceProvider().GetRequiredService<IDbContextFactory<OneArrDbContext>>();
+        var results = new List<string>();
         try
         {
-            var timings = new Dictionary<string, double>();
+            await using (var migrate = await db.CreateDbContextAsync())
+                await migrate.Database.MigrateAsync();
 
-            var generate = Stopwatch.StartNew();
+            var generate = new Phase("generate");
             for (var i = 0; i < count; i++)
             {
                 var year = 1950 + i % 70;
-                var folder = Path.Combine(root, $"Movie {i} ({year})");
+                var folder = Path.Combine(mediaRoot, $"Movie {i} ({year})");
                 Directory.CreateDirectory(folder);
                 File.WriteAllBytes(Path.Combine(folder, $"Movie {i} ({year}) 1080p.mkv"), new byte[1024]);
             }
-            timings["generate files (not measured in the reconciler)"] = generate.Elapsed.TotalMilliseconds;
+            results.Add(Line("generate files (fixture, not reconciler)", generate.Stop()));
 
-            await using (var ctx = db.CreateDbContext())
+            await using (var ctx = await db.CreateDbContextAsync())
             {
                 var profile = new QualityProfile { Name = "HD" };
                 ctx.QualityProfiles.Add(profile);
                 await ctx.SaveChangesAsync();
                 for (var i = 0; i < count; i++)
                 {
-                    var year = 1950 + i % 70;
                     ctx.MediaItems.Add(new MediaItem
                     {
-                        MediaType = MediaType.Movie, Provider = "tmdb", ProviderId = (1000 + i).ToString(), Title = $"Movie {i}", Year = year,
-                        QualityProfileId = profile.Id, RootFolder = root, Monitored = true,
+                        MediaType = MediaType.Movie, Provider = "tmdb", ProviderId = (1000 + i).ToString(), Title = $"Movie {i}", Year = 1950 + i % 70,
+                        QualityProfileId = profile.Id, RootFolder = mediaRoot, Monitored = true,
                     });
                 }
-                ctx.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Movie, Path = root, PathKey = LibraryPaths.Key(root, OperatingSystem.IsWindows()) });
+                ctx.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Movie, Path = mediaRoot, PathKey = LibraryPaths.Key(mediaRoot, OperatingSystem.IsWindows()) });
                 await ctx.SaveChangesAsync();
             }
 
             var fs = new LocalLibraryFileSystem();
             var reconciler = new LibraryReconciler(db, fs, TimeProvider.System);
 
-            var enumerate = Stopwatch.StartNew();
-            var listing = await fs.EnumerateAsync(root, default);
-            timings["enumerate folders and files"] = enumerate.Elapsed.TotalMilliseconds;
+            var enumerate = new Phase("enumerate");
+            var listing = await fs.EnumerateAsync(mediaRoot, default);
+            results.Add(Line("enumerate folders and files", enumerate.Stop()));
             Assert.Equal(count, listing.Files.Count);
 
-            var matchCatalog = Enumerable.Range(0, count)
-                .Select(i => new CatalogMovie(i + 1, $"Movie {i}", 1950 + i % 70, null, null)).ToList();
-            var index = new CatalogIndex(matchCatalog, [], OperatingSystem.IsWindows());
-            var match = Stopwatch.StartNew();
-            var matched = 0;
-            foreach (var file in listing.Files)
-                if (LibraryMatcher.Match(file, MediaType.Movie, index).Outcome == MatchOutcome.Linked) matched++;
-            timings["match files to catalog (indexed)"] = match.Elapsed.TotalMilliseconds;
+            var catalog = Enumerable.Range(0, count).Select(i => new CatalogMovie(i + 1, $"Movie {i}", 1950 + i % 70, null, null)).ToList();
+            var index = new CatalogIndex(catalog, [], OperatingSystem.IsWindows());
+            var match = new Phase("match");
+            var matched = listing.Files.Count(f => LibraryMatcher.Match(f, MediaType.Movie, index).Outcome == MatchOutcome.Linked);
+            results.Add(Line("match files to catalog (indexed)", match.Stop()));
             Assert.Equal(count, matched);
 
-            var preview = Stopwatch.StartNew();
+            var preview = new Phase("preview");
             var plan = await reconciler.PreviewAsync(default);
-            timings["preview: enumerate, match, store plan"] = preview.Elapsed.TotalMilliseconds;
+            results.Add(Line("preview: enumerate, match, probe, store plan", preview.Stop()));
             Assert.Equal(count, plan.Plan.Links.Count);
 
-            var apply = Stopwatch.StartNew();
-            var result = await reconciler.ApplyAsync(plan.PlanId, null, false, default);
-            timings["apply: database writes and re-check"] = apply.Elapsed.TotalMilliseconds;
-            Assert.Equal(count, result.Linked);
+            var apply = new Phase("apply");
+            var applied = await reconciler.ApplyAsync(plan.PlanId, null, false, default);
+            results.Add(Line("apply: re-scan, database writes, recalculation", apply.Stop()));
+            Assert.Equal(count, applied.Linked);
+            // Read the database back. A count from the plan alone would not show whether rows were written.
+            await using (var check = await db.CreateDbContextAsync())
+            {
+                Assert.Equal(count, await check.MediaFiles.CountAsync(f => f.Status == MediaFileStatus.Present));
+                Assert.Equal(count, await check.MediaItems.CountAsync(m => m.HasFile));
+            }
 
-            var rescan = Stopwatch.StartNew();
-            var second = await reconciler.PreviewAsync(default);
-            timings["second preview (no changes)"] = rescan.Elapsed.TotalMilliseconds;
-            Assert.Equal(count, second.Plan.AlreadyLinked);
+            var second = new Phase("second");
+            var again = await reconciler.PreviewAsync(default);
+            results.Add(Line("second preview (no changes)", second.Stop()));
+            Assert.Equal(count, again.Plan.AlreadyLinked);
 
-            // Cancellation responsiveness: cancel a preview while it runs, and measure how long the cancel takes to take effect.
             using var cts = new CancellationTokenSource();
             var cancelled = Stopwatch.StartNew();
             var cancelling = reconciler.PreviewAsync(cts.Token);
@@ -100,23 +125,21 @@ public class LibraryBenchmarkTests
             var observed = 0.0;
             try { await cancelling; }
             catch (OperationCanceledException) { observed = cancelled.Elapsed.TotalMilliseconds; }
-            timings["cancel a running preview: time until it stops"] = observed;
+            results.Add($"cancel a running preview 50 ms in: stopped after {observed:N0} ms");
 
-            var peakMb = Process.GetCurrentProcess().PeakWorkingSet64 / 1024.0 / 1024.0;
-            _out.WriteLine($"Synthetic library: {count:N0} movies, {listing.Files.Count:N0} media files, real disk, database: in-memory SQLite (TestDb).");
-            foreach (var (label, ms) in timings) _out.WriteLine($"{label}: {ms:N0} ms");
-            _out.WriteLine($"Peak working set of the test process: {peakMb:N0} MB");
+            var platform = OperatingSystem.IsWindows() ? "Windows" : "non-Windows";
+            _out.WriteLine($"Synthetic library: {count:N0} movies, {listing.Files.Count:N0} media files, real folders, SQLite file database ({platform}).");
+            foreach (var line in results) _out.WriteLine(line);
+            _out.WriteLine($"Peak working set of the test process: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024.0 / 1024.0:N0} MB");
+            _out.WriteLine($"Logical processors: {Environment.ProcessorCount}");
         }
         finally
         {
-            keepAlive.Dispose();
-            SqliteCleanup(root);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 
-    private static void SqliteCleanup(string root)
-    {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
-    }
+    private static string Line(string label, (double WallMs, double CpuMs, double AllocMb) m) =>
+        $"{label}: wall {m.WallMs:N0} ms, CPU {m.CpuMs:N0} ms, allocated {m.AllocMb:N0} MB";
 }

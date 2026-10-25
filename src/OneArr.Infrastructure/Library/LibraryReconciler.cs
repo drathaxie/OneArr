@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using OneArr.Domain;
 using OneArr.Infrastructure.Persistence;
 
@@ -37,7 +38,9 @@ public sealed record ScanPlan(
     IReadOnlyList<int> EvaluatedItemIds,
     IReadOnlyList<string> RootKeys,
     string MappingsHash,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    int AmbiguousCount,
+    int UnmatchedCount);
 
 public sealed record ScanPlanResponse(int PlanId, ScanPlan Plan);
 
@@ -49,6 +52,9 @@ public sealed record ApplyResult(int Linked, int Relinked, int MarkedMissing, in
 
 public sealed record AutomationGate(bool Allowed, string Reason);
 
+/// <summary>An existing file row as a scan needs it. Read without change tracking or navigation graphs.</summary>
+internal sealed record KnownFile(int Id, string Path, string PathKey, long SizeBytes, int? MediaItemId, MediaFileStatus Status, List<int> EpisodeIds);
+
 /// <summary>
 /// Connects files on disk to catalog items. Preview is read-only for media: it evaluates the disk and the catalog, and stores the reviewed result.
 /// Apply runs a fresh evaluation and writes only entries that still match what was reviewed. It never moves, renames, copies, links or deletes files.
@@ -57,19 +63,23 @@ public sealed record AutomationGate(bool Allowed, string Reason);
 public sealed class LibraryReconciler
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private const int KeptPlans = 20;
+    private const int KeptPlans = 3;
     private const int Batch = 500;
+    /// <summary>Review lists are capped so a large library cannot produce a huge plan. The counts stay exact.</summary>
+    public const int DefaultReviewListLimit = 1000;
 
     private readonly IDbContextFactory<OneArrDbContext> _db;
     private readonly ILibraryFileSystem _fs;
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly int _reviewListLimit;
 
-    public LibraryReconciler(IDbContextFactory<OneArrDbContext> db, ILibraryFileSystem fs, TimeProvider time)
+    public LibraryReconciler(IDbContextFactory<OneArrDbContext> db, ILibraryFileSystem fs, TimeProvider time, int reviewListLimit = DefaultReviewListLimit)
     {
         _db = db;
         _fs = fs;
         _time = time;
+        _reviewListLimit = reviewListLimit;
     }
 
     public async Task<ScanPlanResponse> PreviewAsync(CancellationToken ct)
@@ -77,11 +87,12 @@ public sealed class LibraryReconciler
         await _lock.WaitAsync(ct);
         try
         {
-            var plan = await EvaluateAsync(ct);
+            // The item-id list is needed only by apply, which evaluates again. Keep it out of the stored plan and the response.
+            var plan = (await EvaluateAsync(ct)) with { EvaluatedItemIds = [] };
             await using var db = await _db.CreateDbContextAsync(ct);
             var row = new LibraryScanPlan { CreatedUtc = plan.CreatedUtc, PlanJson = JsonSerializer.Serialize(plan, Json) };
             db.LibraryScanPlans.Add(row);
-            await db.SaveChangesAsync(ct);
+            await SaveAsync(db, ct);
             await db.LibraryScanPlans.Where(p => p.Id <= row.Id - KeptPlans).ExecuteDeleteAsync(ct);
             return new ScanPlanResponse(row.Id, plan);
         }
@@ -97,6 +108,9 @@ public sealed class LibraryReconciler
         try
         {
             await using var db = await _db.CreateDbContextAsync(ct);
+            // Adding thousands of entities with change detection on re-scans everything tracked on each Add, which is quadratic.
+            // SaveChanges still detects changes itself, so the writes are unchanged.
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
             var stored = await db.LibraryScanPlans.FirstOrDefaultAsync(p => p.Id == planId, ct)
                 ?? throw new KeyNotFoundException("Scan preview not found. Run a new preview.");
             if (stored.AppliedUtc is not null) throw new InvalidOperationException("This preview was already applied. Run a new preview.");
@@ -155,48 +169,59 @@ public sealed class LibraryReconciler
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
             var relinked = 0;
-            foreach (var link in toLink)
+            // Written in batches. Each batch is saved and its new entities are detached, so tracked memory stays bounded by the batch.
+            foreach (var chunk in toLink.Chunk(Batch))
             {
-                MediaFile row;
-                if (link.MediaFileId is int existingId)
+                var batchEntities = new List<object>();
+                foreach (var link in chunk)
                 {
-                    row = rows[existingId];
-                    if (row.MediaItemId is int oldItem && oldItem != link.MediaItemId)
+                    MediaFile row;
+                    if (link.MediaFileId is int existingId)
                     {
-                        affectedItems.Add(oldItem);
-                        formerlyLinkedItems.Add(oldItem);
+                        row = rows[existingId];
+                        if (row.MediaItemId is int oldItem && oldItem != link.MediaItemId)
+                        {
+                            affectedItems.Add(oldItem);
+                            formerlyLinkedItems.Add(oldItem);
+                        }
+                        affectedEpisodes.UnionWith(row.EpisodeLinks.Select(l => l.EpisodeId));
+                        // Only the difference changes. Removing and re-adding the same (file, episode) key in one save is not safe.
+                        var wanted = link.EpisodeIds.ToHashSet();
+                        var kept = row.EpisodeLinks.Select(l => l.EpisodeId).Where(wanted.Contains).ToHashSet();
+                        var dropped = row.EpisodeLinks.Where(l => !wanted.Contains(l.EpisodeId)).ToList();
+                        formerlyLinkedEpisodes.UnionWith(dropped.Select(l => l.EpisodeId));
+                        db.MediaFileEpisodes.RemoveRange(dropped);
+                        foreach (var episodeId in wanted.Where(e => !kept.Contains(e)))
+                            row.EpisodeLinks.Add(new MediaFileEpisode { EpisodeId = episodeId });
+                        affectedEpisodes.UnionWith(wanted);
+                        relinked++;
                     }
-                    affectedEpisodes.UnionWith(row.EpisodeLinks.Select(l => l.EpisodeId));
-                    // Only the difference changes. Removing and re-adding the same (file, episode) key in one save is not safe.
-                    var wanted = link.EpisodeIds.ToHashSet();
-                    var kept = row.EpisodeLinks.Select(l => l.EpisodeId).Where(wanted.Contains).ToHashSet();
-                    var dropped = row.EpisodeLinks.Where(l => !wanted.Contains(l.EpisodeId)).ToList();
-                    formerlyLinkedEpisodes.UnionWith(dropped.Select(l => l.EpisodeId));
-                    db.MediaFileEpisodes.RemoveRange(dropped);
-                    foreach (var episodeId in wanted.Where(e => !kept.Contains(e)))
-                        row.EpisodeLinks.Add(new MediaFileEpisode { EpisodeId = episodeId });
-                    affectedEpisodes.UnionWith(wanted);
-                    relinked++;
-                }
-                else
-                {
-                    row = new MediaFile { Path = link.Path, PathKey = link.Key, FirstSeenUtc = now };
-                    db.MediaFiles.Add(row);
-                    foreach (var episodeId in link.EpisodeIds)
+                    else
                     {
-                        row.EpisodeLinks.Add(new MediaFileEpisode { EpisodeId = episodeId });
-                        affectedEpisodes.Add(episodeId);
+                        row = new MediaFile { Path = link.Path, PathKey = link.Key, FirstSeenUtc = now };
+                        db.MediaFiles.Add(row);
+                        batchEntities.Add(row);
+                        foreach (var episodeId in link.EpisodeIds)
+                        {
+                            var join = new MediaFileEpisode { EpisodeId = episodeId };
+                            row.EpisodeLinks.Add(join);
+                            batchEntities.Add(join);
+                            affectedEpisodes.Add(episodeId);
+                        }
                     }
+
+                    row.SizeBytes = link.SizeBytes;
+                    row.Status = MediaFileStatus.Present;
+                    row.MediaItemId = link.MediaItemId;
+                    row.LibraryRootId = RootIdFor(link.Key, enabledRoots, _fs.Windows);
+                    row.MatchMethod = link.Method;
+                    row.Resolution = link.Resolution;
+                    row.LastVerifiedUtc = now;
+                    affectedItems.Add(link.MediaItemId);
                 }
 
-                row.SizeBytes = link.SizeBytes;
-                row.Status = MediaFileStatus.Present;
-                row.MediaItemId = link.MediaItemId;
-                row.LibraryRootId = RootIdFor(link.Key, enabledRoots, _fs.Windows);
-                row.MatchMethod = link.Method;
-                row.Resolution = link.Resolution;
-                row.LastVerifiedUtc = now;
-                affectedItems.Add(link.MediaItemId);
+                await SaveAsync(db, ct);
+                foreach (var entity in batchEntities) db.Entry(entity).State = EntityState.Detached;
             }
 
             foreach (var missing in toMiss)
@@ -242,7 +267,9 @@ public sealed class LibraryReconciler
                 if (root.LastScanComplete) root.LastSuccessfulScanUtc = now;
             }
 
-            await db.SaveChangesAsync(ct);
+            await SaveAsync(db, ct);
+            // The bulk writes are saved. Drop them from tracking so later change scans cover only what recalculation touches.
+            db.ChangeTracker.Clear();
             await RecalculateAsync(db, affectedItems, affectedEpisodes, formerlyLinkedItems, formerlyLinkedEpisodes, ct);
 
             // Items are reviewed only when every enabled folder was read completely. Zero folders never counts as reviewed.
@@ -258,14 +285,14 @@ public sealed class LibraryReconciler
 
             await SaveReviewStateAsync(db, new ReviewState(
                 fresh.Complete ? now : null,
-                fresh.Ambiguous.Count,
-                fresh.Unmatched.Count,
-                acknowledgeUnmatched && fresh.Unmatched.Count > 0,
+                fresh.AmbiguousCount,
+                fresh.UnmatchedCount,
+                acknowledgeUnmatched && fresh.UnmatchedCount > 0,
                 fresh.MappingsHash,
                 fresh.RootKeys), ct);
 
-            stored.AppliedUtc = now;
-            await db.SaveChangesAsync(ct);
+            await db.LibraryScanPlans.Where(p => p.Id == planId).ExecuteUpdateAsync(s => s.SetProperty(p => p.AppliedUtc, now), ct);
+            await SaveAsync(db, ct);
             await tx.CommitAsync(ct);
 
             var gate = await CheckAutomationAsync(ct);
@@ -318,10 +345,10 @@ public sealed class LibraryReconciler
             return new AutomationGate(false, "The path mappings changed since the last complete scan. Preview and apply again");
 
         if (state.AmbiguousCount > 0)
-            return new AutomationGate(false, $"{state.AmbiguousCount} files match more than one catalog entry. Resolve them before automatic grabbing starts");
+            return new AutomationGate(false, $"{state.AmbiguousCount} file(s) match more than one catalog entry. Resolve them before automatic grabbing starts");
 
         if (state.UnmatchedCount > 0 && !state.UnmatchedAcknowledged)
-            return new AutomationGate(false, $"{state.UnmatchedCount} existing files are not matched to a catalog entry. Review them and apply with acknowledgement");
+            return new AutomationGate(false, $"{state.UnmatchedCount} existing file(s) are not matched to a catalog entry. Review them and apply with acknowledgement");
 
         foreach (var root in roots)
         {
@@ -343,7 +370,12 @@ public sealed class LibraryReconciler
         var mappings = await db.PathMappings.AsNoTracking().ToListAsync(ct);
         var movieRows = await db.MediaItems.AsNoTracking().Where(m => m.MediaType == MediaType.Movie).ToListAsync(ct);
         var seriesRows = await db.MediaItems.AsNoTracking().Where(m => m.MediaType == MediaType.Series).Include(m => m.Episodes).ToListAsync(ct);
-        var known = await db.MediaFiles.AsNoTracking().Include(f => f.EpisodeLinks).ToListAsync(ct);
+        // Read as flat records, not entities with their navigation graph, so a large library stays small and cancellation is quicker.
+        var knownRows = await db.MediaFiles.AsNoTracking()
+            .Select(f => new { f.Id, f.Path, f.PathKey, f.SizeBytes, f.MediaItemId, f.Status }).ToListAsync(ct);
+        var linkRows = await db.MediaFileEpisodes.AsNoTracking().Select(l => new { l.MediaFileId, l.EpisodeId }).ToListAsync(ct);
+        var episodesByFile = linkRows.GroupBy(l => l.MediaFileId).ToDictionary(g => g.Key, g => g.Select(l => l.EpisodeId).ToList());
+        var known = knownRows.Select(f => new KnownFile(f.Id, f.Path, f.PathKey, f.SizeBytes, f.MediaItemId, f.Status, episodesByFile.GetValueOrDefault(f.Id) ?? [])).ToList();
 
         var unmapped = 0;
         string? LegacyKey(string? legacy)
@@ -354,11 +386,14 @@ public sealed class LibraryReconciler
             return LibraryPaths.Key(mapped, windows);
         }
 
+        // Long synchronous stretches below do not await, so check for cancellation before and after them.
+        ct.ThrowIfCancellationRequested();
         var movies = movieRows.Select(m => new CatalogMovie(m.Id, m.Title, m.Year, m.Provider == "tmdb" ? m.ProviderId : null, LegacyKey(m.LegacyPath))).ToList();
         var series = seriesRows.Select(s => new CatalogSeries(
             s.Id, s.Title, s.Year, s.Provider == "tmdb" ? s.ProviderId : null, LegacyKey(s.LegacyPath),
             s.Episodes.Select(e => new CatalogEpisode(e.Id, e.SeasonNumber, e.EpisodeNumber)).ToList())).ToList();
         var index = new CatalogIndex(movies, series, windows);
+        ct.ThrowIfCancellationRequested();
         var typeById = movieRows.ToDictionary(m => m.Id, _ => MediaType.Movie);
         foreach (var s in seriesRows) typeById[s.Id] = MediaType.Series;
 
@@ -366,7 +401,7 @@ public sealed class LibraryReconciler
             warnings.Add($"{unmapped} catalog entr{(unmapped == 1 ? "y has a Sonarr/Radarr path" : "ies have Sonarr/Radarr paths")} with no path mapping. They are matched by title and year only until you add a mapping.");
 
         var reports = new List<RootReport>();
-        var accessible = new List<(string Key, List<string> Unreadable)>();
+        var accessible = new List<(string Path, string Key, List<string> Unreadable)>();
         var discovered = new Dictionary<string, (CandidateFile File, MediaType Type)>();
         var filesUnderUnavailable = 0;
         foreach (var root in roots)
@@ -385,7 +420,7 @@ public sealed class LibraryReconciler
             var scan = await _fs.EnumerateAsync(root.Path, ct);
             reports.Add(new RootReport(root.Id, root.MediaType, root.Path, LibraryRootState.Accessible, null, scan.Files.Count,
                 scan.SkippedReparsePoints, scan.UnreadableFolders.Count, scan.Complete, scan.IncompleteReason));
-            accessible.Add((rootKey, scan.UnreadableFolders.Select(f => LibraryPaths.Key(f, windows)).ToList()));
+            accessible.Add((root.Path, rootKey, scan.UnreadableFolders.Select(f => LibraryPaths.Key(f, windows)).ToList()));
             if (!scan.Complete)
                 warnings.Add($"'{root.Path}' was only partly read: {scan.IncompleteReason}. Files in the unread part keep their last known status and automatic grabbing waits for a complete scan.");
             if (scan.SkippedReparsePoints > 0)
@@ -394,11 +429,14 @@ public sealed class LibraryReconciler
                 discovered.TryAdd(LibraryPaths.Key(file.FullPath, windows), (file, root.MediaType));
         }
 
+        ct.ThrowIfCancellationRequested();
         var knownByKey = known.ToDictionary(f => f.PathKey);
         var links = new List<PlannedLink>();
         var ambiguous = new List<ReviewItem>();
         var unmatched = new List<ReviewItem>();
         var alreadyLinked = 0;
+        var ambiguousCount = 0;
+        var unmatchedCount = 0;
         foreach (var (key, (file, type)) in discovered)
         {
             ct.ThrowIfCancellationRequested();
@@ -413,7 +451,7 @@ public sealed class LibraryReconciler
                         links.Add(new PlannedLink(file.FullPath, key, file.SizeBytes, type, match.MediaItemId!.Value, episodeIds, match.Method!, match.Resolution, null));
                     }
                     else if (existing.MediaItemId == match.MediaItemId && existing.Status == MediaFileStatus.Present
-                             && existing.SizeBytes == file.SizeBytes && existing.EpisodeLinks.Select(l => l.EpisodeId).OrderBy(x => x).SequenceEqual(episodeIds.OrderBy(x => x)))
+                             && existing.SizeBytes == file.SizeBytes && existing.EpisodeIds.OrderBy(x => x).SequenceEqual(episodeIds.OrderBy(x => x)))
                     {
                         alreadyLinked++;
                     }
@@ -423,10 +461,12 @@ public sealed class LibraryReconciler
                     }
                     break;
                 case MatchOutcome.Ambiguous:
-                    ambiguous.Add(new ReviewItem(file.FullPath, type, match.Reason, match.CandidateIds!.ToList()));
+                    ambiguousCount++;
+                    if (ambiguous.Count < _reviewListLimit) ambiguous.Add(new ReviewItem(file.FullPath, type, match.Reason, match.CandidateIds!.ToList()));
                     break;
                 default:
-                    unmatched.Add(new ReviewItem(file.FullPath, type, match.Reason, []));
+                    unmatchedCount++;
+                    if (unmatched.Count < _reviewListLimit) unmatched.Add(new ReviewItem(file.FullPath, type, match.Reason, []));
                     break;
             }
         }
@@ -466,13 +506,31 @@ public sealed class LibraryReconciler
             }
         }
 
+        foreach (var scope in accessible)
+        {
+            ct.ThrowIfCancellationRequested();
+            var recheck = await _fs.CheckRootAsync(scope.Path, ct);
+            if (recheck.State == LibraryRootState.Accessible) continue;
+
+            // The folder went offline during the scan. Files already seen there stay linked, but nothing is judged missing or unknown under it.
+            var root = roots.First(r => LibraryPaths.Key(r.Path, windows) == scope.Key);
+            var reportIndex = reports.FindIndex(r => r.Id == root.Id);
+            reports[reportIndex] = reports[reportIndex] with { State = recheck.State, Message = recheck.Message, Complete = false, IncompleteReason = "went offline during the scan" };
+            missing.RemoveAll(m => LibraryPaths.IsWithin(m.Key, scope.Key, windows));
+            unknown.RemoveAll(u => LibraryPaths.IsWithin(u.Key, scope.Key, windows));
+            filesUnderUnavailable += known.Count(f => LibraryPaths.IsWithin(f.PathKey, scope.Key, windows));
+            warnings.Add($"'{root.Path}' went offline during the scan ({recheck.Message}). Nothing under it was treated as missing.");
+        }
+
         var itemIds = movieRows.Select(m => m.Id).Concat(seriesRows.Select(s => s.Id)).ToList();
         return new ScanPlan(now, reports, links, missing, unknown, ambiguous, unmatched, alreadyLinked, filesUnderUnavailable,
             Complete: roots.Count > 0 && reports.All(r => r.State == LibraryRootState.Accessible && r.Complete),
             EvaluatedItemIds: itemIds,
             RootKeys: roots.Select(r => LibraryPaths.Key(r.Path, windows)).ToList(),
             MappingsHash: MappingsHash(mappings),
-            Warnings: warnings);
+            Warnings: warnings,
+            AmbiguousCount: ambiguousCount,
+            UnmatchedCount: unmatchedCount);
     }
 
     private static async Task<Dictionary<int, MediaFile>> LoadRowsAsync(OneArrDbContext db, IEnumerable<int> ids, CancellationToken ct)
@@ -510,7 +568,8 @@ public sealed class LibraryReconciler
                 itemIds.Add(ep.MediaItemId);
             }
             // Save first so the series check below reads the new episode flags.
-            await db.SaveChangesAsync(ct);
+            await SaveAsync(db, ct);
+            db.ChangeTracker.Clear();
         }
 
         if (itemIds.Count == 0) return;
@@ -536,8 +595,20 @@ public sealed class LibraryReconciler
 
             foreach (var series in items.Where(m => m.MediaType == MediaType.Series))
                 series.HasFile = await db.Episodes.AnyAsync(e => e.MediaItemId == series.Id && e.HasFile, ct);
-            await db.SaveChangesAsync(ct);
+            await SaveAsync(db, ct);
+            // This batch is saved. Stop tracking it, or every later save would re-scan all earlier batches.
+            db.ChangeTracker.Clear();
         }
+    }
+
+    /// <summary>
+    /// Saves after an explicit change scan. Automatic detection is switched off during apply for speed, and SaveChanges
+    /// does not scan on its own when it is off, so the scan has to be requested here.
+    /// </summary>
+    private static Task<int> SaveAsync(OneArrDbContext db, CancellationToken ct)
+    {
+        db.ChangeTracker.DetectChanges();
+        return db.SaveChangesAsync(ct);
     }
 
     private static bool HasUndecidedStatus(IEnumerable<MediaFileStatus> statuses) =>
