@@ -19,6 +19,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+# Absolute path: the browser step runs Node from another folder.
+$OutDir = (Resolve-Path -Path $OutDir).Path
 $results = New-Object System.Collections.Generic.List[object]
 $measure = [ordered]@{ version = $ReleaseVersion }
 # Candidate updates are the next two patch versions, so the test works for any installed version.
