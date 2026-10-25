@@ -9,7 +9,9 @@ Everything marked VERIFIED was executed in this environment. Everything else is 
 | .NET SDK 10.0.402 installed user-locally | `dotnet --info` | OK |
 | Restore | `dotnet restore OneArr.slnx` | OK |
 | Backend build | `dotnet build src/OneArr.Api` | 0 errors |
-| Unit and integration tests | `dotnet test tests/OneArr.Tests` | 53 passed, 0 failed |
+| Backend unit and integration tests | `dotnet test OneArr.slnx -c Release` | 59 passed, 0 failed (includes 6 settings API tests) |
+| Frontend Settings tests | `npm test` (in `web/`) | 8 passed, 0 failed (General, quality profile and indexer forms) |
+| Frontend dependency audit | `npm audit` | 0 vulnerabilities (Vite 6.4.4, Vitest 4.1.12) |
 | Frontend typecheck and production build | `npx tsc --noEmit && npx vite build` (in `web/`) | OK, output to `src/OneArr.Api/wwwroot` |
 | EF Core initial migration | `dotnet-ef migrations add InitialCreate` | created `20261025023026_InitialCreate` |
 | End-to-end smoke against fake services | `bash tools/smoke/smoke.sh` | 27 of 27 checks passed |
@@ -26,7 +28,8 @@ Smoke coverage: health; auth required; first-run setup; second setup refused; wr
 - **Automatic grabbing and wanted-search automation: NOT IMPLEMENTED.** Manual only. The background scheduler runs queue sync and import only.
 - **Prowlarr bridge, Cardigann, Usenet, music, books, subtitles, requests: NOT IMPLEMENTED** (out of scope for this run).
 - **Fail-closed root-folder check** (item root outside the media root) is implemented in `DownloadService` but has no dedicated automated test; it is covered by code review only.
-- **Frontend unit tests: none.** The frontend is verified by typecheck, build and one headless load.
+- **Frontend tests cover the Settings screen only.** Other pages are verified by typecheck, build and one headless load.
+- **Test tooling dependency note:** Vitest 4.1.12 is installed with `--legacy-peer-deps` because npm 10 crashed resolving its optional peers. The lockfile is committed and `npm ci` works from it. Vitest 4.1.12 was published 2026-10-15, so it is recent; it is used because older versions carry audit advisories.
 - **Sonarr/Radarr response shapes** were written from public API knowledge and tested against fixtures, not against pinned upstream versions.
 - **Season selection** in the add form: all seasons are monitored; per-season selection is accepted by the API but not exposed in the UI.
 - **Import of multi-file season packs** is untested beyond the single-file path.

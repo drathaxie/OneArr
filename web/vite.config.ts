@@ -1,9 +1,14 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Production output is served by ASP.NET Core from wwwroot. Dev server proxies API calls to the backend.
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
   build: {
     outDir: "../src/OneArr.Api/wwwroot",
     emptyOutDir: true,

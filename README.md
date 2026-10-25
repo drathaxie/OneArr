@@ -76,7 +76,10 @@ The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtim
 ## Tests and smoke
 
 ```powershell
-dotnet test OneArr.slnx                 # 53 unit/integration tests, no network
+dotnet test OneArr.slnx -c Release      # 59 backend tests (parsing, importer, providers, settings API), no network
+cd web
+npm test                                # 8 frontend tests (Settings screen forms), no network
+cd ..
 ```
 
 `tools/smoke/smoke.sh` is a **bash** script. On Windows run it from Git Bash or WSL, and it also needs `jq` and `python3` on that shell's PATH. It starts the API and local fake TMDb/Torznab/qBittorrent/Radarr services and runs 27 checks. Use it with fixture credentials only; it never contacts real trackers, TMDb or qBittorrent.

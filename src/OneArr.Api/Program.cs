@@ -110,3 +110,6 @@ static async Task WriteError(HttpContext ctx, int status, string message)
     ctx.Response.StatusCode = status;
     await ctx.Response.WriteAsJsonAsync(new { error = message });
 }
+
+// Exposes the entry point to WebApplicationFactory in tests.
+public partial class Program { }
