@@ -26,7 +26,9 @@ public sealed class SafeImporter : IImporter
         try
         {
             source = CanonicalUnder(request.TorrentRoot, request.SourcePath);
+            RequireNoLinksBelow(request.TorrentRoot, source);
             dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath, Path.GetFileName(source));
+            RequireNoLinksBelow(request.DestinationRoot, dest);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -88,6 +90,35 @@ public sealed class SafeImporter : IImporter
         if (!full.StartsWith(rootFull, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Path is outside the allowed root");
         return full;
+    }
+
+    /// <summary>
+    /// Fails closed if any component between root (exclusive) and path (inclusive) is a symbolic link, including dangling ones.
+    /// Only true symlinks/junction targets count. Generic reparse points (such as OneDrive placeholders) are allowed.
+    /// The root itself is not checked; configure roots deliberately.
+    /// </summary>
+    public static void RequireNoLinksBelow(string root, string path)
+    {
+        var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+        var full = Path.GetFullPath(path);
+        var relative = Path.GetRelativePath(rootFull, full);
+        if (relative == "." || relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            throw new UnauthorizedAccessException("Path is outside the allowed root");
+
+        var current = rootFull;
+        foreach (var segment in relative.Split(Path.DirectorySeparatorChar))
+        {
+            current = Path.Combine(current, segment);
+            if (IsLinkEntry(current)) throw new UnauthorizedAccessException("Path passes through a symbolic link");
+            if (!File.Exists(current) && !Directory.Exists(current)) return; // nothing deeper exists yet
+        }
+    }
+
+    private static bool IsLinkEntry(string path)
+    {
+        // LinkTarget is read from the entry itself, so it also works for dangling links and does not follow them.
+        if (new FileInfo(path).LinkTarget is not null) return true;
+        return Directory.Exists(path) && new DirectoryInfo(path).LinkTarget is not null;
     }
 
     /// <summary>Builds the destination path from a relative folder name and a file name, rejecting traversal and absolute paths.</summary>
