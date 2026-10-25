@@ -12,7 +12,6 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY OneArr.slnx ./
 COPY src ./src
-COPY tests ./tests
 COPY --from=web /repo/src/OneArr.Api/wwwroot ./src/OneArr.Api/wwwroot
 RUN dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -o /out --no-self-contained
 
