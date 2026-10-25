@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type EpisodeRow, type Job, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
-import { LibraryPanel } from "./library";
+import { LibraryPanel, RootFolderTool } from "./library";
 
 function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -88,6 +88,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     <>
       <h2>{label}</h2>
       <AddMedia kind={kind} profiles={profiles ?? []} onAdded={reload} />
+      <RootFolderTool kind={kind} onChanged={reload} />
       <ErrorLine message={error ?? message} />
       <div className="card table-wrap">
         {items && items.length === 0 && <p className="muted">Nothing here yet. Search TMDb above to add a {kind === "movie" ? "movie" : "series"}.</p>}

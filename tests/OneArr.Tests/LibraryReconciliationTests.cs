@@ -276,11 +276,16 @@ public class LibraryPathRulesTests
     }
 }
 
-/// <summary>An in-memory disk. Tests change it to simulate files appearing, vanishing, resizing, or a share going offline.</summary>
+/// <summary>
+/// An in-memory disk. Tests change it to simulate files appearing, vanishing, resizing, a share going offline,
+/// a folder that cannot be read, or an I/O error on a single file.
+/// </summary>
 internal sealed class FakeLibraryFs : ILibraryFileSystem
 {
     private readonly Dictionary<string, List<CandidateFile>> _files = new();
     private readonly HashSet<string> _existing = new();
+    private readonly HashSet<string> _unreadable = new();
+    private readonly HashSet<string> _undecidable = new();
     public Dictionary<string, LibraryRootState> RootStates { get; } = new();
     public bool Windows { get; set; }
 
@@ -289,10 +294,20 @@ internal sealed class FakeLibraryFs : ILibraryFileSystem
             ? new RootCheck(LibraryRootState.Accessible, null)
             : new RootCheck(LibraryRootState.Unavailable, "offline"));
 
-    public Task<LibraryEnumeration> EnumerateAsync(string root, CancellationToken ct) =>
-        Task.FromResult(new LibraryEnumeration(_files.TryGetValue(root, out var list) ? [.. list] : [], 0, 0));
+    public Task<LibraryEnumeration> EnumerateAsync(string root, CancellationToken ct)
+    {
+        var files = _files.TryGetValue(root, out var list) ? list.Where(f => !_unreadable.Any(u => f.FullPath.StartsWith(u + "/", StringComparison.Ordinal))).ToList() : [];
+        var unreadable = _unreadable.Where(u => u.StartsWith(root + "/", StringComparison.Ordinal) || u == root).ToList();
+        return Task.FromResult(new LibraryEnumeration(files, 0, unreadable, Complete: unreadable.Count == 0,
+            IncompleteReason: unreadable.Count == 0 ? null : $"{unreadable.Count} folder(s) could not be read"));
+    }
 
-    public Task<bool> FileExistsAsync(string path, CancellationToken ct) => Task.FromResult(_existing.Contains(path));
+    public Task<FileProbe> ProbeFileAsync(string path, CancellationToken ct)
+    {
+        if (_undecidable.Contains(path)) return Task.FromResult(new FileProbe(FileProbeState.Unknown, "I/O error"));
+        if (_unreadable.Any(u => path.StartsWith(u + "/", StringComparison.Ordinal))) return Task.FromResult(new FileProbe(FileProbeState.Unknown, "Access denied"));
+        return Task.FromResult(new FileProbe(_existing.Contains(path) ? FileProbeState.Exists : FileProbeState.Missing));
+    }
 
     public void Put(string root, string relative, long size = 1000)
     {
@@ -303,7 +318,7 @@ internal sealed class FakeLibraryFs : ILibraryFileSystem
         _existing.Add(full);
     }
 
-    /// <summary>Deletes the file. Also removes it from the enumeration.</summary>
+    /// <summary>Deletes the file. It is gone from the listing and from the disk.</summary>
     public void Delete(string root, string relative)
     {
         var full = root + "/" + relative;
@@ -317,6 +332,11 @@ internal sealed class FakeLibraryFs : ILibraryFileSystem
         var full = root + "/" + relative;
         _files.GetValueOrDefault(root)?.RemoveAll(f => f.FullPath == full);
     }
+
+    /// <summary>Makes a folder unreadable. Its files are not listed, and probes inside it are undecidable.</summary>
+    public void MakeUnreadable(string root, string relativeFolder) => _unreadable.Add(root + "/" + relativeFolder);
+
+    public void MakeUndecidable(string root, string relative) => _undecidable.Add(root + "/" + relative);
 }
 
 public class LibraryReconciliationTests
@@ -347,7 +367,7 @@ public class LibraryReconciliationTests
     private static async Task<ApplyResult> PreviewAndApplyAsync(LibraryReconciler reconciler, IReadOnlyList<string>? exclude = null)
     {
         var preview = await reconciler.PreviewAsync(default);
-        return await reconciler.ApplyAsync(preview.PlanId, exclude, default);
+        return await reconciler.ApplyAsync(preview.PlanId, exclude, false, default);
     }
 
     [Fact]
@@ -400,7 +420,7 @@ public class LibraryReconciliationTests
         var second = await reconciler.PreviewAsync(default);
         Assert.Empty(second.Plan.Links);
         Assert.Equal(1, second.Plan.AlreadyLinked);
-        var applied = await reconciler.ApplyAsync(second.PlanId, null, default);
+        var applied = await reconciler.ApplyAsync(second.PlanId, null, false, default);
 
         Assert.Equal(0, applied.Linked + applied.Relinked);
         await using var db = world.Db.CreateDbContext();
@@ -479,7 +499,7 @@ public class LibraryReconciliationTests
         Assert.Equal(LibraryRootState.Unavailable, preview.Plan.Roots.Single().State);
         Assert.Equal(1, preview.Plan.FilesUnderUnavailableRoots);
 
-        await reconciler.ApplyAsync(preview.PlanId, null, default);
+        await reconciler.ApplyAsync(preview.PlanId, null, false, default);
         await using var db = world.Db.CreateDbContext();
         Assert.True((await db.MediaItems.FindAsync(movie))!.HasFile);
         Assert.Equal(MediaFileStatus.Inaccessible, (await db.MediaFiles.SingleAsync()).Status);
@@ -498,7 +518,7 @@ public class LibraryReconciliationTests
         fs.Delete(MovieRoot, "Dune (2021)/Dune (2021).mkv");
         var preview = await reconciler.PreviewAsync(default);
         Assert.Single(preview.Plan.Missing);
-        await reconciler.ApplyAsync(preview.PlanId, null, default);
+        await reconciler.ApplyAsync(preview.PlanId, null, false, default);
 
         await using var db = world.Db.CreateDbContext();
         Assert.Equal(MediaFileStatus.Missing, (await db.MediaFiles.SingleAsync()).Status);
@@ -555,7 +575,7 @@ public class LibraryReconciliationTests
         var preview = await Reconciler(world, fs).PreviewAsync(default);
         Assert.Single(preview.Plan.Ambiguous);
         Assert.Single(preview.Plan.Unmatched);
-        await Reconciler(world, fs).ApplyAsync(preview.PlanId, null, default);
+        await Reconciler(world, fs).ApplyAsync(preview.PlanId, null, false, default);
 
         await using var db = world.Db.CreateDbContext();
         Assert.Empty(db.MediaFiles);
@@ -573,7 +593,7 @@ public class LibraryReconciliationTests
         var preview = await reconciler.PreviewAsync(default);
 
         fs.Put(MovieRoot, "Dune (2021)/Dune (2021).mkv", 999);
-        var applied = await reconciler.ApplyAsync(preview.PlanId, null, default);
+        var applied = await reconciler.ApplyAsync(preview.PlanId, null, false, default);
 
         Assert.Equal(0, applied.Linked);
         Assert.Single(applied.Skipped);
@@ -604,9 +624,9 @@ public class LibraryReconciliationTests
         fs.Put(MovieRoot, "Dune (2021)/Dune (2021).mkv");
         var reconciler = Reconciler(world, fs);
         var preview = await reconciler.PreviewAsync(default);
-        await reconciler.ApplyAsync(preview.PlanId, null, default);
+        await reconciler.ApplyAsync(preview.PlanId, null, false, default);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => reconciler.ApplyAsync(preview.PlanId, null, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reconciler.ApplyAsync(preview.PlanId, null, false, default));
     }
 
     [Fact]
@@ -644,37 +664,6 @@ public class LibraryReconciliationTests
         var preview = await Reconciler(world, fs).PreviewAsync(default);
 
         Assert.Single(preview.Plan.Links);
-    }
-
-    [Fact]
-    public async Task Automation_waits_for_scan_and_applied_roots_and_pauses_when_a_root_is_offline()
-    {
-        var empty = await WorldAsync();
-        Assert.True((await Reconciler(empty, new FakeLibraryFs()).CheckAutomationAsync(default)).Allowed);
-
-        var legacy = await WorldAsync();
-        await legacy.AddMovieAsync("Dune", 2021);
-        await using (var db = legacy.Db.CreateDbContext())
-        {
-            (await db.MediaItems.SingleAsync()).LegacyPath = "/data/media/movies/Dune (2021)";
-            await db.SaveChangesAsync();
-        }
-        Assert.False((await Reconciler(legacy, new FakeLibraryFs()).CheckAutomationAsync(default)).Allowed);
-
-        var world = await WorldAsync((MediaType.Movie, MovieRoot));
-        var fs = OnlineFs(MovieRoot);
-        var reconciler = Reconciler(world, fs);
-        var unscanned = await reconciler.CheckAutomationAsync(default);
-        Assert.False(unscanned.Allowed);
-        Assert.Contains("Scan", unscanned.Reason, StringComparison.Ordinal);
-
-        await PreviewAndApplyAsync(reconciler);
-        Assert.True((await reconciler.CheckAutomationAsync(default)).Allowed);
-
-        fs.RootStates[MovieRoot] = LibraryRootState.Unavailable;
-        var offline = await reconciler.CheckAutomationAsync(default);
-        Assert.False(offline.Allowed);
-        Assert.Contains("not reachable", offline.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

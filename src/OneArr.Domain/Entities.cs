@@ -25,6 +25,8 @@ public class MediaItem
     /// <summary>Path exactly as the migrated application stored it (may be a Linux container path). Never used as a Windows path directly.</summary>
     public string? LegacyPath { get; set; }
     public string? LegacySource { get; set; }
+    /// <summary>Set when a complete library scan has checked this item. Null for items that existed before reconciliation.</summary>
+    public DateTimeOffset? LibraryReviewedUtc { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<Season> Seasons { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();
@@ -166,7 +168,8 @@ public class SearchAttempt
 
 public enum LibraryRootState { Unknown = 0, Accessible = 1, Unavailable = 2, Invalid = 3 }
 
-public enum MediaFileStatus { Present = 0, Missing = 1, Inaccessible = 2 }
+/// <summary>Present and Missing are verified facts. Inaccessible means the folder is offline. Unknown means the disk could not be read to decide.</summary>
+public enum MediaFileStatus { Present = 0, Missing = 1, Inaccessible = 2, Unknown = 3 }
 
 /// <summary>A folder OneArr scans for existing media. A media type can have several roots.</summary>
 public class LibraryRoot
@@ -181,7 +184,10 @@ public class LibraryRoot
     public LibraryRootState LastState { get; set; } = LibraryRootState.Unknown;
     public string? LastMessage { get; set; }
     public DateTimeOffset? LastCheckedUtc { get; set; }
+    /// <summary>When a complete, non-partial scan of this folder was last applied. Null means never.</summary>
     public DateTimeOffset? LastSuccessfulScanUtc { get; set; }
+    /// <summary>True only when the most recent apply read this folder completely. A partial or failed scan sets it false.</summary>
+    public bool LastScanComplete { get; set; }
 }
 
 /// <summary>Maps a path as Sonarr/Radarr saw it (often a Linux container path) to where the same folder is on this PC.</summary>

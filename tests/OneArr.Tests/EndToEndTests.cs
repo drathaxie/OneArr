@@ -32,6 +32,7 @@ public class EndToEndTests
             Assert.Single(await db.MediaItems.Where(m => m.Monitored && !m.HasFile).ToListAsync());
 
         // 2. Scheduled search queries the indexer (GET only) and submits the acceptable release to qBittorrent.
+        await w.ReconcileLibraryAsync();
         var pass = await w.Search.RunOnceAsync(Ct);
         Assert.Equal(1, pass.Grabbed);
         Assert.Contains(w.Indexer.Queries, q => q.Contains("t=search") && q.Contains("cat=2000"));
@@ -73,6 +74,7 @@ public class EndToEndTests
 
         // 6. The movie is no longer wanted, so nothing is searched or added again, even after the post-grab interval.
         w.Time.Advance(w.Policy.AfterGrabInterval * 3);
+        await w.ReconcileLibraryAsync();
         var after = await w.Search.RunOnceAsync(Ct);
         Assert.Equal(0, after.Considered);
         Assert.Equal(1, w.Qbit.AddCount);
@@ -97,6 +99,7 @@ public class EndToEndTests
         var (_, episodes) = await w.AddSeriesAsync("Test Show", episodes: 3);
 
         // Three episodes are wanted. Only episode 2 has a matching release, so only one grab is expected.
+        await w.ReconcileLibraryAsync();
         var pass = await w.Search.RunOnceAsync(Ct);
         Assert.Equal(3, pass.Searched);
         Assert.Equal(1, pass.Grabbed);
@@ -126,6 +129,7 @@ public class EndToEndTests
         await w.ConfigureAsync();
         w.Indexer.Body = TestWorld.Torznab(("The.Matrix.1999.1080p.BluRay.x264-GRP", MovieHash, 42));
         await w.AddMovieAsync("The Matrix", 1999);
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
         var content = Path.Combine(w.Dirs.Torrents, "onearr-movies", "The.Matrix.1999.1080p.BluRay.x264-GRP.mkv");
         Directory.CreateDirectory(Path.GetDirectoryName(content)!);
@@ -151,6 +155,7 @@ public class EndToEndTests
         var gate = new TaskCompletionSource();
 
         var first = w.Runner.TryRunAsync("wanted-search", async t => { await gate.Task; return "done"; }, Ct);
+        await w.ReconcileLibraryAsync();
         var second = await w.Runner.TryRunAsync("wanted-search", t => w.Search.RunOnceAsync(t).ContinueWith(x => x.Result.ToString(), TaskScheduler.Default), Ct);
         gate.SetResult();
 

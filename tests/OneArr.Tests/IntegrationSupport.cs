@@ -165,6 +165,29 @@ public sealed class TestWorld : IDisposable
         Runner = new JobRunner(Db, Time);
     }
 
+    /// <summary>
+    /// Runs the complete scan and apply an operator would, against the empty test library, so automatic grabbing is allowed.
+    /// Call it after adding catalog items. Items added later are not reviewed yet, as in production.
+    /// </summary>
+    public async Task ReconcileLibraryAsync()
+    {
+        await using (var db = Db.CreateDbContext())
+        {
+            if (!await db.LibraryRoots.AnyAsync())
+            {
+                var movies = Path.Combine(Dirs.Media, "movies");
+                var tv = Path.Combine(Dirs.Media, "tv");
+                Directory.CreateDirectory(movies);
+                Directory.CreateDirectory(tv);
+                db.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Movie, Path = movies, PathKey = LibraryPaths.Key(movies, OperatingSystem.IsWindows()) });
+                db.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Series, Path = tv, PathKey = LibraryPaths.Key(tv, OperatingSystem.IsWindows()) });
+                await db.SaveChangesAsync();
+            }
+        }
+        var preview = await Library.PreviewAsync(default);
+        await Library.ApplyAsync(preview.PlanId, null, false, default);
+    }
+
     /// <summary>Recreates the search service over the same database, as after a process restart.</summary>
     public WantedSearchService RestartSearch() => Search = new WantedSearchService(Db, new ReleaseService(Db, new TorznabClient(new FakeFactory(Http)), new ReleaseRanker(new ReleaseParser()), new QBittorrentClient(new FakeFactory(Http)), Time), Settings, Time, Policy, Library);
 

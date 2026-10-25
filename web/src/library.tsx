@@ -5,15 +5,19 @@ type Root = { id: number; mediaType: string; path: string; label: string | null;
 type Mapping = { id?: number; mediaType: string; sourcePrefix: string; targetPrefix: string };
 type Status = { windows: boolean; automation: { allowed: boolean; reason: string }; roots: Root[]; mappings: Mapping[] };
 type Entry = { path: string; key?: string; method?: string; reason?: string; mediaType?: string; candidateIds?: number[] };
-type RootReport = { id: number; path: string; state: string; message: string | null; filesFound: number; skippedReparsePoints: number; inaccessibleEntries: number };
+type RootReport = { id: number; path: string; state: string; message: string | null; filesFound: number; skippedReparsePoints: number; unreadableFolders: number; complete: boolean; incompleteReason: string | null };
 type Plan = {
   planId: number;
   plan: {
     roots: RootReport[]; links: (Entry & { sizeBytes: number; mediaItemId: number; mediaFileId: number | null })[]; missing: Entry[];
-    ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number; warnings: string[];
+    unknown: (Entry & { reason?: string })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number;
+    complete: boolean; warnings: string[];
   };
 };
-type ApplyResult = { linked: number; relinked: number; markedMissing: number; markedInaccessible: number; skipped: string[] };
+type ApplyResult = {
+  linked: number; relinked: number; markedMissing: number; markedUnknown: number; markedInaccessible: number; reviewedItems: number;
+  complete: boolean; skipped: string[]; automation: { allowed: boolean; reason: string };
+};
 
 const PAGE_LIMIT = 200;
 
@@ -33,6 +37,7 @@ export function LibraryPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ApplyResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [acknowledge, setAcknowledge] = useState(false);
 
   async function refresh() {
     try {
@@ -70,7 +75,8 @@ export function LibraryPanel() {
     const count = selectedCount(plan, unchecked);
     if (!confirm(`Apply ${count} change(s) to OneArr's database? No files will be moved, renamed, copied, linked or deleted.`)) return;
     await run(async () => {
-      const res = await api<ApplyResult>("POST", `/api/library/plans/${plan.planId}/apply`, { excludePaths: [...unchecked] });
+      const res = await api<ApplyResult>("POST", `/api/library/plans/${plan.planId}/apply`, { excludePaths: [...unchecked], acknowledgeUnmatched: acknowledge });
+      setAcknowledge(false);
       setResult(res);
       setPlan(null);
       await refresh();
@@ -130,18 +136,23 @@ export function LibraryPanel() {
         {message && <p className="error">{message}</p>}
         {result && (
           <div>
-            <p className="ok">Applied: {result.linked} linked, {result.relinked} relinked, {result.markedMissing} marked missing, {result.markedInaccessible} marked inaccessible.</p>
+            <p className={result.complete ? "ok" : "error"}>
+              Applied: {result.linked} linked, {result.relinked} relinked, {result.markedMissing} marked missing, {result.markedUnknown} unknown, {result.markedInaccessible} inaccessible.
+              {result.complete ? ` ${result.reviewedItems} catalog entries reviewed.` : " The scan was incomplete, so no catalog entries were reviewed."}
+            </p>
+            <p className={result.automation.allowed ? "ok" : "error"}>Automatic grabbing: {result.automation.reason}</p>
             {result.skipped.length > 0 && <ul>{result.skipped.map((s, i) => <li key={i} className="muted">{s}</li>)}</ul>}
           </div>
         )}
-        {plan && <PlanView plan={plan} unchecked={unchecked} onToggle={toggle} busy={busy} onApply={apply} />}
+        {plan && <PlanView plan={plan} unchecked={unchecked} onToggle={toggle} busy={busy} onApply={apply} acknowledge={acknowledge} onAcknowledge={setAcknowledge} />}
       </div>
     </>
   );
 }
 
-function PlanView({ plan, unchecked, onToggle, busy, onApply }: {
+function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAcknowledge }: {
   plan: Plan; unchecked: Set<string>; onToggle: (path: string) => void; busy: boolean; onApply: () => void;
+  acknowledge: boolean; onAcknowledge: (value: boolean) => void;
 }) {
   const p = plan.plan;
   const selected = selectedCount(plan, unchecked);
@@ -154,6 +165,10 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply }: {
       </p>
       {p.warnings.map((w, i) => <p key={i} className="muted">{w}</p>)}
       {p.roots.map((r) => r.state !== "Accessible" && <p key={r.id} className="error">{r.path}: {r.message}</p>)}
+      {p.roots.map((r) => r.state === "Accessible" && !r.complete && (
+        <p key={r.id} className="error">{r.path} was only partly read ({r.incompleteReason}). Files there are not treated as missing, and automatic grabbing waits for a complete scan.</p>
+      ))}
+      {!p.complete && <p className="error">This scan is incomplete, so applying it will not review catalog entries or allow automatic grabbing.</p>}
 
       {p.links.length > 0 && (
         <>
@@ -164,6 +179,14 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply }: {
               <tr key={l.path}><td><input type="checkbox" aria-label={`Link ${l.path}`} checked={!unchecked.has(l.path)} onChange={() => onToggle(l.path)} /></td><td className="muted">{l.path}</td><td>{l.method}{l.mediaFileId ? " (update)" : ""}</td></tr>
             ))}</tbody>
           </table></div>
+        </>
+      )}
+
+      {p.unknown.length > 0 && (
+        <>
+          <h2>Status unknown (left as it was)</h2>
+          <p className="muted">The disk could not confirm these files either way. They keep their current availability, and their items are not grabbed again until a scan can read them.</p>
+          <ul>{p.unknown.slice(0, PAGE_LIMIT).map((u) => <li key={u.path}><span className="muted">{u.path}</span> — {u.reason}</li>)}</ul>
         </>
       )}
 
@@ -191,7 +214,13 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply }: {
         </>
       )}
 
-      <button className="primary" disabled={busy || selected === 0} onClick={onApply}>Apply {selected} change(s)</button>
+      {p.unmatched.length > 0 && (
+        <label className="inline" style={{ marginBottom: ".5rem" }}>
+          <input type="checkbox" checked={acknowledge} onChange={(e) => onAcknowledge(e.target.checked)} />
+          {" "}I have reviewed the {p.unmatched.length} unmatched file(s). They are not in the catalog. Automatic grabbing stays paused until this is acknowledged.
+        </label>
+      )}
+      <div><button className="primary" disabled={busy || selected === 0} onClick={onApply}>Apply {selected} change(s)</button></div>
     </div>
   );
 }
@@ -230,10 +259,16 @@ function AddRootForm({ windows, disabled, onAdded }: { windows: boolean; disable
   );
 }
 
+type Suggestions = { suggestions: { mediaType: string; sourcePrefix: string; count: number }[]; entriesWithoutLegacyPath: number };
+
 function MappingsForm({ mappings, windows, disabled, onSaved }: { mappings: Mapping[]; windows: boolean; disabled: boolean; onSaved: () => void }) {
   const [rows, setRows] = useState<Mapping[]>(mappings);
   const [err, setErr] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<Suggestions | null>(null);
   useEffect(() => setRows(mappings), [mappings]);
+  useEffect(() => {
+    api<Suggestions>("GET", "/api/library/mapping-suggestions").then(setSuggested).catch(() => setSuggested(null));
+  }, [mappings]);
 
   async function save() {
     setErr(null);
@@ -252,6 +287,26 @@ function MappingsForm({ mappings, windows, disabled, onSaved }: { mappings: Mapp
         Sonarr and Radarr store paths as they see them, often Linux container paths such as /data/media/movies. Map each one to the matching folder on this PC.
         OneArr never uses a stored Linux path directly on Windows.
       </p>
+      {suggested && suggested.suggestions.length > 0 && (
+        <div style={{ marginBottom: ".75rem" }}>
+          <p className="muted">Found in your stored paths. Choose the matching folder on this PC:</p>
+          <ul>
+            {suggested.suggestions.map((g) => (
+              <li key={`${g.mediaType}${g.sourcePrefix}`} className="row spread">
+                <span><code>{g.sourcePrefix}</code> <span className="muted">{g.count} {g.mediaType === "Series" ? "series" : "movies"}</span></span>
+                <button className="small" disabled={rows.some((r) => r.sourcePrefix === g.sourcePrefix)}
+                  onClick={() => setRows([...rows, { mediaType: g.mediaType, sourcePrefix: g.sourcePrefix, targetPrefix: "" }])}>Add mapping</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {suggested && suggested.entriesWithoutLegacyPath > 0 && (
+        <p className="muted">
+          {suggested.entriesWithoutLegacyPath} entries have no stored original path. Run the Radarr or Sonarr migration again to store them.
+          Re-importing keeps your existing edits and does not create duplicates.
+        </p>
+      )}
       {rows.map((r, i) => (
         <div key={i} className="row" style={{ marginBottom: ".5rem" }}>
           <select aria-label="Mapping type" value={r.mediaType === "Series" ? "series" : "movie"} onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, mediaType: e.target.value === "series" ? "Series" : "Movie" } : x))}>
@@ -270,5 +325,46 @@ function MappingsForm({ mappings, windows, disabled, onSaved }: { mappings: Mapp
         {err && <span className="error">{err}</span>}
       </div>
     </div>
+  );
+}
+
+/** Moves catalog entries to another root folder. It changes OneArr's record only; files on disk are not moved. */
+export function RootFolderTool({ kind, onChanged }: { kind: "movie" | "series"; onChanged: () => void }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [folders, setFolders] = useState<{ rootFolder: string; count: number }[]>([]);
+
+  useEffect(() => {
+    api<Suggestions & { rootFolders: { rootFolder: string; count: number }[] }>("GET", "/api/library/mapping-suggestions")
+      .then((res) => setFolders(res.rootFolders))
+      .catch(() => setFolders([]));
+  }, []);
+
+  async function change() {
+    setMessage(null);
+    if (!confirm(`Change the root folder for matching ${kind === "movie" ? "movies" : "series"} to "${to}"? Files on disk are not moved.`)) return;
+    try {
+      const res = await api<{ updated: number }>("POST", "/api/media/root-folder", { mediaType: kind, fromRootFolder: from, toRootFolder: to, ids: null });
+      setMessage(`Updated ${res.updated} entr${res.updated === 1 ? "y" : "ies"}.`);
+      onChanged();
+    } catch (x) {
+      setMessage((x as Error).message);
+    }
+  }
+
+  return (
+    <details className="card">
+      <summary>Change root folder in bulk</summary>
+      <p className="muted">Choose the current root folder, then the new one. Only where future downloads go changes. Existing files are not moved.</p>
+      <div className="row">
+        <input aria-label="Current root folder" list={`roots-${kind}`} value={from} onChange={(e) => setFrom(e.target.value)} placeholder="Current folder, e.g. /data/media/movies" style={{ minWidth: 220 }} />
+        <datalist id={`roots-${kind}`}>{folders.map((f) => <option key={f.rootFolder} value={f.rootFolder}>{f.count}</option>)}</datalist>
+        <span>→</span>
+        <input aria-label="New root folder" value={to} onChange={(e) => setTo(e.target.value)} placeholder="New folder, e.g. D:\\Media\\Movies" style={{ minWidth: 220 }} />
+        <button className="small primary" disabled={!from.trim() || !to.trim()} onClick={change}>Change root folder</button>
+      </div>
+      {message && <p className="muted">{message}</p>}
+    </details>
   );
 }

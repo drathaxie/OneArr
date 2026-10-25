@@ -164,4 +164,98 @@ public class LibraryApiTests
         Assert.True(item.HasFile);
         Assert.Equal(ValidRoot.Replace(@"Movies", "Films"), item.RootFolder);
     }
+
+    private static async Task<int> SeedProfileAsync(ApiFactory factory)
+    {
+        await using var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext();
+        var profile = new QualityProfile { Name = "HD" };
+        db.QualityProfiles.Add(profile);
+        await db.SaveChangesAsync();
+        return profile.Id;
+    }
+
+    private static async Task<int> SeedMovieAsync(ApiFactory factory, string tmdb, string title, string rootFolder, string? legacyPath, bool monitored = true)
+    {
+        await using var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext();
+        var profileId = await db.QualityProfiles.Select(q => q.Id).FirstAsync();
+        var item = new MediaItem
+        {
+            MediaType = MediaType.Movie, Provider = "tmdb", ProviderId = tmdb, Title = title, Year = 2000, Monitored = monitored,
+            QualityProfileId = profileId, RootFolder = rootFolder, LegacyPath = legacyPath,
+        };
+        db.MediaItems.Add(item);
+        await db.SaveChangesAsync();
+        return item.Id;
+    }
+
+    /// <summary>An item imported before legacy paths were kept: it has no LegacyPath, and the user has since edited it.</summary>
+    [Fact]
+    public async Task Re_importing_an_old_catalog_backfills_legacy_paths_without_overwriting_edits_or_duplicating()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        await SeedProfileAsync(factory);
+        var id = await SeedMovieAsync(factory, "438631", "Dune", ValidRoot, legacyPath: null, monitored: false);
+
+        var first = await client.PostAsJsonAsync("/api/migration/import", new
+        {
+            items = new[] { new { type = "movie", tmdbId = 438631, title = "Dune", monitored = true, legacyPath = "/data/media/movies/Dune (2021)", legacySource = "radarr" } },
+            qualityProfileId = 1, rootFolder = OperatingSystem.IsWindows() ? @"E:\\Other" : "/other/root",
+        });
+        var second = await client.PostAsJsonAsync("/api/migration/import", new
+        {
+            items = new[] { new { type = "movie", tmdbId = 438631, title = "Dune", monitored = true, legacyPath = "/elsewhere/Dune", legacySource = "sonarr" } },
+            qualityProfileId = 1, rootFolder = ValidRoot,
+        });
+
+        using var body = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        Assert.Equal("exists", body.RootElement.GetProperty("results")[0].GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        await using var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext();
+        var item = await db.MediaItems.SingleAsync();
+        Assert.Equal(id, item.Id);
+        Assert.Equal("/data/media/movies/Dune (2021)", item.LegacyPath);
+        Assert.Equal("radarr", item.LegacySource);
+        Assert.False(item.Monitored);
+        Assert.Equal(ValidRoot, item.RootFolder);
+        Assert.Equal(1, await db.MediaItems.CountAsync());
+    }
+
+    [Fact]
+    public async Task Bulk_root_reassignment_moves_only_the_selected_entries_and_validates_the_target()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        await SeedProfileAsync(factory);
+        await SeedMovieAsync(factory, "1", "One", "/data/media/movies", null);
+        await SeedMovieAsync(factory, "2", "Two", "/data/media/movies", null);
+        await SeedMovieAsync(factory, "3", "Three", ValidRoot, null);
+
+        var invalid = await client.PostAsJsonAsync("/api/media/root-folder", new { mediaType = "movie", fromRootFolder = "/data/media/movies", toRootFolder = "relative\\x", ids = (List<int>?)null });
+        var moved = await client.PostAsJsonAsync("/api/media/root-folder", new { mediaType = "movie", fromRootFolder = "/data/media/movies", toRootFolder = ValidRoot, ids = (List<int>?)null });
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var body = JsonDocument.Parse(await moved.Content.ReadAsStringAsync());
+        Assert.Equal(2, body.RootElement.GetProperty("updated").GetInt32());
+        await using var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext();
+        Assert.Equal(3, await db.MediaItems.CountAsync(m => m.RootFolder == ValidRoot));
+    }
+
+    [Fact]
+    public async Task Mapping_suggestions_group_stored_legacy_folders_and_count_entries_still_without_one()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        await SeedProfileAsync(factory);
+        await SeedMovieAsync(factory, "1", "Dune", ValidRoot, "/data/media/movies/Dune (2021)");
+        await SeedMovieAsync(factory, "2", "Arrival", ValidRoot, "/data/media/movies/Arrival (2016)");
+        await SeedMovieAsync(factory, "3", "Old", ValidRoot, null);
+
+        using var body = JsonDocument.Parse(await (await client.GetAsync("/api/library/mapping-suggestions")).Content.ReadAsStringAsync());
+
+        var suggestion = body.RootElement.GetProperty("suggestions").EnumerateArray().Single();
+        Assert.Equal("/data/media/movies", suggestion.GetProperty("sourcePrefix").GetString());
+        Assert.Equal(2, suggestion.GetProperty("count").GetInt32());
+        Assert.Equal(1, body.RootElement.GetProperty("entriesWithoutLegacyPath").GetInt32());
+    }
 }

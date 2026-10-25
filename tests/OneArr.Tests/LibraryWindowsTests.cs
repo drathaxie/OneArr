@@ -42,7 +42,7 @@ public class LibraryWindowsTests
         Assert.Equal(3, preview.Plan.Links.Count);
         Assert.Equal(before, Snapshot(tree.Root));
 
-        var applied = await reconciler.ApplyAsync(preview.PlanId, null, default);
+        var applied = await reconciler.ApplyAsync(preview.PlanId, null, false, default);
         Assert.Equal(3, applied.Linked);
         Assert.Equal(before, Snapshot(tree.Root));
 
@@ -65,7 +65,7 @@ public class LibraryWindowsTests
         var reconciler = new LibraryReconciler(world.Db, new LocalLibraryFileSystem(), world.Time);
 
         var first = await reconciler.PreviewAsync(default);
-        await reconciler.ApplyAsync(first.PlanId, null, default);
+        await reconciler.ApplyAsync(first.PlanId, null, false, default);
         var second = await reconciler.PreviewAsync(default);
 
         Assert.Empty(second.Plan.Links);

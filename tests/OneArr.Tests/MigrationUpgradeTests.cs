@@ -42,6 +42,8 @@ public class MigrationUpgradeTests
                 Assert.True(movie.HasFile);
                 Assert.Equal("D:\\Media\\Movies", movie.RootFolder);
                 Assert.Null(movie.LegacyPath);
+                // A catalog from before reconciliation is unreviewed after upgrade, so automatic grabbing stays blocked until a complete apply.
+                Assert.Null(movie.LibraryReviewedUtc);
                 Assert.Equal(1, await upgraded.QualityProfiles.CountAsync());
                 Assert.Empty(await upgraded.LibraryRoots.ToListAsync());
                 Assert.Empty(await upgraded.MediaFiles.ToListAsync());

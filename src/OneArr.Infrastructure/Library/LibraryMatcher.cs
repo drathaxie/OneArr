@@ -13,6 +13,52 @@ public sealed record CatalogEpisode(int Id, int SeasonNumber, int EpisodeNumber)
 
 public sealed record CatalogSeries(int Id, string Title, int? Year, string? TmdbId, string? LegacyKey, IReadOnlyList<CatalogEpisode> Episodes);
 
+/// <summary>Lookup tables built once per scan, so matching a file never walks the whole catalog.</summary>
+public sealed class CatalogIndex
+{
+    public CatalogIndex(IReadOnlyList<CatalogMovie> movies, IReadOnlyList<CatalogSeries> series, bool windows)
+    {
+        Windows = windows;
+        foreach (var m in movies)
+        {
+            if (m.LegacyKey is not null) Add(MovieLegacy, m.LegacyKey, m);
+            if (m.TmdbId is not null) Add(MovieByTmdb, m.TmdbId, m);
+            if (m.Year is int y) Add(MovieByTitleYear, LibraryMatcher.TitleYearKey(m.Title, y), m);
+        }
+        foreach (var s in series)
+        {
+            if (s.LegacyKey is not null) Add(SeriesLegacy, s.LegacyKey, s);
+            if (s.TmdbId is not null) Add(SeriesByTmdb, s.TmdbId, s);
+            Add(SeriesByTitle, LibraryMatcher.NormalizeTitle(s.Title), s);
+        }
+    }
+
+    public bool Windows { get; }
+    public Dictionary<string, List<CatalogMovie>> MovieLegacy { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<CatalogSeries>> SeriesLegacy { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<CatalogMovie>> MovieByTmdb { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<CatalogSeries>> SeriesByTmdb { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<CatalogMovie>> MovieByTitleYear { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<CatalogSeries>> SeriesByTitle { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The key itself and every ancestor folder key. A legacy folder matches any file inside it.</summary>
+    public IEnumerable<string> AncestorsOf(string key)
+    {
+        yield return key;
+        var sep = Windows ? '\\' : '/';
+        for (var i = key.Length - 1; i > 0; i--)
+        {
+            if (key[i] == sep && i != key.Length - 1) yield return key[..i];
+        }
+    }
+
+    private static void Add<T>(Dictionary<string, List<T>> map, string key, T value)
+    {
+        if (!map.TryGetValue(key, out var list)) map[key] = list = [];
+        list.Add(value);
+    }
+}
+
 public enum MatchOutcome { Linked, Ambiguous, Unmatched }
 
 /// <summary>The result for one file. Only <see cref="MatchOutcome.Linked"/> may ever change the catalog.</summary>
@@ -35,24 +81,32 @@ public static partial class LibraryMatcher
 {
     private const int MaxEpisodeRange = 50;
 
-    public static FileMatch Match(CandidateFile file, MediaType type, IReadOnlyList<CatalogMovie> movies, IReadOnlyList<CatalogSeries> series, bool windows)
+    /// <summary>Convenience overload that builds the index for one call. Large scans should build a <see cref="CatalogIndex"/> once.</summary>
+    public static FileMatch Match(CandidateFile file, MediaType type, IReadOnlyList<CatalogMovie> movies, IReadOnlyList<CatalogSeries> series, bool windows) =>
+        Match(file, type, new CatalogIndex(movies, series, windows));
+
+    /// <summary>
+    /// Lookups are indexed, so each file costs about its path depth plus the size of its own candidate list.
+    /// Work does not grow with catalog size times file count.
+    /// </summary>
+    public static FileMatch Match(CandidateFile file, MediaType type, CatalogIndex index)
     {
         var segments = file.RelativePath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
         var fileName = segments.Length > 0 ? segments[^1] : file.FullPath;
         var folders = segments.Length > 1 ? segments[..^1] : [];
-        var fileKey = LibraryPaths.Key(file.FullPath, windows);
+        var fileKey = LibraryPaths.Key(file.FullPath, index.Windows);
         var resolution = ParseResolution(file.RelativePath);
 
         if (SampleTag().IsMatch(fileName)) return Unmatched(file, type, "Looks like a sample file");
 
         return type == MediaType.Movie
-            ? MatchMovie(file, movies, folders, fileName, fileKey, resolution, windows)
-            : MatchSeries(file, series, folders, fileName, fileKey, resolution, windows);
+            ? MatchMovie(file, index, folders, fileName, fileKey, resolution)
+            : MatchSeries(file, index, folders, fileName, fileKey, resolution);
     }
 
-    private static FileMatch MatchMovie(CandidateFile file, IReadOnlyList<CatalogMovie> movies, string[] folders, string fileName, string fileKey, int? resolution, bool windows)
+    private static FileMatch MatchMovie(CandidateFile file, CatalogIndex index, string[] folders, string fileName, string fileKey, int? resolution)
     {
-        var legacy = movies.Where(m => m.LegacyKey is not null && (fileKey == m.LegacyKey || LibraryPaths.IsWithin(fileKey, m.LegacyKey, windows))).ToList();
+        var legacy = index.AncestorsOf(fileKey).SelectMany(k => index.MovieLegacy.GetValueOrDefault(k) ?? []).ToList();
         if (legacy.Count == 1) return Linked(file, MediaType.Movie, legacy[0].Id, [], "legacy-path", resolution);
         if (legacy.Count > 1) return Ambiguous(file, MediaType.Movie, "Several movies share this folder", legacy.Select(m => m.Id).ToList());
 
@@ -60,7 +114,7 @@ public static partial class LibraryMatcher
         if (conflict) return Unmatched(file, MediaType.Movie, "The path names more than one TMDb id");
         if (tmdb is not null)
         {
-            var byId = movies.Where(m => m.TmdbId == tmdb).ToList();
+            var byId = index.MovieByTmdb.GetValueOrDefault(tmdb) ?? [];
             if (byId.Count == 1) return Linked(file, MediaType.Movie, byId[0].Id, [], "tmdb-id", resolution);
             if (byId.Count > 1) return Ambiguous(file, MediaType.Movie, $"TMDb id {tmdb} matches several movies", byId.Select(m => m.Id).ToList());
             return Unmatched(file, MediaType.Movie, $"TMDb id {tmdb} is not in the catalog");
@@ -70,19 +124,18 @@ public static partial class LibraryMatcher
         var parsed = ParseTitle(source);
         if (parsed.Year is not int year) return Unmatched(file, MediaType.Movie, "No year in the folder or file name, so the movie cannot be identified safely");
 
-        var title = NormalizeTitle(parsed.Title);
-        var candidates = movies.Where(m => NormalizeTitle(m.Title) == title && m.Year == year).ToList();
+        var candidates = index.MovieByTitleYear.GetValueOrDefault(TitleYearKey(parsed.Title, year)) ?? [];
         if (candidates.Count == 1) return Linked(file, MediaType.Movie, candidates[0].Id, [], "title-year", resolution);
         if (candidates.Count > 1) return Ambiguous(file, MediaType.Movie, $"'{parsed.Title} ({year})' matches several movies", candidates.Select(m => m.Id).ToList());
         return Unmatched(file, MediaType.Movie, $"No catalog movie titled '{parsed.Title} ({year})'");
     }
 
-    private static FileMatch MatchSeries(CandidateFile file, IReadOnlyList<CatalogSeries> series, string[] folders, string fileName, string fileKey, int? resolution, bool windows)
+    private static FileMatch MatchSeries(CandidateFile file, CatalogIndex index, string[] folders, string fileName, string fileKey, int? resolution)
     {
         var episodes = ParseEpisodes(fileName);
         if (episodes.Count == 0) return Unmatched(file, MediaType.Series, "No season and episode number (S01E01) in the file name");
 
-        var legacy = series.Where(s => s.LegacyKey is not null && (fileKey == s.LegacyKey || LibraryPaths.IsWithin(fileKey, s.LegacyKey, windows))).ToList();
+        var legacy = index.AncestorsOf(fileKey).SelectMany(k => index.SeriesLegacy.GetValueOrDefault(k) ?? []).ToList();
         IReadOnlyList<CatalogSeries> candidates = legacy;
         string method = "legacy-path";
 
@@ -92,7 +145,7 @@ public static partial class LibraryMatcher
             if (conflict) return Unmatched(file, MediaType.Series, "The path names more than one TMDb id");
             if (tmdb is not null)
             {
-                candidates = series.Where(s => s.TmdbId == tmdb).ToList();
+                candidates = index.SeriesByTmdb.GetValueOrDefault(tmdb) ?? [];
                 method = "tmdb-id";
                 if (candidates.Count == 0) return Unmatched(file, MediaType.Series, $"TMDb id {tmdb} is not in the catalog");
             }
@@ -101,8 +154,8 @@ public static partial class LibraryMatcher
                 var source = folders.Length > 0 ? folders[0] : TitleBeforeEpisode(fileName);
                 var parsed = ParseTitle(source);
                 if (string.IsNullOrWhiteSpace(parsed.Title)) return Unmatched(file, MediaType.Series, "No series title found in the path");
-                var title = NormalizeTitle(parsed.Title);
-                candidates = series.Where(s => NormalizeTitle(s.Title) == title && (parsed.Year is null || s.Year == parsed.Year)).ToList();
+                var sameTitle = index.SeriesByTitle.GetValueOrDefault(NormalizeTitle(parsed.Title)) ?? [];
+                candidates = sameTitle.Where(s => parsed.Year is null || s.Year == parsed.Year).ToList();
                 method = parsed.Year is null ? "title-only" : "title-year";
                 if (candidates.Count == 0) return Unmatched(file, MediaType.Series, $"No catalog series titled '{parsed.Title}'");
             }
@@ -120,6 +173,8 @@ public static partial class LibraryMatcher
         }
         return Linked(file, MediaType.Series, show.Id, ids, method, resolution);
     }
+
+    internal static string TitleYearKey(string title, int year) => $"{NormalizeTitle(title)}|{year}";
 
     public static string NormalizeTitle(string text)
     {

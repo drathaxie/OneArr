@@ -28,7 +28,8 @@ public static class ApiEndpoints
     public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null);
     public sealed record LibraryRootBody(string Type, string Path, string? Label);
     public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
-    public sealed record ApplyBody(List<string>? ExcludePaths);
+    public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
+    public sealed record BulkRootBody(string MediaType, string? FromRootFolder, string ToRootFolder, List<int>? Ids);
 
     public static void Map(WebApplication app)
     {
@@ -309,6 +310,42 @@ public static class ApiEndpoints
             return Results.Ok(rows);
         });
 
+        // Suggests mappings from the stored Sonarr/Radarr paths, and counts catalog entries that still lack one.
+        api.MapGet("/library/mapping-suggestions", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var items = await c.MediaItems.AsNoTracking().Select(m => new { m.MediaType, m.LegacyPath, m.RootFolder }).ToListAsync(ct);
+            var suggestions = items.Where(i => i.LegacyPath is { Length: > 0 })
+                .Select(i => new { Type = i.MediaType, Parent = ParentFolder(i.LegacyPath!) })
+                .Where(x => x.Parent is { Length: > 0 })
+                .GroupBy(x => new { x.Type, x.Parent })
+                .Select(g => new { mediaType = g.Key.Type.ToString(), sourcePrefix = g.Key.Parent, count = g.Count() })
+                .OrderByDescending(g => g.count).ToList();
+            var rootFolders = items.GroupBy(i => i.RootFolder)
+                .Select(g => new { rootFolder = g.Key, count = g.Count() }).OrderByDescending(g => g.count).ToList();
+            return Results.Ok(new
+            {
+                suggestions,
+                entriesWithoutLegacyPath = items.Count(i => string.IsNullOrEmpty(i.LegacyPath)),
+                rootFolders,
+            });
+        });
+
+        // Moves catalog entries to a new RootFolder. It changes only where future downloads go, never files on disk.
+        api.MapPost("/media/root-folder", async (BulkRootBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            var type = ParseType(body.MediaType);
+            MediaService.ValidateRoot(body.ToRootFolder);
+            var target = body.ToRootFolder.Trim();
+            await using var c = await db.CreateDbContextAsync(ct);
+            var query = c.MediaItems.Where(m => m.MediaType == type);
+            if (body.Ids is { Count: > 0 }) query = query.Where(m => body.Ids.Contains(m.Id));
+            else if (!string.IsNullOrWhiteSpace(body.FromRootFolder)) query = query.Where(m => m.RootFolder == body.FromRootFolder.Trim());
+            else return Results.BadRequest(new { error = "Choose the entries by id or by their current root folder" });
+            var updated = await query.Where(m => m.RootFolder != target).ExecuteUpdateAsync(s => s.SetProperty(m => m.RootFolder, target), ct);
+            return Results.Ok(new { updated });
+        });
+
         // Read-only preview. It stores the reviewed result and changes no media rows or files.
         api.MapPost("/library/preview", async (LibraryReconciler library, CancellationToken ct) => Results.Ok(await library.PreviewAsync(ct)));
 
@@ -316,7 +353,7 @@ public static class ApiEndpoints
         {
             try
             {
-                return Results.Ok(await library.ApplyAsync(id, body?.ExcludePaths, ct));
+                return Results.Ok(await library.ApplyAsync(id, body?.ExcludePaths, body?.AcknowledgeUnmatched ?? false, ct));
             }
             catch (KeyNotFoundException ex)
             {
@@ -421,6 +458,14 @@ public static class ApiEndpoints
             }
             return Results.Ok(new { results });
         });
+    }
+
+    /// <summary>The folder above a stored legacy path. Radarr and Sonarr store the movie or series folder itself.</summary>
+    private static string ParentFolder(string legacyPath)
+    {
+        var trimmed = legacyPath.TrimEnd('/');
+        var cut = trimmed.LastIndexOf('/');
+        return cut <= 0 ? "" : trimmed[..cut];
     }
 
     private static MediaType ParseType(string type) => type.ToLowerInvariant() switch

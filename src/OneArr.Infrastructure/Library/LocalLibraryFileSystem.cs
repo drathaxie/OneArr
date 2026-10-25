@@ -3,14 +3,32 @@ using OneArr.Infrastructure.Files;
 
 namespace OneArr.Infrastructure.Library;
 
+/// <summary>One entry in a folder listing. Kept separate from FileSystemInfo so the walk can be tested without a disk.</summary>
+public sealed record LibraryEntry(string FullPath, bool IsDirectory, bool IsReparsePoint, long SizeBytes);
+
 /// <summary>
-/// Reads library folders on this machine. Junctions, symlinks and other reparse points are counted and skipped,
-/// never followed, so a link cannot pull files from outside the root into the catalog.
-/// Reachability checks are time-limited so an offline network share cannot hang a scan.
+/// Reads library folders on this machine. Junctions, symlinks and other reparse points are counted and skipped, never followed.
+/// Every network-facing call has a time limit, and the walk stops at cancellation, at a timeout, or at a file-count cap.
+/// A walk that did not finish is reported as incomplete so the reconciler never treats its files as missing.
 /// </summary>
 public sealed class LocalLibraryFileSystem : ILibraryFileSystem
 {
     public static readonly TimeSpan ReachTimeout = TimeSpan.FromSeconds(10);
+    public const int DefaultMaxFiles = 500_000;
+
+    private readonly TimeSpan _enumerationTimeout;
+    private readonly int _maxFiles;
+    private readonly Func<string, IEnumerable<LibraryEntry>> _list;
+
+    public LocalLibraryFileSystem() : this(TimeSpan.FromMinutes(15), DefaultMaxFiles, ListDirectory) { }
+
+    /// <param name="list">Test seam. Production uses <see cref="ListDirectory"/>.</param>
+    public LocalLibraryFileSystem(TimeSpan enumerationTimeout, int maxFiles, Func<string, IEnumerable<LibraryEntry>> list)
+    {
+        _enumerationTimeout = enumerationTimeout;
+        _maxFiles = maxFiles;
+        _list = list;
+    }
 
     public bool Windows => OperatingSystem.IsWindows();
 
@@ -32,11 +50,119 @@ public sealed class LocalLibraryFileSystem : ILibraryFileSystem
         }
     }
 
-    public Task<LibraryEnumeration> EnumerateAsync(string root, CancellationToken ct) =>
-        Task.Run(() => Walk(Path.GetFullPath(root), ct), ct);
+    public async Task<LibraryEnumeration> EnumerateAsync(string root, CancellationToken ct)
+    {
+        var full = Path.GetFullPath(root);
+        using var stop = new CancellationTokenSource();
+        var work = Task.Run(() => Walk(full, _list, _maxFiles, stop.Token), CancellationToken.None);
+        try
+        {
+            return await work.WaitAsync(_enumerationTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            // Stop the walker at its next folder. A call already blocked in the OS finishes on its own, but nothing new starts.
+            stop.Cancel();
+            return new LibraryEnumeration([], 0, [full], Complete: false, IncompleteReason: $"Scan stopped after {_enumerationTimeout.TotalMinutes:0} minutes");
+        }
+    }
 
-    public Task<bool> FileExistsAsync(string path, CancellationToken ct) =>
-        Task.Run(() => File.Exists(path), ct).WaitAsync(ReachTimeout, ct);
+    public async Task<FileProbe> ProbeFileAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            return await Task.Run(() => Probe(path), ct).WaitAsync(ReachTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            return new FileProbe(FileProbeState.Unknown, "The folder did not respond in time");
+        }
+    }
+
+    /// <summary>
+    /// Walks the tree with an explicit stack. Stops at cancellation. A folder that cannot be listed is recorded and the walk continues,
+    /// so one bad folder does not hide the rest. Reaching the file cap makes the walk incomplete and marks the whole root unreadable.
+    /// </summary>
+    /// <summary>Public so tests can drive the walk with a fake listing. Production calls it through <see cref="EnumerateAsync"/>.</summary>
+    public static LibraryEnumeration Walk(string root, Func<string, IEnumerable<LibraryEntry>> list, int maxFiles, CancellationToken ct)
+    {
+        var files = new List<CandidateFile>();
+        var unreadable = new List<string>();
+        var skipped = 0;
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var dir = pending.Pop();
+
+            List<LibraryEntry> entries;
+            try
+            {
+                entries = list(dir).ToList();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                unreadable.Add(dir);
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                if (entry.IsReparsePoint)
+                {
+                    skipped++;
+                    continue;
+                }
+                if (entry.IsDirectory)
+                {
+                    pending.Push(entry.FullPath);
+                    continue;
+                }
+                if (!SafeImporter.IsMediaFile(entry.FullPath)) continue;
+
+                if (files.Count >= maxFiles)
+                    return new LibraryEnumeration(files, skipped, [root], Complete: false, IncompleteReason: $"More than {maxFiles:N0} media files; the scan stopped early");
+                files.Add(new CandidateFile(entry.FullPath, Path.GetRelativePath(root, entry.FullPath), entry.SizeBytes));
+            }
+        }
+
+        return new LibraryEnumeration(files, skipped, unreadable, Complete: unreadable.Count == 0,
+            IncompleteReason: unreadable.Count == 0 ? null : $"{unreadable.Count} folder(s) could not be read");
+    }
+
+    public static IEnumerable<LibraryEntry> ListDirectory(string dir) =>
+        new DirectoryInfo(dir).EnumerateFileSystemInfos()
+            .Select(e => new LibraryEntry(e.FullName, e is DirectoryInfo, (e.Attributes & FileAttributes.ReparsePoint) != 0, e is FileInfo f ? f.Length : 0));
+
+    /// <summary>
+    /// File.Exists returns false on access denied, so it cannot tell "gone" from "unreadable". The parent folder is listed instead:
+    /// if it cannot be read the answer is Unknown; if it is readable and the file is absent the answer is Missing.
+    /// </summary>
+    private static FileProbe Probe(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) return new FileProbe(FileProbeState.Exists);
+            var parent = Path.GetDirectoryName(path);
+            if (parent is null) return new FileProbe(FileProbeState.Unknown, "No folder for this path");
+            using var entries = Directory.EnumerateFileSystemEntries(parent).GetEnumerator();
+            entries.MoveNext();
+            return new FileProbe(FileProbeState.Missing);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // The folder itself is gone. Its root was readable moments ago in the same apply, so the file is confirmed absent.
+            return new FileProbe(FileProbeState.Missing);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new FileProbe(FileProbeState.Unknown, ex.Message);
+        }
+    }
+
+    private static LibraryRootState CheckReadableState(string root) => CheckReadable(root).State;
 
     private static RootCheck CheckReadable(string root)
     {
@@ -55,49 +181,6 @@ public sealed class LocalLibraryFileSystem : ILibraryFileSystem
         {
             return new RootCheck(LibraryRootState.Unavailable, ex.Message);
         }
-    }
-
-    private static LibraryEnumeration Walk(string root, CancellationToken ct)
-    {
-        var files = new List<CandidateFile>();
-        var skipped = 0;
-        var inaccessible = 0;
-        var pending = new Stack<DirectoryInfo>();
-        pending.Push(new DirectoryInfo(root));
-
-        while (pending.Count > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            var dir = pending.Pop();
-
-            List<FileSystemInfo> entries;
-            try
-            {
-                entries = dir.EnumerateFileSystemInfos().ToList();
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-            {
-                inaccessible++;
-                continue;
-            }
-
-            foreach (var entry in entries)
-            {
-                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    skipped++;
-                    continue;
-                }
-                if (entry is DirectoryInfo sub)
-                {
-                    pending.Push(sub);
-                    continue;
-                }
-                if (entry is FileInfo file && SafeImporter.IsMediaFile(file.Name))
-                    files.Add(new CandidateFile(file.FullName, Path.GetRelativePath(root, file.FullName), file.Length));
-            }
-        }
-        return new LibraryEnumeration(files, skipped, inaccessible);
     }
 
     private static char? DriveLetter(string root) =>

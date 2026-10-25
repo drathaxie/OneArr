@@ -314,6 +314,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<string>("LastMessage")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("LastScanComplete")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("LastState")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -448,6 +451,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LegacySource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LibraryReviewedUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MediaType")
