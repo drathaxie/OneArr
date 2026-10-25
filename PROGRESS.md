@@ -7,6 +7,65 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Library safety hardening (branch `library-reconciliation`, verified at b8117a7)
+
+**Verified on GitHub Actions (run 40202436157, commit b8117a7):** both jobs pass. Windows: 211 cross-platform tests
+(0 failed), 18 Windows filesystem tests (0 failed), release-shaped publish, acceptance run on Windows. Linux: pass.
+
+**Earlier verified result (commit 587c3c2, run 40200870468):** Windows job passed with 186 cross-platform tests and 18
+Windows filesystem tests. This was the first commit where Windows CI ran the NTFS library tests.
+
+**Changes**
+
+- Automatic grabbing fails closed. It starts only when a complete apply has reviewed every monitored catalog entry
+  (`MediaItem.LibraryReviewedUtc`), every enabled folder was read completely by that apply, the folder set and path
+  mappings match that scan, nothing is ambiguous, unmatched files are acknowledged, and every folder is reachable now.
+  Migrations never set the review flag, so a migrated catalog stays blocked until an operator applies a complete scan.
+  Applying a scan never enables automatic grabbing.
+- Partial scans: a walk is complete only if it read every folder, stayed under the file cap and finished within the time
+  limit. Files in an unreadable folder become `Unknown`, not `Missing`. `Unknown` never clears `HasFile`, and an
+  incomplete scan never reviews the catalog. A probe distinguishes Exists, Missing and Unknown; `File.Exists` returns
+  false on access denied, so it could not do this.
+- Time limits: enumeration stops after 15 minutes and the walker stops at its next folder. A listing that is blocked
+  inside the OS cannot be interrupted, so that thread finishes on its own. Cancellation is honoured per folder and per
+  file.
+- Previously imported catalogs: re-running the migration refreshes missing legacy paths, keeps user edits, and creates no
+  duplicates (tested through the real endpoint on existing items).
+- Bulk root-folder reassignment (`POST /api/media/root-folder`) and mapping suggestions
+  (`GET /api/library/mapping-suggestions`) are in the API and the Movies/Series pages and Library panel.
+- Matching uses a catalog index instead of a scan of the whole catalog per file.
+
+**Performance (one run each, Linux sandbox, real files on disk, in-memory SQLite)**
+
+| Phase                         | 20,000 movies | 40,000 movies |
+|-------------------------------|---------------|---------------|
+| Enumerate folders and files   | 217 ms        | 454 ms        |
+| Match (indexed)               | 410 ms        | 791 ms        |
+| Preview (enumerate+match+store) | 1,040 ms    | 1,759 ms      |
+| Apply (database writes)       | 5,909 ms      | 12,076 ms     |
+| Second preview, no changes    | 570 ms        | 1,458 ms      |
+| Cancel a running preview      | 226 ms        | 440 ms        |
+| Peak working set (test process)| 636 MB       | 910 MB        |
+
+Not measured: Windows timings, network shares, real Sonarr/Radarr libraries. Apply is the slowest phase, and cancellation
+latency grows with library size because some phases check the token per batch rather than per row.
+Reproduce with `ONEARR_BENCH=1 ONEARR_BENCH_MOVIES=20000 dotnet test tests/OneArr.Tests --filter Benchmark`.
+
+**What is fake and what is real**
+
+- Fake: `FakeLibraryFs` (in-memory disk) for the reconciler tests, including unreadable folders and undecidable files.
+  `TestDb` is in-memory SQLite. The walk tests use a fake listing.
+- Real: `LocalLibraryFileSystem` against folders on disk, in the Linux sandbox and in the Windows CI job (junctions,
+  missing folders, the probe). The migration upgrade test runs on a real SQLite file from the previous schema.
+- Not real: Sonarr/Radarr, TMDb lookups, real network shares, and a real drive that goes offline.
+
+**Not verified**
+
+- A permission-denied folder on Windows (only simulated).
+- Radarr/Sonarr re-import with a live TMDb lookup (needs credentials).
+- Timings on Windows and on a real network share.
+- A native folder picker: not built. Paths are typed.
+
 ## Existing-library reconciliation (branch `library-reconciliation`)
 
 **Problem fixed:** items imported from Radarr/Sonarr showed as missing although the files existed. Nothing linked files on
@@ -46,7 +105,7 @@ disk to catalog items, the migration dropped the original paths, and existing it
 **Not verified yet**
 
 - `LibraryWindowsTests` (real NTFS scan, byte-for-byte unchanged check, junctions, unavailable drive, case-insensitive
-  folder) are written but can only run on the Windows CI job. Result: pending the CI run for this branch.
+  folder) passed in the Windows CI job at 587c3c2 and b8117a7.
 - A real Radarr/Sonarr migration with TMDb lookups (needs your credentials).
 - An offline UNC share on a real network. The code path is tested with a fake disk.
 - Scan speed on a large library (not measured).
