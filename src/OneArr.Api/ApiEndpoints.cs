@@ -20,7 +20,7 @@ public static class ApiEndpoints
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash);
     public sealed record IndexerBody(string Name, string BaseUrl, string ApiKey, bool Enabled);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string Password, string? MovieCategory, string? TvCategory, bool Enabled);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
@@ -249,6 +249,24 @@ public static class ApiEndpoints
             return Results.Ok(new { files = count, mode = "read-only" });
         });
 
+        api.MapPost("/automation/wanted-search", async (WantedSearchService search, JobRunner runner, CancellationToken ct) =>
+        {
+            string? message = null;
+            var ran = await runner.TryRunAsync("wanted-search", async t =>
+            {
+                var summary = await search.RunOnceAsync(t);
+                message = summary.ToString();
+                return message;
+            }, ct);
+            return ran ? Results.Ok(new { message }) : Results.Conflict(new { error = "A wanted search is already running" });
+        });
+
+        api.MapGet("/automation/search-attempts", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            return Results.Ok(await c.SearchAttempts.AsNoTracking().OrderBy(s => s.NextAttemptAt).Take(200).ToListAsync(ct));
+        });
+
         api.MapGet("/jobs", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             await using var c = await db.CreateDbContextAsync(ct);
@@ -265,7 +283,7 @@ public static class ApiEndpoints
                 dryRunImport = await settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct),
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
-                automaticGrabbing = false,
+                automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
             });
         });
 
@@ -275,6 +293,7 @@ public static class ApiEndpoints
             if (body.DryRunImport is bool dry) await settings.SetAsync(SettingKeys.DryRunImport, dry.ToString(), ct);
             if (body.TorrentRoot is not null) await settings.SetAsync(SettingKeys.TorrentRoot, RequireAbsolute(body.TorrentRoot), ct);
             if (body.MediaRoot is not null) await settings.SetAsync(SettingKeys.MediaRoot, RequireAbsolute(body.MediaRoot), ct);
+            if (body.AutomaticGrabbing is bool auto) await settings.SetAsync(SettingKeys.AutomaticGrab, auto.ToString(), ct);
             return Results.NoContent();
         });
 

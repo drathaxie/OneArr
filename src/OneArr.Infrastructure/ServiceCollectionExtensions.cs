@@ -45,6 +45,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ReleaseService>();
         services.AddSingleton<DownloadService>();
         services.AddSingleton<JobRunner>();
+        services.AddSingleton(new SearchPolicy());
+        services.AddSingleton<WantedSearchService>();
         services.AddHostedService<BackgroundScheduler>();
         return services;
     }

@@ -140,3 +140,23 @@ public class AppSetting
     public string Key { get; set; } = "";
     public string Value { get; set; } = "";
 }
+
+public enum SearchOutcome { None = 0, Grabbed = 1, NoAcceptableRelease = 2, IndexerError = 3, DownloadClientError = 4, SkippedActiveDownload = 5, Rejected = 6 }
+
+/// <summary>
+/// Persistent per-item search state, so restarts keep backoff and never re-search an item before its next attempt is due.
+/// ItemKey is "movie:{id}" or "episode:{id}", which keeps movie and episode keys from colliding.
+/// </summary>
+public class SearchAttempt
+{
+    public int Id { get; set; }
+    public string ItemKey { get; set; } = "";
+    public int MediaItemId { get; set; }
+    public int? EpisodeId { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public DateTimeOffset NextAttemptAt { get; set; }
+    public int Attempts { get; set; }
+    public int ConsecutiveFailures { get; set; }
+    public SearchOutcome LastOutcome { get; set; }
+    public string? LastMessage { get; set; }
+}

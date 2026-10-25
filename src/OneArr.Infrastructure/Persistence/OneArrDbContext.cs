@@ -18,6 +18,7 @@ public class OneArrDbContext : DbContext
     public DbSet<FileRecord> FileRecords => Set<FileRecord>();
     public DbSet<JobHistory> JobHistories => Set<JobHistory>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
+    public DbSet<SearchAttempt> SearchAttempts => Set<SearchAttempt>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -53,6 +54,13 @@ public class OneArrDbContext : DbContext
         b.Entity<ImportRecord>(e =>
         {
             e.Property(x => x.Action).HasConversion<string>().HasMaxLength(16);
+        });
+
+        b.Entity<SearchAttempt>(e =>
+        {
+            e.HasIndex(x => x.ItemKey).IsUnique();
+            e.HasIndex(x => x.NextAttemptAt);
+            e.Property(x => x.LastOutcome).HasConversion<string>().HasMaxLength(32);
         });
 
         b.Entity<FileRecord>(e => e.HasIndex(x => x.Path).IsUnique());

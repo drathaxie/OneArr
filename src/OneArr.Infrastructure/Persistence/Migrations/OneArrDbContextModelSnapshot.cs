@@ -380,6 +380,52 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.ToTable("QualityProfiles");
                 });
 
+            modelBuilder.Entity("OneArr.Domain.SearchAttempt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("EpisodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ItemKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastOutcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MediaItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemKey")
+                        .IsUnique();
+
+                    b.HasIndex("NextAttemptAt");
+
+                    b.ToTable("SearchAttempts");
+                });
+
             modelBuilder.Entity("OneArr.Domain.Season", b =>
                 {
                     b.Property<int>("Id")

@@ -73,6 +73,12 @@ public sealed class ReleaseService
         if (hardReasons.Count > 0) throw new ArgumentException("Release rejected: " + string.Join("; ", hardReasons));
 
         await using var db = await _db.CreateDbContextAsync(ct);
+        // One active download per movie, or per episode. Queued, downloading and completed-but-not-yet-imported all count.
+        var alreadyActive = await db.DownloadJobs.AnyAsync(j => j.MediaItemId == request.MediaItemId
+            && j.EpisodeId == request.EpisodeId
+            && (j.Status == DownloadStatus.Queued || j.Status == DownloadStatus.Downloading || j.Status == DownloadStatus.Completed), ct);
+        if (alreadyActive) throw new ArgumentException("An active download already exists for this item");
+
         var item = await db.MediaItems.AsNoTracking().FirstAsync(m => m.Id == request.MediaItemId, ct);
         var clients = await db.DownloadClients.AsNoTracking().Where(c => c.Enabled).OrderBy(c => c.Id).ToListAsync(ct);
         var client = clients.FirstOrDefault() ?? throw new ArgumentException("No enabled download client is configured");

@@ -142,6 +142,21 @@ public class SettingsApiTests
     }
 
     [Fact]
+    public async Task AutomaticGrabbingIsOffByDefaultAndCanBeSwitchedOn()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var before = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+
+        var put = await client.PutAsJsonAsync("/api/settings", new { automaticGrabbing = true });
+        var after = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+
+        Assert.False(before.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+        Assert.True(after.GetProperty("automaticGrabbing").GetBoolean());
+    }
+
+    [Fact]
     public async Task DryRunChoiceAndPathsSurviveARestart()
     {
         var dir = Path.Combine(Path.GetTempPath(), "onearr-restart-" + Guid.NewGuid().ToString("N"));
