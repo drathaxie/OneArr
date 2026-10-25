@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OneArr.Application;
 using OneArr.Domain;
+using OneArr.Infrastructure.Library;
 using OneArr.Infrastructure.Persistence;
 
 namespace OneArr.Infrastructure.Services;
@@ -38,20 +39,26 @@ public sealed class WantedSearchService
     private readonly SettingsStore _settings;
     private readonly TimeProvider _time;
     private readonly SearchPolicy _policy;
+    private readonly LibraryReconciler _library;
 
-    public WantedSearchService(IDbContextFactory<OneArrDbContext> db, ReleaseService releases, SettingsStore settings, TimeProvider time, SearchPolicy policy)
+    public WantedSearchService(IDbContextFactory<OneArrDbContext> db, ReleaseService releases, SettingsStore settings, TimeProvider time, SearchPolicy policy, LibraryReconciler library)
     {
         _db = db;
         _releases = releases;
         _settings = settings;
         _time = time;
         _policy = policy;
+        _library = library;
     }
 
     public async Task<WantedSearchSummary> RunOnceAsync(CancellationToken ct)
     {
         if (!await _settings.GetBoolAsync(SettingKeys.AutomaticGrab, defaultValue: false, ct))
             return new WantedSearchSummary(false, 0, 0, 0, 0, "Automatic grabbing is off");
+
+        // Existing media must be scanned and applied first, or it would look missing and be downloaded again.
+        var gate = await _library.CheckAutomationAsync(ct);
+        if (!gate.Allowed) return new WantedSearchSummary(true, 0, 0, 0, 0, "Paused: " + gate.Reason);
 
         var now = _time.GetUtcNow();
         var today = DateOnly.FromDateTime(now.UtcDateTime);

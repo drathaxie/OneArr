@@ -303,7 +303,7 @@ public class CatalogAndJobTests
         }
         var meta = new StubMetadata();
         var media = new MediaService(factory, meta, TimeProvider.System);
-        var req = new AddMediaRequest(MediaType.Series, "1399", 1, "/data/media/tv", true, null, true);
+        var req = new AddMediaRequest(MediaType.Series, "1399", 1, OperatingSystem.IsWindows() ? @"D:\Media\TV" : "/data/media/tv", true, null, true);
 
         var first = await media.AddAsync(req, CancellationToken.None);
         var second = await media.AddAsync(req, CancellationToken.None);
@@ -328,8 +328,8 @@ public class CatalogAndJobTests
             await db.SaveChangesAsync();
         }
         var media = new MediaService(factory, new StubMetadata(), TimeProvider.System);
-        var movie = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "100", 1, "/data/media/movies", true, null, true), CancellationToken.None);
-        var series = await media.AddAsync(new AddMediaRequest(MediaType.Series, "100", 1, "/data/media/tv", true, null, true), CancellationToken.None);
+        var movie = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "100", 1, OperatingSystem.IsWindows() ? @"D:\Media\Movies" : "/data/media/movies", true, null, true), CancellationToken.None);
+        var series = await media.AddAsync(new AddMediaRequest(MediaType.Series, "100", 1, OperatingSystem.IsWindows() ? @"D:\Media\TV" : "/data/media/tv", true, null, true), CancellationToken.None);
         Assert.True(movie.Created);
         Assert.True(series.Created);
         Assert.NotEqual(movie.Item.Id, series.Item.Id);

@@ -296,6 +296,145 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.ToTable("JobHistories");
                 });
 
+            modelBuilder.Entity("OneArr.Domain.LibraryRoot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Label")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastCheckedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("LastScanComplete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastSuccessfulScanUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PathKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaType", "PathKey")
+                        .IsUnique();
+
+                    b.ToTable("LibraryRoots");
+                });
+
+            modelBuilder.Entity("OneArr.Domain.LibraryScanPlan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("AppliedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlanJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("LibraryScanPlans");
+                });
+
+            modelBuilder.Entity("OneArr.Domain.MediaFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("FirstSeenUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("LastVerifiedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LibraryRootId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MatchMethod")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("MediaItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PathKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Resolution")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryRootId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("PathKey")
+                        .IsUnique();
+
+                    b.ToTable("MediaFiles");
+                });
+
+            modelBuilder.Entity("OneArr.Domain.MediaFileEpisode", b =>
+                {
+                    b.Property<int>("MediaFileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EpisodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaFileId", "EpisodeId");
+
+                    b.HasIndex("EpisodeId");
+
+                    b.ToTable("MediaFileEpisodes");
+                });
+
             modelBuilder.Entity("OneArr.Domain.MediaItem", b =>
                 {
                     b.Property<int>("Id")
@@ -307,6 +446,15 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("HasFile")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("LegacyPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LegacySource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LibraryReviewedUtc")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("MediaType")
                         .IsRequired()
@@ -354,6 +502,33 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("MediaItems");
+                });
+
+            modelBuilder.Entity("OneArr.Domain.PathMapping", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourcePrefix")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetPrefix")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaType", "SourcePrefix")
+                        .IsUnique();
+
+                    b.ToTable("PathMappings");
                 });
 
             modelBuilder.Entity("OneArr.Domain.QualityProfile", b =>
@@ -462,6 +637,36 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("SeasonId");
                 });
 
+            modelBuilder.Entity("OneArr.Domain.MediaFile", b =>
+                {
+                    b.HasOne("OneArr.Domain.LibraryRoot", null)
+                        .WithMany()
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OneArr.Domain.MediaItem", null)
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("OneArr.Domain.MediaFileEpisode", b =>
+                {
+                    b.HasOne("OneArr.Domain.Episode", null)
+                        .WithMany()
+                        .HasForeignKey("EpisodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OneArr.Domain.MediaFile", "MediaFile")
+                        .WithMany("EpisodeLinks")
+                        .HasForeignKey("MediaFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaFile");
+                });
+
             modelBuilder.Entity("OneArr.Domain.MediaItem", b =>
                 {
                     b.HasOne("OneArr.Domain.QualityProfile", "QualityProfile")
@@ -480,6 +685,11 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("MediaItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("OneArr.Domain.MediaFile", b =>
+                {
+                    b.Navigation("EpisodeLinks");
                 });
 
             modelBuilder.Entity("OneArr.Domain.MediaItem", b =>

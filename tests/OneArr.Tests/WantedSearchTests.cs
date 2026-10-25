@@ -22,6 +22,7 @@ public class WantedSearchTests
         await w.ConfigureAsync(automaticGrab: false);
         await w.AddMovieAsync("The Matrix", 1999);
 
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
 
         Assert.False(summary.Enabled);
@@ -37,6 +38,7 @@ public class WantedSearchTests
         w.Indexer.Body = TestWorld.Torznab((Matrix, HashA, 42));
         var movieId = await w.AddMovieAsync("The Matrix", 1999);
 
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
         Assert.Equal(1, w.Qbit.AddCount);
         await using var db = w.Db.CreateDbContext();
@@ -56,10 +58,12 @@ public class WantedSearchTests
         await w.ConfigureAsync();
         w.Indexer.Body = TestWorld.Torznab((Matrix, HashA, 42));
         await w.AddMovieAsync("The Matrix", 1999);
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
 
         // Well past the post-grab interval, the item is due again, but its download is still active.
         w.Time.Advance(w.Policy.AfterGrabInterval + TimeSpan.FromHours(1));
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
 
         Assert.Equal(1, summary.Skipped);
@@ -74,6 +78,7 @@ public class WantedSearchTests
         await w.ConfigureAsync();
         w.Indexer.Body = TestWorld.Torznab((Matrix, HashA, 42));
         var movieId = await w.AddMovieAsync("The Matrix", 1999);
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
 
         var second = await Assert.ThrowsAsync<ArgumentException>(() => w.Releases.GrabAsync(
@@ -91,6 +96,7 @@ public class WantedSearchTests
         w.Indexer.Body = TestWorld.Torznab(("Other.Movie.1999.1080p.BluRay", HashB, 10));
         await w.AddMovieAsync("The Matrix", 1999);
 
+        await w.ReconcileLibraryAsync();
         var first = await w.Search.RunOnceAsync(Ct);
         Assert.Equal(1, first.Searched);
         Assert.Equal(0, first.Grabbed);
@@ -98,10 +104,12 @@ public class WantedSearchTests
             Assert.Equal(SearchOutcome.NoAcceptableRelease, (await db.SearchAttempts.SingleAsync()).LastOutcome);
 
         w.Time.Advance(TimeSpan.FromHours(5));
+        await w.ReconcileLibraryAsync();
         Assert.Equal(0, (await w.Search.RunOnceAsync(Ct)).Considered);
         Assert.Single(w.Indexer.Queries);
 
         w.Time.Advance(TimeSpan.FromHours(2));
+        await w.ReconcileLibraryAsync();
         Assert.Equal(1, (await w.Search.RunOnceAsync(Ct)).Searched);
         Assert.Equal(2, w.Indexer.Queries.Count);
     }
@@ -114,6 +122,7 @@ public class WantedSearchTests
         w.Indexer.Fail = true;
         await w.AddMovieAsync("The Matrix", 1999);
 
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
         await using (var db = w.Db.CreateDbContext())
         {
@@ -124,6 +133,7 @@ public class WantedSearchTests
         }
 
         w.Time.Advance(TimeSpan.FromMinutes(15));
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
         await using (var db = w.Db.CreateDbContext())
         {
@@ -133,14 +143,17 @@ public class WantedSearchTests
         }
 
         w.Time.Advance(TimeSpan.FromMinutes(30));
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
         await using (var db = w.Db.CreateDbContext())
             Assert.Equal(3, (await db.SearchAttempts.SingleAsync()).ConsecutiveFailures);
 
         // Third failure waits 60 minutes: not due after 59, due after 60.
         w.Time.Advance(TimeSpan.FromMinutes(59));
+        await w.ReconcileLibraryAsync();
         Assert.Equal(0, (await w.Search.RunOnceAsync(Ct)).Considered);
         w.Time.Advance(TimeSpan.FromMinutes(1));
+        await w.ReconcileLibraryAsync();
         Assert.Equal(1, (await w.Search.RunOnceAsync(Ct)).Considered);
     }
 
@@ -151,6 +164,7 @@ public class WantedSearchTests
         await w.ConfigureAsync();
         await w.AddSeriesAsync("Test Show", episodes: 5);
 
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
 
         Assert.Equal(5, summary.Considered);
@@ -167,6 +181,7 @@ public class WantedSearchTests
         w.Qbit.FailAdd = true;
         await w.AddMovieAsync("The Matrix", 1999);
 
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
 
         Assert.Equal(0, summary.Grabbed);
@@ -180,6 +195,7 @@ public class WantedSearchTests
 
         w.Qbit.FailAdd = false;
         w.Time.Advance(TimeSpan.FromMinutes(15));
+        await w.ReconcileLibraryAsync();
         Assert.Equal(1, (await w.Search.RunOnceAsync(Ct)).Grabbed);
     }
 
@@ -190,6 +206,7 @@ public class WantedSearchTests
         await w.ConfigureAsync();
         w.Indexer.Body = TestWorld.Torznab(("Other.Movie.1999.1080p.BluRay", HashB, 10));
         await w.AddMovieAsync("The Matrix", 1999);
+        await w.ReconcileLibraryAsync();
         await w.Search.RunOnceAsync(Ct);
 
         // A new service instance over the same database must honour the stored backoff.
@@ -215,6 +232,7 @@ public class WantedSearchTests
             await db.SaveChangesAsync();
         }
 
+        await w.ReconcileLibraryAsync();
         var summary = await w.Search.RunOnceAsync(Ct);
 
         Assert.Equal(0, summary.Considered);

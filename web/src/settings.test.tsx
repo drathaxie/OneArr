@@ -38,6 +38,7 @@ function defaultRoutes(): Record<string, Handler> {
     "GET /api/quality-profiles": () => ({ body: [{ id: 1, name: "HD-1080p", minResolution: 720, cutoffResolution: 1080, allowWebSources: true }] }),
     "GET /api/indexers": () => ({ body: [] }),
     "GET /api/download-clients": () => ({ body: [] }),
+    "GET /api/library/status": () => ({ body: { windows: false, automation: { allowed: true, reason: "All library folders are reachable and scanned" }, roots: [], mappings: [] } }),
     "PUT /api/settings": () => ({ status: 204 }),
   };
 }

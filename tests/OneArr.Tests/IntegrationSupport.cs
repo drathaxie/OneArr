@@ -5,6 +5,7 @@ using OneArr.Application;
 using OneArr.Domain;
 using OneArr.Infrastructure;
 using OneArr.Infrastructure.Files;
+using OneArr.Infrastructure.Library;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Providers;
 using OneArr.Infrastructure.Services;
@@ -140,6 +141,7 @@ public sealed class TestWorld : IDisposable
     public ReleaseService Releases { get; }
     public DownloadService Downloads { get; }
     public WantedSearchService Search { get; private set; }
+    public LibraryReconciler Library { get; }
     public JobRunner Runner { get; }
     public SearchPolicy Policy { get; }
 
@@ -158,12 +160,36 @@ public sealed class TestWorld : IDisposable
         var ranker = new ReleaseRanker(new ReleaseParser());
         Releases = new ReleaseService(Db, new TorznabClient(factory), ranker, new QBittorrentClient(factory), Time);
         Downloads = new DownloadService(Db, new QBittorrentClient(factory), new SafeImporter(TimeSpan.Zero), Settings, Time);
-        Search = new WantedSearchService(Db, Releases, Settings, Time, Policy);
+        Library = new LibraryReconciler(Db, new LocalLibraryFileSystem(), Time);
+        Search = new WantedSearchService(Db, Releases, Settings, Time, Policy, Library);
         Runner = new JobRunner(Db, Time);
     }
 
+    /// <summary>
+    /// Runs the complete scan and apply an operator would, against the empty test library, so automatic grabbing is allowed.
+    /// Call it after adding catalog items. Items added later are not reviewed yet, as in production.
+    /// </summary>
+    public async Task ReconcileLibraryAsync()
+    {
+        await using (var db = Db.CreateDbContext())
+        {
+            if (!await db.LibraryRoots.AnyAsync())
+            {
+                var movies = Path.Combine(Dirs.Media, "movies");
+                var tv = Path.Combine(Dirs.Media, "tv");
+                Directory.CreateDirectory(movies);
+                Directory.CreateDirectory(tv);
+                db.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Movie, Path = movies, PathKey = LibraryPaths.Key(movies, OperatingSystem.IsWindows()) });
+                db.LibraryRoots.Add(new LibraryRoot { MediaType = MediaType.Series, Path = tv, PathKey = LibraryPaths.Key(tv, OperatingSystem.IsWindows()) });
+                await db.SaveChangesAsync();
+            }
+        }
+        var preview = await Library.PreviewAsync(default);
+        await Library.ApplyAsync(preview.PlanId, null, false, default);
+    }
+
     /// <summary>Recreates the search service over the same database, as after a process restart.</summary>
-    public WantedSearchService RestartSearch() => Search = new WantedSearchService(Db, new ReleaseService(Db, new TorznabClient(new FakeFactory(Http)), new ReleaseRanker(new ReleaseParser()), new QBittorrentClient(new FakeFactory(Http)), Time), Settings, Time, Policy);
+    public WantedSearchService RestartSearch() => Search = new WantedSearchService(Db, new ReleaseService(Db, new TorznabClient(new FakeFactory(Http)), new ReleaseRanker(new ReleaseParser()), new QBittorrentClient(new FakeFactory(Http)), Time), Settings, Time, Policy, Library);
 
     public async Task<int> AddProfileAsync()
     {

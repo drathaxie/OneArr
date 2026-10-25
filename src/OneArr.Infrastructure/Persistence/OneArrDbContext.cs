@@ -19,6 +19,11 @@ public class OneArrDbContext : DbContext
     public DbSet<JobHistory> JobHistories => Set<JobHistory>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
     public DbSet<SearchAttempt> SearchAttempts => Set<SearchAttempt>();
+    public DbSet<LibraryRoot> LibraryRoots => Set<LibraryRoot>();
+    public DbSet<PathMapping> PathMappings => Set<PathMapping>();
+    public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
+    public DbSet<MediaFileEpisode> MediaFileEpisodes => Set<MediaFileEpisode>();
+    public DbSet<LibraryScanPlan> LibraryScanPlans => Set<LibraryScanPlan>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -61,6 +66,37 @@ public class OneArrDbContext : DbContext
             e.HasIndex(x => x.ItemKey).IsUnique();
             e.HasIndex(x => x.NextAttemptAt);
             e.Property(x => x.LastOutcome).HasConversion<string>().HasMaxLength(32);
+        });
+
+        b.Entity<LibraryRoot>(e =>
+        {
+            e.HasIndex(x => new { x.MediaType, x.PathKey }).IsUnique();
+            e.Property(x => x.MediaType).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.LastState).HasConversion<string>().HasMaxLength(16);
+        });
+
+        b.Entity<PathMapping>(e =>
+        {
+            e.HasIndex(x => new { x.MediaType, x.SourcePrefix }).IsUnique();
+            e.Property(x => x.MediaType).HasConversion<string>().HasMaxLength(16);
+        });
+
+        b.Entity<MediaFile>(e =>
+        {
+            e.HasIndex(x => x.PathKey).IsUnique();
+            e.HasIndex(x => x.MediaItemId);
+            e.HasIndex(x => x.LibraryRootId);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasOne<MediaItem>().WithMany().HasForeignKey(x => x.MediaItemId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<LibraryRoot>().WithMany().HasForeignKey(x => x.LibraryRootId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<MediaFileEpisode>(e =>
+        {
+            e.HasKey(x => new { x.MediaFileId, x.EpisodeId });
+            e.HasIndex(x => x.EpisodeId);
+            e.HasOne(x => x.MediaFile).WithMany(f => f.EpisodeLinks).HasForeignKey(x => x.MediaFileId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Episode>().WithMany().HasForeignKey(x => x.EpisodeId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<FileRecord>(e => e.HasIndex(x => x.Path).IsUnique());

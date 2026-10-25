@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type EpisodeRow, type Job, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
+import { LibraryPanel, RootFolderTool } from "./library";
 
 function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -87,6 +88,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     <>
       <h2>{label}</h2>
       <AddMedia kind={kind} profiles={profiles ?? []} onAdded={reload} />
+      <RootFolderTool kind={kind} onChanged={reload} />
       <ErrorLine message={error ?? message} />
       <div className="card table-wrap">
         {items && items.length === 0 && <p className="muted">Nothing here yet. Search TMDb above to add a {kind === "movie" ? "movie" : "series"}.</p>}
@@ -145,7 +147,7 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
   async function add(r: MetadataResult) {
     const pid = profileId === "" ? profiles[0]?.id : profileId;
     if (!pid) return setMessage("Create a quality profile in Settings first");
-    if (!root.startsWith("/")) return setMessage("Enter an absolute root folder, e.g. /data/media/movies");
+    if (!/^([A-Za-z]:[\\/]|\\\\|\/)/.test(root)) return setMessage("Enter a folder path, e.g. D:\\Media\\Movies");
     try {
       localStorage.setItem("onearr.root", root);
     } catch { /* storage unavailable */ }
@@ -171,7 +173,7 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
       </form>
       <div className="row" style={{ marginTop: ".5rem" }}>
         <label style={{ minWidth: 200 }}>Root folder
-          <input aria-label="Root folder" value={root} onChange={(e) => setRoot(e.target.value)} placeholder="/data/media/movies" />
+          <input aria-label="Root folder" value={root} onChange={(e) => setRoot(e.target.value)} placeholder="D:\\Media\\Movies" />
         </label>
         <label>Quality profile
           <select value={profileId} onChange={(e) => setProfileId(e.target.value ? Number(e.target.value) : "")}>
@@ -401,6 +403,7 @@ export function Settings() {
       <h2>Settings</h2>
       <ErrorLine message={error ?? message} />
       {data && <GeneralForm data={data} onSave={save} />}
+      <LibraryPanel />
 
       <div className="card">
         <h2>Quality profiles</h2>
@@ -437,10 +440,10 @@ function GeneralForm({ data, onSave }: { data: any; onSave: (body: Record<string
         <input type="password" autoComplete="off" value={tmdb} onChange={(e) => setTmdb(e.target.value)} placeholder={data.tmdbConfigured ? "Leave blank to keep the stored key" : "Paste your TMDb v3 key or v4 read token"} />
       </label>
       <label>Torrent download root (absolute)
-        <input value={torrentRoot} onChange={(e) => setTorrentRoot(e.target.value)} placeholder="/data/torrents" />
+        <input value={torrentRoot} onChange={(e) => setTorrentRoot(e.target.value)} placeholder="D:\\Downloads\\Torrents" />
       </label>
       <label>Media root (absolute, imports go here)
-        <input value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="/data/media" />
+        <input value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\\Media" />
       </label>
       <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
       <p className="muted">Automatic grabbing is not implemented in this build; all grabs are manual.</p>
@@ -544,7 +547,7 @@ export function Migration() {
   }
 
   async function importSelected() {
-    const items = (preview ?? []).filter((_, idx) => picked.has(idx)).map((item) => ({ type: item.type, tmdbId: item.tmdbId, title: item.title, monitored: item.monitored }));
+    const items = (preview ?? []).filter((_, idx) => picked.has(idx)).map((item) => ({ type: item.type, tmdbId: item.tmdbId, title: item.title, monitored: item.monitored, legacyPath: item.path, legacySource: kind }));
     if (!confirm(`Copy ${items.length} catalog entr${items.length === 1 ? "y" : "ies"} into OneArr? This only writes to OneArr's database. ${kind} is not modified.`)) return;
     try {
       const res = await api<{ results: { title: string; status: string; message?: string }[] }>("POST", "/api/migration/import", {
@@ -559,7 +562,7 @@ export function Migration() {
   return (
     <>
       <h2>Migration Preview</h2>
-      <p className="muted">Read-only: OneArr issues GET requests to the legacy API and never writes to it. Nothing is copied until you confirm.</p>
+      <p className="muted">Read-only: OneArr issues GET requests to the legacy API and never writes to it. Nothing is copied until you confirm. Existing files are not moved. After importing, map the legacy paths and run a library scan in Settings so existing files are recognised.</p>
       <form className="card row" onSubmit={loadPreview}>
         <select aria-label="Legacy application" value={kind} onChange={(e) => setKind(e.target.value as "sonarr" | "radarr")}>
           <option value="radarr">Radarr (movies)</option>
@@ -580,7 +583,7 @@ export function Migration() {
               </select>
             </label>
             <label>Root folder
-              <input value={root} onChange={(e) => setRoot(e.target.value)} placeholder={kind === "radarr" ? "/data/media/movies" : "/data/media/tv"} />
+              <input value={root} onChange={(e) => setRoot(e.target.value)} placeholder={kind === "radarr" ? "D:\\Media\\Movies" : "D:\\Media\\TV"} />
             </label>
             <button className="primary" onClick={importSelected} disabled={picked.size === 0 || !root}>Import {picked.size} selected</button>
           </div>
