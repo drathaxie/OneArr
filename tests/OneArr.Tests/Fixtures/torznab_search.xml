@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Fixture</title>
+    <item>
+      <title>The.Matrix.1999.2160p.BluRay.x265-GRP</title>
+      <link>magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01&amp;dn=matrix</link>
+      <size>25000000000</size>
+      <category>2000</category>
+      <category>2040</category>
+      <torznab:attr name="seeders" value="42" />
+      <torznab:attr name="infohash" value="abcdef0123456789abcdef0123456789abcdef01" />
+      <torznab:attr name="category" value="2040" />
+    </item>
+    <item>
+      <title>Test.Show.S01E02.720p.WEB-DL.x264</title>
+      <link>https://indexer.example/dl/2</link>
+      <enclosure url="https://indexer.example/dl/2.torrent" length="1500000000" type="application/x-bittorrent" />
+      <torznab:attr name="seeders" value="0" />
+      <torznab:attr name="category" value="5040" />
+    </item>
+  </channel>
+</rss>
