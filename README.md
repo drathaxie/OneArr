@@ -9,10 +9,12 @@ A self-hosted movie and TV manager built as one ASP.NET Core 10 process with a R
 - First-run password setup, bearer-token sign-in, `/health`.
 - TMDb search and add (movies and series), stable `(MediaType, Provider, ProviderId)` identity, de-duplicated re-adds, seasons and episodes stored, monitoring toggles, per-item root folder and quality profile.
 - Quality profiles (minimum and cutoff resolution, web-source toggle).
-- Generic Torznab indexers: manual search with accept/reject reasons per release. Automatic grabbing is **not implemented**; every grab is manual.
+- Generic Torznab indexers: manual search with accept/reject reasons per release.
+- Automatic grabbing (off by default): every 15 minutes, searches wanted movies and aired episodes, and grabs the best accepted release. Bounded to 10 items per pass, with backoff on failures and no second grab while a download is active. Turn it on with `PUT /api/settings` and `{"automaticGrabbing": true}` (the UI toggle is not built yet), or trigger a run with `POST /api/automation/wanted-search`.
 - qBittorrent WebUI v2 client: cookie login with re-login on 403, add magnet to a configured category (`onearr-movies` / `onearr-tv`), queue state sync.
 - Safe importer: canonical-path containment, symlink refusal, no overwrite, idempotent same-content reimport, hardlink on same filesystem, otherwise verified copy (SHA-256). Source files are never deleted. Dry-run is the default.
 - Read-only library scan of the media root.
+- Symlinks anywhere below the torrent or media root cause the import to fail closed.
 - Migration preview from Sonarr v3 (`/api/v3/series`) and Radarr v3 (`/api/v3/movie`), GET-only, followed by explicit confirmation to copy selected entries into OneArr's own database.
 
 ## Requirements
@@ -71,12 +73,12 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). The Docker daemon was not reachable in the build environment, so this path is **UNVERIFIED**. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image).
+The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). It was built and started in the development sandbox, with `/health`, the UI, auth and restart persistence checked. That build needed a sandbox-specific CA workaround for package downloads; a normal host does not. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image). Bind-mounted host folders with that ownership were not tested.
 
 ## Tests and smoke
 
 ```powershell
-dotnet test OneArr.slnx -c Release      # 59 backend tests (parsing, importer, providers, settings API), no network
+dotnet test OneArr.slnx -c Release      # 88 backend tests (parsing, search, importer containment, end-to-end, settings API), no network
 cd web
 npm test                                # 8 frontend tests (Settings screen forms), no network
 cd ..

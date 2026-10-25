@@ -1,46 +1,84 @@
 # PROGRESS
 
-Everything marked VERIFIED was executed in this environment. Everything else is labelled.
+Everything marked VERIFIED was executed. Everything else is labelled. Integration with real services is **not** claimed
+anywhere in this file: all upstream services were simulated with fakes that run inside the test process or on localhost.
 
 ## Verified (commands executed, results observed)
 
 | Item | Command | Result |
 |---|---|---|
-| .NET SDK 10.0.402 installed user-locally | `dotnet --info` | OK |
-| Restore | `dotnet restore OneArr.slnx` | OK |
-| Backend build | `dotnet build src/OneArr.Api` | 0 errors |
-| Backend unit and integration tests | `dotnet test OneArr.slnx -c Release` | 59 passed, 0 failed (includes 6 settings API tests) |
-| Frontend Settings tests | `npm test` (in `web/`) | 8 passed, 0 failed (General, quality profile and indexer forms) |
-| Frontend dependency audit | `npm audit` | 0 vulnerabilities (Vite 6.4.4, Vitest 4.1.12) |
-| Frontend typecheck and production build | `npx tsc --noEmit && npx vite build` (in `web/`) | OK, output to `src/OneArr.Api/wwwroot` |
-| EF Core initial migration | `dotnet-ef migrations add InitialCreate` | created `20261025023026_InitialCreate` |
-| End-to-end smoke against fake services | `bash tools/smoke/smoke.sh` | 27 of 27 checks passed |
-| Headless browser load at 390px | Playwright script | setup form renders, all 7 views navigate, no horizontal overflow, 0 console errors |
+| Solution build, Release | `dotnet build OneArr.slnx -c Release --no-incremental` | 0 errors, 0 warnings |
+| Backend tests | `dotnet test OneArr.slnx -c Release` | 88 passed, 0 failed |
+| Frontend typecheck, build, Settings tests | `npm run build`, `npm test` (in `web/`) | pass (8 Settings tests) |
+| Frontend audit | `npm audit` | 0 vulnerabilities |
+| End-to-end smoke against fake upstreams | `bash tools/smoke/smoke.sh` | 27 of 27 checks passed |
+| Container image build | `docker build` (see caveat below) | image built, all three stages |
+| Container start and health | `docker run ... onearr:local` | `/health` ok, UI served, API requires token |
+| Migrations on a fresh container database | container logs | `InitialCreate` and `AddSearchAttempts` applied |
+| Data survives container restart | restart, then login and read settings | login and settings persisted |
 
-Smoke coverage: health; auth required; first-run setup; second setup refused; wrong password refused; secrets not returned; TMDb search and add; re-add dedupe; release decisions with reasons; server refuses rejected grab; manual grab to qBittorrent with hash and category; duplicate grab refused; queue sync reads state; dry-run writes nothing; real import into the item's root folder; source retained; job marked Imported; import idempotent; legacy preview; legacy reader GET-only; dashboard counts; no qBittorrent delete call.
+### Docker caveat (read this)
 
-## Not verified / not done
+- The Docker daemon was started inside the sandbox (`dockerd`, vfs storage, iptables off). Base images pull.
+- The sandbox's network proxy re-signs TLS traffic with its own CA. Containers do not trust that CA, so `npm ci`
+  and `dotnet restore` fail inside a plain `docker build`. The image that was verified was built from a temporary
+  Dockerfile that installed the sandbox CA into the build stages. The repository Dockerfile was not changed for this.
+- On a normal host with a normal network, the repository Dockerfile is the one to use.
 
-- **Docker build and `docker compose up`: UNVERIFIED.** The Docker CLI exists but the daemon socket was absent.
-- **Live services: UNVERIFIED.** No real TMDb, indexer, qBittorrent, Sonarr or Radarr was contacted, by design.
-- **Fresh clone build: partially verified.** Restore, build and tests ran on Linux in the working tree; a clean clone and `npm ci` were not run separately.
-- **Windows: NOT VERIFIED by this environment.** The build commands were corrected for PowerShell. The smoke script is bash-only (run it from Git Bash or WSL). One symlink-refusal test returns early when symlink creation is not permitted, so that case is not verified on such Windows hosts. The importer hardlink path is Linux-only; Windows uses verified copy.
-- **Automatic grabbing and wanted-search automation: NOT IMPLEMENTED.** Manual only. The background scheduler runs queue sync and import only.
-- **Prowlarr bridge, Cardigann, Usenet, music, books, subtitles, requests: NOT IMPLEMENTED** (out of scope for this run).
-- **Fail-closed root-folder check** (item root outside the media root) is implemented in `DownloadService` but has no dedicated automated test; it is covered by code review only.
-- **Frontend tests cover the Settings screen only.** Other pages are verified by typecheck, build and one headless load.
-- **Test tooling dependency note:** Vitest 4.1.12 is installed with `--legacy-peer-deps` because npm 10 crashed resolving its optional peers. The lockfile is committed and `npm ci` works from it. Vitest 4.1.12 was published 2026-10-15, so it is recent; it is used because older versions carry audit advisories.
-- **Sonarr/Radarr response shapes** were written from public API knowledge and tested against fixtures, not against pinned upstream versions.
-- **Season selection** in the add form: all seasons are monitored; per-season selection is accepted by the API but not exposed in the UI.
-- **Import of multi-file season packs** is untested beyond the single-file path.
+### Bugs found and fixed in this run
 
-## Outstanding risks
+- **Dockerfile could not build at all.** It copied `OneArr.sln` (the file is `OneArr.slnx`) and `tests/`, which
+  `.dockerignore` excludes. Both lines were removed. The earlier "Docker not verified" status was correct, but the
+  Dockerfile itself was also broken.
+- **Importer followed symlinked directories.** Only a symlink as the final file was refused. A symlinked folder in the
+  torrent or media tree could lead outside the root. Every component below the root is now checked, including dangling links.
 
-- The browser session token lives in `sessionStorage`; a stolen token grants access until it expires (7 days). Deleting `secret.key` and restarting invalidates all tokens.
-- `ONEARR_TMDB_BASE_URL` is intended only for fixtures and should not be set in production.
-- Hardlink uses libc `link()` via P/Invoke, so it is Linux-only; other platforms fall back to verified copy.
-- A single OneArr process per `/config` is assumed; multiple instances sharing one SQLite file are not supported.
+## Automation (added in this run)
+
+- **Wanted detection:** monitored movies without a file, and monitored aired episodes without a file. Items with an
+  active download (queued, downloading, completed but not imported) are skipped.
+- **Scheduled Torznab search:** runs every 15 minutes in the scheduler, only when `automation.grab` is on. It is off by default.
+- **Grab selection:** the best accepted release from the existing ranker. Grabs go through the same `ReleaseService` as manual grabs.
+- **Duplicate-grab prevention:** a second grab for the same movie or episode is refused while one is active. Info-hash dedupe still applies.
+- **Bounded runs:** at most 10 items per pass (`SearchPolicy.MaxSearchesPerRun`).
+- **Backoff and retry:** no acceptable release waits 6 hours. Indexer or download-client failures back off 15 min, doubling to a 24 h cap. A grab waits 24 h before the item is looked at again.
+- **Persistent state:** `SearchAttempt` rows survive restarts (migration `AddSearchAttempts`). Existing migrations are unchanged.
+- **Endpoints:** `POST /api/automation/wanted-search` (manual run, shares the scheduler's lock) and `GET /api/automation/search-attempts`.
+
+## Filesystem containment (added in this run)
+
+Covered by `FilesystemContainmentTests`:
+sibling directories that share a name prefix (`torrents` vs `torrents-evil`), traversal in source and destination,
+symlinked directories in the source and destination trees, symlinked files as source, pre-existing symlinks at the
+destination (never followed), dangling symlinks (cannot create a file outside the root), dry-run still refusing symlinks.
+
+Symlink cases return early on hosts that cannot create symlinks (Windows without the privilege). Those cases are **not
+verified** on such hosts. Generic reparse points are allowed on purpose, so OneDrive placeholder files still import.
+
+## Integration tests (fakes only)
+
+`EndToEndTests.MissingMovieIsSearchedSubmittedCompletedAndImported` runs the full chain: wanted detection, scheduled
+Torznab search (GET only), accepted release, qBittorrent submission with category, downloading then completed,
+safe import into the media root, no second search after import, idempotent re-import, and no delete or pause calls.
+
+Also covered: episode targeting (only the matching episode is grabbed and imported into `Season 01`), dry-run changing
+nothing, and the scheduler lock preventing overlapping search runs.
+
+The download is simulated by writing a file into the temporary torrent root. Nothing is fetched. `RoutingHandler`
+throws for any host not explicitly routed, so tests cannot reach the network or a real indexer or client.
+
+## Not verified / not implemented
+
+- **Real Torznab indexers, Prowlarr, real qBittorrent, real TMDb: NOT TESTED.** Only fake servers were used.
+- **Upgrades** (replacing a file below the quality cutoff) are not searched. Only missing items are.
+- **Missing-status jobs** (not found in the client for 15 minutes) do not block a new grab, by design. A stuck release could be grabbed again.
+- **Season packs, specials, anime numbering, subtitles, music, books, requests:** out of scope.
+- **Windows:** the test suite was run on Windows earlier (59 backend tests); the new containment and search tests have
+  not been run on Windows yet. Symlink tests may return early there.
+- **Container networking inside the sandbox:** verified with the CA workaround only (see caveat above).
+- **Container as the non-root user with a bind-mounted host folder:** not tested. The verified run used a named volume.
 
 ## Next highest-value change
 
-Run `docker compose up --build` on a host with a working Docker daemon, then point the smoke test's fake services at the containerised app. Add a dedicated test for the root-folder containment failure path.
+Run the wanted search against a real Torznab indexer and a real qBittorrent instance on a staging host, with dry-run
+imports and a synthetic `/data`, and record the results here. Then add upgrade searching for items below the cutoff.
