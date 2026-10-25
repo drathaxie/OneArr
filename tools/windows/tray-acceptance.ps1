@@ -153,9 +153,10 @@ try {
 
     # ---- 1. Install from the extracted release folder and launch the installed copy.
     Start-Process -FilePath $releaseTray -WorkingDirectory $releaseDir -WindowStyle Hidden | Out-Null
-    $installed = Wait-Until { (Test-Path $tray) -and (Test-Path (Join-Path $app 'OneArr.Api.exe')) } 120
-    Check 'installs to %LOCALAPPDATA%\OneArr (tray and app folder)' $installed $root
     $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\OneArr.lnk'
+    # The installer writes the program files, then the autostart value, then the shortcut. Wait for all of them.
+    $installed = Wait-Until { (Test-Path $tray) -and (Test-Path (Join-Path $app 'OneArr.Api.exe')) -and (Test-Path $shortcut) } 120
+    Check 'installs to %LOCALAPPDATA%\OneArr (tray and app folder)' $installed $root
     Check 'Start Menu shortcut exists' (Test-Path $shortcut)
     $runValue = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name OneArr -ErrorAction SilentlyContinue).OneArr
     Check 'autostart is registered for the installed tray' ($runValue -like "*OneArr.Tray.exe*")
