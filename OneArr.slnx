@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OneArr.Api/OneArr.Api.csproj" />
+    <Project Path="src/OneArr.Application/OneArr.Application.csproj" />
+    <Project Path="src/OneArr.Domain/OneArr.Domain.csproj" />
+    <Project Path="src/OneArr.Infrastructure/OneArr.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OneArr.Tests/OneArr.Tests.csproj" />
+  </Folder>
+</Solution>

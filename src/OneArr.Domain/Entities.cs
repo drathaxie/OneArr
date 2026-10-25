@@ -1,0 +1,142 @@
+namespace OneArr.Domain;
+
+public enum MediaType { Movie = 1, Series = 2 }
+
+public enum DownloadStatus { Queued = 0, Downloading = 1, Completed = 2, Imported = 3, Failed = 4, Unknown = 5, Missing = 6 }
+
+public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4 }
+
+/// <summary>Movie or series. Identity is (MediaType, Provider, ProviderId) so IDs never collide across media types.</summary>
+public class MediaItem
+{
+    public int Id { get; set; }
+    public MediaType MediaType { get; set; }
+    public string Provider { get; set; } = "tmdb";
+    public string ProviderId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public int? Year { get; set; }
+    public string? Overview { get; set; }
+    public string? PosterPath { get; set; }
+    public bool Monitored { get; set; } = true;
+    public int QualityProfileId { get; set; }
+    public QualityProfile? QualityProfile { get; set; }
+    public string RootFolder { get; set; } = "";
+    public bool HasFile { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<Season> Seasons { get; set; } = new();
+    public List<Episode> Episodes { get; set; } = new();
+}
+
+public class Season
+{
+    public int Id { get; set; }
+    public int MediaItemId { get; set; }
+    public int SeasonNumber { get; set; }
+    public bool Monitored { get; set; } = true;
+    public List<Episode> Episodes { get; set; } = new();
+}
+
+public class Episode
+{
+    public int Id { get; set; }
+    public int MediaItemId { get; set; }
+    public int SeasonNumber { get; set; }
+    public int EpisodeNumber { get; set; }
+    public string Provider { get; set; } = "tmdb";
+    public string ProviderId { get; set; } = "";
+    public string Title { get; set; } = "";
+    public DateOnly? AirDate { get; set; }
+    public bool Monitored { get; set; } = true;
+    public bool HasFile { get; set; }
+}
+
+public class QualityProfile
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    /// <summary>Lowest acceptable resolution (720, 1080, 2160).</summary>
+    public int MinResolution { get; set; } = 720;
+    /// <summary>Resolution at which upgrades stop being sought.</summary>
+    public int CutoffResolution { get; set; } = 1080;
+    public bool AllowWebSources { get; set; } = true;
+}
+
+public class IndexerConfig
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    /// <summary>Server-side only. Never returned by the API.</summary>
+    public string ApiKey { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+}
+
+public class DownloadClientConfig
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public string Username { get; set; } = "";
+    /// <summary>Server-side only. Never returned by the API.</summary>
+    public string Password { get; set; } = "";
+    public string MovieCategory { get; set; } = "onearr-movies";
+    public string TvCategory { get; set; } = "onearr-tv";
+    public bool Enabled { get; set; } = true;
+}
+
+public class DownloadJob
+{
+    public int Id { get; set; }
+    public int? MediaItemId { get; set; }
+    public int? EpisodeId { get; set; }
+    public MediaType MediaType { get; set; }
+    public string ReleaseTitle { get; set; } = "";
+    public string Link { get; set; } = "";
+    /// <summary>Correlation key from the download client (torrent info hash), used to detect duplicates and match queue items.</summary>
+    public string? Hash { get; set; }
+    public string Category { get; set; } = "";
+    public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
+    public double Progress { get; set; }
+    public string ClientState { get; set; } = "";
+    public string? ContentPath { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public class ImportRecord
+{
+    public int Id { get; set; }
+    public int? DownloadJobId { get; set; }
+    public string SourcePath { get; set; } = "";
+    public string DestinationPath { get; set; } = "";
+    public ImportAction Action { get; set; }
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public class FileRecord
+{
+    public int Id { get; set; }
+    public string Path { get; set; } = "";
+    public long Size { get; set; }
+    public DateTimeOffset ScannedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public class JobHistory
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? FinishedAt { get; set; }
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+}
+
+/// <summary>Key/value application settings (TMDb key, admin password hash, flags).</summary>
+public class AppSetting
+{
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+}
