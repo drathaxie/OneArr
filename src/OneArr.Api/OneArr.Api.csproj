@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneArr.Domain\OneArr.Domain.csproj" />
+    <ProjectReference Include="..\OneArr.Application\OneArr.Application.csproj" />
+    <ProjectReference Include="..\OneArr.Infrastructure\OneArr.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
