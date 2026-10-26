@@ -282,6 +282,64 @@ public class LibraryFailClosedTests
         Assert.Equal(MediaFileStatus.Present, (await check.MediaFiles.SingleAsync()).Status);
     }
 
+    /// <summary>
+    /// Review lists are capped so a large library cannot produce a huge stored plan. The counts must stay exact,
+    /// because the acknowledgement gate depends on them.
+    /// </summary>
+    [Fact]
+    public async Task Capped_review_lists_keep_exact_counts_for_the_acknowledgement_gate()
+    {
+        var world = await WorldAsync((MediaType.Movie, MovieRoot));
+        var fs = OnlineFs(MovieRoot);
+        for (var i = 0; i < 5; i++) fs.Put(MovieRoot, $"Loose {i}/Loose {i}.mkv");
+        var reconciler = new LibraryReconciler(world.Db, fs, world.Time, reviewListLimit: 2);
+
+        var preview = await reconciler.PreviewAsync(default);
+
+        Assert.Equal(2, preview.Plan.Unmatched.Count);
+        Assert.Equal(5, preview.Plan.UnmatchedCount);
+        var applied = await reconciler.ApplyAsync(preview.PlanId, null, acknowledgeUnmatched: false, default);
+        Assert.False(applied.Automation.Allowed);
+        Assert.Contains("5 existing file(s)", applied.Automation.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Apply writes in batches and clears change tracking between them. More than two batches must persist every row,
+    /// every HasFile and the root's scan state. A regression here would be silent, so the database is read back.
+    /// </summary>
+    [Fact]
+    public async Task A_batched_apply_persists_every_link_and_flag_across_batch_boundaries()
+    {
+        const int total = 1201;
+        var world = await WorldAsync((MediaType.Movie, MovieRoot));
+        var fs = OnlineFs(MovieRoot);
+        await using (var db = world.Db.CreateDbContext())
+        {
+            var profile = await db.QualityProfiles.FirstAsync();
+            for (var i = 0; i < total; i++)
+            {
+                var year = 1950 + i % 70;
+                db.MediaItems.Add(new MediaItem
+                {
+                    MediaType = MediaType.Movie, Provider = "tmdb", ProviderId = (5000 + i).ToString(), Title = $"Batch {i}", Year = year,
+                    QualityProfileId = profile.Id, RootFolder = MovieRoot, Monitored = true, CreatedAt = world.Time.GetUtcNow(),
+                });
+                fs.Put(MovieRoot, $"Batch {i} ({year})/Batch {i} ({year}).mkv", 100 + i);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var result = await ScanAndApplyAsync(Reconciler(world, fs));
+
+        Assert.True(result.Complete);
+        Assert.Equal(total, result.Linked);
+        await using var check = world.Db.CreateDbContext();
+        Assert.Equal(total, await check.MediaFiles.CountAsync(f => f.Status == MediaFileStatus.Present));
+        Assert.Equal(total, await check.MediaItems.CountAsync(m => m.HasFile));
+        Assert.Equal(Enumerable.Range(0, total).Sum(i => 100L + i), await check.MediaFiles.SumAsync(f => f.SizeBytes));
+        Assert.True((await check.LibraryRoots.SingleAsync()).LastScanComplete);
+    }
+
     [Fact]
     public async Task A_cancelled_preview_writes_nothing()
     {
@@ -297,6 +355,35 @@ public class LibraryFailClosedTests
         await using var db = world.Db.CreateDbContext();
         Assert.Empty(db.LibraryScanPlans);
         Assert.Empty(db.MediaFiles);
+    }
+
+    /// <summary>
+    /// A share can drop offline after the root was checked and while probes run. Its files then look missing, and clearing HasFile
+    /// would send the item back to the search. The scan must notice and withhold every missing decision under that folder.
+    /// </summary>
+    [Fact]
+    public async Task A_folder_that_drops_offline_during_the_scan_yields_no_missing_decisions()
+    {
+        var world = await WorldAsync((MediaType.Movie, MovieRoot));
+        var fs = OnlineFs(MovieRoot);
+        var movie = await AddMovieAsync(world, "Dune", 2021);
+        fs.Put(MovieRoot, "Dune (2021)/Dune (2021).mkv");
+        var reconciler = Reconciler(world, fs);
+        await ScanAndApplyAsync(reconciler);
+        fs.Delete(MovieRoot, "Dune (2021)/Dune (2021).mkv");
+        fs.DropRootOnProbe = MovieRoot;
+
+        var preview = await reconciler.PreviewAsync(default);
+
+        Assert.Empty(preview.Plan.Missing);
+        Assert.Empty(preview.Plan.Unknown);
+        Assert.False(preview.Plan.Complete);
+        Assert.Equal(LibraryRootState.Unavailable, preview.Plan.Roots.Single().State);
+        await reconciler.ApplyAsync(preview.PlanId, null, false, default);
+        await using var db = world.Db.CreateDbContext();
+        Assert.True((await db.MediaItems.FindAsync(movie))!.HasFile);
+        // Offline when applied, so the file is Inaccessible: it keeps its availability and is not treated as missing.
+        Assert.Equal(MediaFileStatus.Inaccessible, (await db.MediaFiles.SingleAsync()).Status);
     }
 
     [Fact]

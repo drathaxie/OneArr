@@ -302,8 +302,16 @@ internal sealed class FakeLibraryFs : ILibraryFileSystem
             IncompleteReason: unreadable.Count == 0 ? null : $"{unreadable.Count} folder(s) could not be read"));
     }
 
+    /// <summary>When set, the next probe takes this root offline first, as a share dropping mid-scan would.</summary>
+    public string? DropRootOnProbe { get; set; }
+
     public Task<FileProbe> ProbeFileAsync(string path, CancellationToken ct)
     {
+        if (DropRootOnProbe is { } dropped)
+        {
+            RootStates[dropped] = LibraryRootState.Unavailable;
+            DropRootOnProbe = null;
+        }
         if (_undecidable.Contains(path)) return Task.FromResult(new FileProbe(FileProbeState.Unknown, "I/O error"));
         if (_unreadable.Any(u => path.StartsWith(u + "/", StringComparison.Ordinal))) return Task.FromResult(new FileProbe(FileProbeState.Unknown, "Access denied"));
         return Task.FromResult(new FileProbe(_existing.Contains(path) ? FileProbeState.Exists : FileProbeState.Missing));
