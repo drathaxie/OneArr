@@ -26,7 +26,11 @@ public static class ApiEndpoints
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
-    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null);
+    public sealed record SeasonSelection(int SeasonNumber, bool Monitored);
+    public sealed record EpisodeSelection(int SeasonNumber, int EpisodeNumber, bool Monitored);
+    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null, List<SeasonSelection>? Seasons = null, List<EpisodeSelection>? Episodes = null, bool EpisodesUnknown = false);
+    public sealed record MonitoringSyncPreview(List<MonitoringChange> Changes, List<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked, List<string> EpisodesUnknownTitles);
+    public sealed record MonitoringSyncBody(string Kind, string BaseUrl, string ApiKey, bool? Apply = null, MonitoringSyncPreview? Preview = null);
     public sealed record LibraryRootBody(string Type, string Path, string? Label);
     public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
     public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
@@ -135,6 +139,46 @@ public static class ApiEndpoints
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
             await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
+
+        api.MapPatch("/media/{id:int}/seasons/{season:int}", async (int id, int season, PatchMediaBody body, MediaService media, CancellationToken ct) =>
+            body.Monitored is bool m && await media.UpdateSeasonMonitoredAsync(id, season, m, ct) ? Results.NoContent() : Results.NotFound());
+
+        api.MapPatch("/media/episodes/{episodeId:int}", async (int episodeId, PatchMediaBody body, MediaService media, CancellationToken ct) =>
+            body.Monitored is bool m && await media.UpdateEpisodeMonitoredAsync(episodeId, m, ct) ? Results.NoContent() : Results.NotFound());
+
+        // Detail view: seasons, episodes, linked files, and per-episode file resolution in one read.
+        // Episode resolution comes from the linked file row, not from the filename, so a missing file has none.
+        api.MapGet("/media/{id:int}/detail", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var item = await c.MediaItems.AsNoTracking().Include(m => m.Seasons).Include(m => m.Episodes).FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+            var files = await c.MediaFiles.AsNoTracking().Where(f => f.MediaItemId == id).OrderBy(f => f.Path)
+                .Select(f => new { f.Path, f.SizeBytes, f.Resolution, f.Status, f.MatchMethod }).ToListAsync(ct);
+            var episodeIds = item.Episodes.Select(e => e.Id).ToHashSet();
+            var resolutions = await c.MediaFileEpisodes.AsNoTracking().Join(c.MediaFiles.AsNoTracking(), l => l.MediaFileId, f => f.Id,
+                (l, f) => new { l.EpisodeId, f.Resolution }).Where(x => episodeIds.Contains(x.EpisodeId)).ToListAsync(ct);
+            var resolutionByEpisode = resolutions.GroupBy(x => x.EpisodeId).ToDictionary(g => g.Key, g => g.First().Resolution);
+            var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+            return Results.Ok(new
+            {
+                item.Id, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
+                item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
+                seasons = item.Seasons.OrderBy(s => s.SeasonNumber).Select(s => new
+                {
+                    s.SeasonNumber, s.Monitored,
+                    episodeCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber),
+                    hasFileCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber && e.HasFile),
+                    wantedCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber && item.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today),
+                }),
+                episodes = item.Episodes.OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber).Select(e => new
+                {
+                    e.Id, e.SeasonNumber, e.EpisodeNumber, e.Title, e.AirDate, e.Monitored, e.HasFile,
+                    resolution = resolutionByEpisode.GetValueOrDefault(e.Id),
+                }),
+                files,
+            });
+        });
 
         api.MapDelete("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
             await media.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound());
@@ -306,6 +350,17 @@ public static class ApiEndpoints
             c.LibraryRoots.Add(root);
             await c.SaveChangesAsync(ct);
             return Results.Ok(root);
+        });
+
+        // Live reachability check for one configured folder. Read-only: it does not scan, does not
+        // change the stored last-scan state, and does not touch any file in the folder.
+        api.MapPost("/library/roots/{id:int}/test", async (int id, ILibraryFileSystem fs, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var root = await c.LibraryRoots.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+            if (root is null) return Results.NotFound();
+            var check = await fs.CheckRootAsync(root.Path, ct);
+            return Results.Ok(new { root.Id, root.Path, state = check.State.ToString(), check.Message });
         });
 
         api.MapDelete("/library/roots/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
@@ -532,7 +587,7 @@ public static class ApiEndpoints
             return Results.Ok(new
             {
                 readOnly = true,
-                items = items.Where(i => i.Error is null).Select(i => new { type = i.Type == MediaType.Movie ? "movie" : "series", i.Title, i.Year, i.TmdbId, i.TvdbId, i.ImdbId, i.Path, i.Monitored }),
+                items = items.Where(i => i.Error is null).Select(i => new { type = i.Type == MediaType.Movie ? "movie" : "series", i.Title, i.Year, i.TmdbId, i.TvdbId, i.ImdbId, i.Path, i.Monitored, seasons = (i.Seasons ?? []).Select(s => new { s.SeasonNumber, s.Monitored }), episodes = (i.Episodes ?? []).Select(e => new { e.SeasonNumber, e.EpisodeNumber, e.Monitored }), i.EpisodesUnknown }),
                 errors = items.Where(i => i.Error is not null).Select(i => new { i.Title, i.Error }),
             });
         });
@@ -549,7 +604,26 @@ public static class ApiEndpoints
                 }
                 try
                 {
-                    var r = await media.AddAsync(new AddMediaRequest(ParseType(sel.Type), tmdb.ToString(), body.QualityProfileId, body.RootFolder, sel.Monitored, null, true), ct);
+                    var type = ParseType(sel.Type);
+                    // Safe skip, not a silent default: a new series with no season monitoring data must
+                    // never be imported as "all monitored" — that was the original inflated-wanted bug.
+                    // An already-imported series is different: AddAsync returns it unchanged, so it still
+                    // reports "exists" and only its legacy path is filled in below.
+                    if (type == MediaType.Series && sel.Seasons is not { Count: > 0 })
+                    {
+                        await using var check = await db.CreateDbContextAsync(ct);
+                        var exists = await check.MediaItems.AnyAsync(m => m.MediaType == type && m.Provider == "tmdb" && m.ProviderId == tmdb.ToString(), ct);
+                        if (ShouldSkipNewSeriesImport(type, sel.Seasons, exists))
+                        {
+                            results.Add(new { sel.Title, status = "skipped", message = $"No season monitoring data from {sel.LegacySource ?? "the legacy source"}; skipped so no season is silently marked monitored. Import again once seasons are reported, or check the series in Sonarr." });
+                            continue;
+                        }
+                    }
+                    // New series keep Sonarr's season flags and, when supplied, per-episode flags.
+                    // Existing items are returned unchanged here; use /migration/monitoring-sync for them.
+                    var monitorSeasons = sel.Seasons is { Count: > 0 } ? sel.Seasons.Where(s => s.Monitored).Select(s => s.SeasonNumber).ToList() : null;
+                    var monitorEpisodes = sel.Episodes is { Count: > 0 } ? sel.Episodes.Select(e => new EpisodeMonitor(e.SeasonNumber, e.EpisodeNumber, e.Monitored)).ToList() : null;
+                    var r = await media.AddAsync(new AddMediaRequest(type, tmdb.ToString(), body.QualityProfileId, body.RootFolder, sel.Monitored, monitorSeasons, monitorSeasons is null, monitorEpisodes), ct);
                     // Keep the original path so existing files can be matched. An existing value is never overwritten.
                     if (sel.LegacyPath is { Length: > 0 } legacy)
                     {
@@ -562,7 +636,10 @@ public static class ApiEndpoints
                             await c.SaveChangesAsync(ct);
                         }
                     }
-                    results.Add(new { sel.Title, status = r.Created ? "added" : "exists", id = r.Item.Id });
+                    var warning = r.Created && sel.EpisodesUnknown
+                        ? "Warning: episode monitoring data was unavailable, so episodes took their season flags. Run monitoring sync later to restore per-episode exceptions."
+                        : null;
+                    results.Add(new { sel.Title, status = r.Created ? "added" : "exists", id = r.Item.Id, message = warning });
                 }
                 catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException)
                 {
@@ -571,6 +648,76 @@ public static class ApiEndpoints
             }
             return Results.Ok(new { results });
         });
+
+        // Monitoring sync for already-imported items. Preview by default (apply: false): no writes at all.
+        // Apply only changes Monitored flags on matched items; it never creates items, never touches file
+        // state, quality profiles, root folders, or titles, and a body-supplied key is never stored.
+        // Apply requires the exact preview the user saw: the server recomputes from the current source
+        // and the current database, compares it to the submitted preview, and refuses with 409 (plus the
+        // fresh preview) if the source, the database, or any proposed change has moved since preview.
+        api.MapPost("/migration/monitoring-sync", async (MonitoringSyncBody body, MediaService media, ILegacyArrReader reader, CancellationToken ct) =>
+        {
+            var items = await reader.ReadAsync(new LegacyArrSource(body.Kind, body.BaseUrl, body.ApiKey), ct);
+            var fresh = await media.SyncLegacyMonitoringAsync(items.Where(i => i.Error is null).ToList(), apply: false, ct);
+            if (body.Apply == true)
+            {
+                if (body.Preview is null)
+                    return Results.BadRequest(new { error = "Preview required: run Preview monitoring sync for this source first, then Apply the preview you saw." });
+                if (!PreviewMatches(fresh, body.Preview))
+                    return Results.Conflict(new
+                    {
+                        error = "The source or proposed changes changed since your preview. Review the fresh preview below before applying.",
+                        preview = MapSyncResult(fresh),
+                    });
+                var applied = await media.SyncLegacyMonitoringAsync(items.Where(i => i.Error is null).ToList(), apply: true, ct);
+                return Results.Ok(MapSyncResult(applied, applied: true));
+            }
+            return Results.Ok(MapSyncResult(fresh));
+        });
+    }
+
+    /// <summary>Public for testing: the skip rule for series imports with no season monitoring data.</summary>
+    public static bool ShouldSkipNewSeriesImport(MediaType type, IReadOnlyList<SeasonSelection>? seasons, bool exists) =>
+        type == MediaType.Series && seasons is not { Count: > 0 } && !exists;
+
+    public static object MapSyncResult(MonitoringSyncResult result, bool applied = false) => new
+    {
+        applied,
+        result.ItemsChecked, result.SkippedNoTmdb,
+        changes = result.Changes.Select(c => new { c.TmdbId, c.Title, c.Type, c.SeriesMonitoredBefore, c.SeriesMonitoredAfter, c.MonitoredChanged, c.SeasonsChanged, c.EpisodesChanged, c.EpisodesUnknown, seasonChanges = c.SeasonChanges.Select(s => new { s.SeasonNumber, s.Before, s.After }), episodeChanges = c.EpisodeChanges.Select(e => new { e.SeasonNumber, e.EpisodeNumber, e.Before, e.After }) }),
+        unmatchedTitles = result.UnmatchedTitles,
+        episodesUnknownTitles = result.EpisodesUnknownTitles,
+    };
+
+    /// <summary>Public for testing: exact preview equality, so Apply cannot run on a stale preview.</summary>
+    public static bool PreviewMatches(MonitoringSyncResult fresh, MonitoringSyncPreview preview)
+    {
+        if (fresh.ItemsChecked != preview.ItemsChecked || fresh.SkippedNoTmdb != preview.SkippedNoTmdb) return false;
+        if (!fresh.UnmatchedTitles.OrderBy(x => x).SequenceEqual(preview.UnmatchedTitles.OrderBy(x => x))) return false;
+        if (!fresh.EpisodesUnknownTitles.OrderBy(x => x).SequenceEqual(preview.EpisodesUnknownTitles.OrderBy(x => x))) return false;
+        var freshChanges = fresh.Changes.ToDictionary(c => (c.TmdbId, c.Type));
+        var previewChanges = preview.Changes.ToDictionary(c => (c.TmdbId, c.Type));
+        if (freshChanges.Count != previewChanges.Count) return false;
+        foreach (var (key, f) in freshChanges)
+        {
+            if (!previewChanges.TryGetValue(key, out var p)) return false;
+            if (f.Title != p.Title || f.SeriesMonitoredBefore != p.SeriesMonitoredBefore || f.SeriesMonitoredAfter != p.SeriesMonitoredAfter
+                || f.MonitoredChanged != p.MonitoredChanged || f.SeasonsChanged != p.SeasonsChanged || f.EpisodesChanged != p.EpisodesChanged
+                || f.EpisodesUnknown != p.EpisodesUnknown) return false;
+            // Counts alone are not enough: the exact seasons and episodes, with their old and proposed
+            // values, must match, or a preview for episodes 1 and 2 would pass after the source moved to 3 and 4.
+            var freshSeasons = (f.SeasonChanges ?? []).ToDictionary(s => s.SeasonNumber, s => (s.Before, s.After));
+            var previewSeasons = (p.SeasonChanges ?? []).ToDictionary(s => s.SeasonNumber, s => (s.Before, s.After));
+            if (freshSeasons.Count != previewSeasons.Count) return false;
+            foreach (var (season, values) in freshSeasons)
+                if (!previewSeasons.TryGetValue(season, out var pv) || pv != values) return false;
+            var freshEpisodes = (f.EpisodeChanges ?? []).ToDictionary(e => (e.SeasonNumber, e.EpisodeNumber), e => (e.Before, e.After));
+            var previewEpisodes = (p.EpisodeChanges ?? []).ToDictionary(e => (e.SeasonNumber, e.EpisodeNumber), e => (e.Before, e.After));
+            if (freshEpisodes.Count != previewEpisodes.Count) return false;
+            foreach (var (episode, values) in freshEpisodes)
+                if (!previewEpisodes.TryGetValue(episode, out var pv) || pv != values) return false;
+        }
+        return true;
     }
 
     /// <summary>The folder above a stored legacy path. Radarr and Sonarr store the movie or series folder itself.</summary>

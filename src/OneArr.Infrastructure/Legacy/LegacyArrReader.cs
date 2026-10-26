@@ -46,6 +46,7 @@ public sealed class LegacyArrReader : ILegacyArrReader
         if (doc.RootElement.ValueKind != JsonValueKind.Array) throw new ExternalServiceException($"{kind} returned an unexpected payload");
 
         var items = new List<LegacyItem>();
+        var sonarrIds = new List<int?>();
         var type = kind == "sonarr" ? MediaType.Series : MediaType.Movie;
         foreach (var e in doc.RootElement.EnumerateArray())
         {
@@ -54,20 +55,79 @@ public sealed class LegacyArrReader : ILegacyArrReader
                 var title = Str(e, "title");
                 if (string.IsNullOrWhiteSpace(title)) throw new FormatException("missing title");
                 var tmdb = Int(e, "tmdbId");
+                var seasons = new List<LegacySeason>();
+                if (e.TryGetProperty("seasons", out var seasonsJson) && seasonsJson.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var s in seasonsJson.EnumerateArray())
+                    {
+                        if (Int(s, "seasonNumber") is int n)
+                            seasons.Add(new LegacySeason(n, Bool(s, "monitored")));
+                    }
+                }
+                sonarrIds.Add(kind == "sonarr" && tmdb is not null ? Int(e, "id") : null);
                 if (tmdb is null)
                 {
                     items.Add(new LegacyItem(kind, type, title, Int(e, "year"), null, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"),
-                        "No TMDb id on this item; cannot map it to the TMDb catalog"));
+                        "No TMDb id on this item; cannot map it to the TMDb catalog", seasons));
                     continue;
                 }
-                items.Add(new LegacyItem(kind, type, title, Int(e, "year"), tmdb, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"), null));
+                items.Add(new LegacyItem(kind, type, title, Int(e, "year"), tmdb, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"), null, seasons));
             }
             catch (Exception ex) when (ex is FormatException or InvalidOperationException)
             {
+                sonarrIds.Add(null);
                 items.Add(new LegacyItem(kind, type, "(unreadable item)", null, null, null, null, null, false, "Malformed legacy record: " + ex.Message));
             }
         }
+
+        // Episode-level flags, one GET per Sonarr series. Whenever an episode-level read cannot be
+        // performed — not only when the request fails, but also when the Sonarr series id is absent —
+        // the series is marked EpisodesUnknown. Without that, the missing-data case left Episodes null
+        // with EpisodesUnknown false, and sync would fall back to season flags and silently overwrite
+        // per-episode exceptions. A failed read never fails the whole read.
+        if (kind == "sonarr")
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (sonarrIds[i] is not int sonarrId)
+                {
+                    items[i] = items[i] with { EpisodesUnknown = true };
+                    continue;
+                }
+                var (episodes, unknown) = await FetchEpisodesAsync(client, source.ApiKey, sonarrId, ct);
+                items[i] = items[i] with { Episodes = episodes, EpisodesUnknown = unknown };
+            }
+        }
         return items;
+    }
+
+    private static async Task<(List<LegacyEpisode>? Episodes, bool Unknown)> FetchEpisodesAsync(HttpClient client, string apiKey, int seriesId, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await OutboundHttp.SendWithRetryAsync(client, () =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, $"api/v3/episode?seriesId={seriesId}");
+                req.Headers.Add("X-Api-Key", apiKey);
+                req.Headers.Accept.ParseAdd("application/json");
+                return req;
+            }, ct);
+            if (!response.IsSuccessStatusCode) return (null, true);
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return (null, true);
+            var episodes = new List<LegacyEpisode>();
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                if (Int(e, "seasonNumber") is int season && Int(e, "episodeNumber") is int episode)
+                    episodes.Add(new LegacyEpisode(season, episode, Bool(e, "monitored")));
+            }
+            return (episodes, false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return (null, true);
+        }
     }
 
     private static string? Str(JsonElement e, string name) =>

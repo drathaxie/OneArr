@@ -9,8 +9,8 @@ type RootReport = { id: number; path: string; state: string; message: string | n
 type Plan = {
   planId: number;
   plan: {
-    roots: RootReport[]; links: (Entry & { sizeBytes: number; resolution?: number | null; mediaItemId: number; mediaFileId: number | null })[]; missing: Entry[];
-    unknown: (Entry & { reason?: string })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number;
+    roots: RootReport[]; links: (Entry & { sizeBytes: number; resolution?: number | null; mediaItemId: number; mediaFileId: number | null })[]; missing: (Entry & { mediaItemId?: number })[];
+    unknown: (Entry & { reason?: string; mediaItemId?: number })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number;
     complete: boolean; warnings: string[];
   };
 };
@@ -38,6 +38,7 @@ export function LibraryPanel() {
   const [result, setResult] = useState<ApplyResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [acknowledge, setAcknowledge] = useState(false);
+  const [rootTests, setRootTests] = useState<Record<number, string>>({});
 
   async function refresh() {
     try {
@@ -116,7 +117,11 @@ export function LibraryPanel() {
                 <span className={stateClass(r.lastState)}>{r.lastState}{r.lastMessage ? `: ${r.lastMessage}` : ""}</span>
                 <span className="muted">{r.lastSuccessfulScanUtc ? ` · last applied ${new Date(r.lastSuccessfulScanUtc).toLocaleString()}` : " · not scanned yet"}</span>
               </span>
-              <button className="small danger" disabled={busy} onClick={() => run(async () => { await api("DELETE", `/api/library/roots/${r.id}`); await refresh(); })}>Remove</button>
+              <span className="row">
+                <button className="small" disabled={busy} onClick={() => run(async () => { const res = await api<{ state: string; message: string | null }>("POST", `/api/library/roots/${r.id}/test`); setRootTests((t) => ({ ...t, [r.id]: `${res.state}${res.message ? `: ${res.message}` : ""}` })); })}>Test folder</button>
+                <button className="small danger" disabled={busy} onClick={() => run(async () => { await api("DELETE", `/api/library/roots/${r.id}`); await refresh(); })}>Remove</button>
+              </span>
+              {rootTests[r.id] && <span className="muted">Test: {rootTests[r.id]}</span>}
             </li>
           ))}
         </ul>
@@ -156,6 +161,17 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
 }) {
   const p = plan.plan;
   const selected = selectedCount(plan, unchecked);
+  const [titles, setTitles] = useState<Record<number, string>>({});
+  useEffect(() => {
+    (async () => {
+      try {
+        const movies = await api<{ id: number; title: string }[]>("GET", "/api/media?type=movie");
+        const series = await api<{ id: number; title: string }[]>("GET", "/api/media?type=series");
+        setTitles(Object.fromEntries([...movies, ...series].map((m) => [m.id, m.title])));
+      } catch { /* titles are context only; the plan is still usable without them */ }
+    })();
+  }, [plan.planId]);
+  const titleFor = (id?: number) => (id !== undefined && titles[id] ? titles[id] : undefined);
   return (
     <div style={{ marginTop: ".75rem" }}>
       <p>
@@ -176,7 +192,7 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
           <div className="table-wrap"><table>
             <thead><tr><th /><th>File</th><th>Size</th><th>Resolution</th><th>Matched by</th></tr></thead>
             <tbody>{p.links.slice(0, PAGE_LIMIT).map((l) => (
-              <tr key={l.path}><td><input type="checkbox" aria-label={`Link ${l.path}`} checked={!unchecked.has(l.path)} onChange={() => onToggle(l.path)} /></td><td className="muted">{l.path}</td><td>{formatBytes(l.sizeBytes)}</td><td>{l.resolution ? `${l.resolution}p` : "—"}</td><td>{l.method}{l.mediaFileId ? " (update)" : ""}</td></tr>
+              <tr key={l.path}><td><input type="checkbox" aria-label={`Link ${l.path}`} checked={!unchecked.has(l.path)} onChange={() => onToggle(l.path)} /></td><td><strong>{titleFor(l.mediaItemId) ?? "Unknown title"}</strong><br /><span className="muted">{l.path}</span></td><td>{formatBytes(l.sizeBytes)}</td><td>{l.resolution ? `${l.resolution}p` : "—"}</td><td>{l.method}{l.mediaFileId ? " (update)" : ""}</td></tr>
             ))}</tbody>
           </table></div>
         </>
@@ -186,7 +202,7 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
         <>
           <h2>Status unknown (left as it was)</h2>
           <p className="muted">The disk could not confirm these files either way. They keep their current availability, and their items are not grabbed again until a scan can read them.</p>
-          <ul>{p.unknown.slice(0, PAGE_LIMIT).map((u) => <li key={u.path}><span className="muted">{u.path}</span> — {u.reason}</li>)}</ul>
+          <ul>{p.unknown.slice(0, PAGE_LIMIT).map((u) => <li key={u.path}>{titleFor(u.mediaItemId) && <strong>{titleFor(u.mediaItemId)}: </strong>}<span className="muted">{u.path}</span> — {u.reason}</li>)}</ul>
         </>
       )}
 
@@ -195,7 +211,7 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
           <h2>Confirmed missing</h2>
           <p className="muted">These files are gone from an online folder. Their items will show as wanted again.</p>
           <ul>{p.missing.slice(0, PAGE_LIMIT).map((m) => (
-            <li key={m.path}><label className="inline"><input type="checkbox" checked={!unchecked.has(m.path)} onChange={() => onToggle(m.path)} /> <span className="muted">{m.path}</span></label></li>
+            <li key={m.path}><label className="inline"><input type="checkbox" checked={!unchecked.has(m.path)} onChange={() => onToggle(m.path)} /> {titleFor(m.mediaItemId) && <strong>{titleFor(m.mediaItemId)}: </strong>}<span className="muted">{m.path}</span></label></li>
           ))}</ul>
         </>
       )}
@@ -203,7 +219,7 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
       {p.ambiguous.length > 0 && (
         <>
           <h2>Ambiguous (not linked)</h2>
-          <ul>{p.ambiguous.slice(0, PAGE_LIMIT).map((a) => <li key={a.path}><span className="muted">{a.path}</span> — {a.reason}</li>)}</ul>
+          <ul>{p.ambiguous.slice(0, PAGE_LIMIT).map((a) => <li key={a.path}><span className="muted">{a.path}</span> — {a.reason}{a.candidateIds && a.candidateIds.length > 0 ? ` Possible matches: ${a.candidateIds.map((id) => titles[id] ?? `#${id}`).join(", ")}` : ""}</li>)}</ul>
         </>
       )}
       {p.unmatched.length > 0 && (

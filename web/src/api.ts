@@ -56,10 +56,75 @@ export interface MediaItem {
   title: string;
   year: number | null;
   overview: string | null;
+  posterPath: string | null;
   monitored: boolean;
   qualityProfileId: number;
   rootFolder: string;
   hasFile: boolean;
+  legacyPath?: string | null;
+  legacySource?: string | null;
+}
+
+export function posterUrl(posterPath: string | null | undefined): string | null {
+  if (!posterPath) return null;
+  if (posterPath.startsWith("http")) return posterPath;
+  return `https://image.tmdb.org/t/p/w342${posterPath}`;
+}
+
+export interface DetailSeason {
+  seasonNumber: number;
+  monitored: boolean;
+  episodeCount: number;
+  hasFileCount: number;
+  wantedCount: number;
+}
+
+export interface DetailEpisode {
+  id: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  airDate: string | null;
+  monitored: boolean;
+  hasFile: boolean;
+  resolution: number | null;
+}
+
+export interface MediaDetail {
+  id: number;
+  mediaType: "Movie" | "Series";
+  title: string;
+  year: number | null;
+  overview: string | null;
+  posterPath: string | null;
+  monitored: boolean;
+  qualityProfileId: number;
+  rootFolder: string;
+  hasFile: boolean;
+  legacyPath: string | null;
+  legacySource: string | null;
+  seasons: DetailSeason[];
+  episodes: DetailEpisode[];
+  files: MediaFile[];
+}
+
+export interface WantedEpisode {
+  mediaItemId: number;
+  episodeId: number;
+  seriesTitle: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string;
+  airDate: string | null;
+  hasActiveDownload: boolean;
+}
+
+export interface WantedList {
+  movies: MediaItem[];
+  episodes: WantedEpisode[];
+  unmonitoredMoviesWithoutFile: number;
+  unmonitoredEpisodesWithoutFile: number;
+  movieHasActiveDownload: Record<string, boolean>;
 }
 
 export interface QualityProfile {
