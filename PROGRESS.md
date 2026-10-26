@@ -7,6 +7,54 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Review fixes to PR #4 (branch `visual-library`, same PR, not merged)
+
+Four review findings, all fixed on the same branch:
+
+1. **Preview missed series/movie-only monitored changes (bug, fixed).** `SyncLegacyMonitoringAsync` compared
+   `item.Monitored` to its original value after conditionally updating it, so during Preview (no update) a
+   series-level-only change was never reported. Now `monitoredChanged` is computed before any mutation, is
+   reported as its own field in every change, and preview and apply report the same change set.
+2. **Episode-level Sonarr exceptions (now supported, not just documented).** The reader now also reads
+   `GET /api/v3/episode?seriesId={id}` for each Sonarr series (one GET per series, a one-off migration cost).
+   Sync applies per-episode flags, which win over season flags, and episodes Sonarr does not report are left
+   alone. New imports pass episode flags through to `AddAsync`, which also prefers them over the season flag.
+   If an episode read fails, that series is marked `EpisodesUnknown`: its season flags still sync, but its
+   episodes are left alone and the series is listed in the sync result and in the UI as unknown, instead of
+   being silently forced to its season flag.
+3. **Apply now requires a valid preview.** The API returns 400 if `apply: true` arrives without a preview,
+   recomputes from the current source and database, and returns 409 with the fresh preview if the source,
+   the database, or any proposed change moved since the preview the user saw. The Migration UI keeps the
+   preview bound to its source: Apply is disabled until a preview exists for the current kind + URL, changing
+   kind, URL, or key clears the preview, and after a 409 the user must Preview again. Loading the regular
+   migration preview no longer clears the API key (it previously forced retyping the key before a sync);
+   the key still lives only in session state and is never stored.
+4. **Missing season data no longer defaults new imports to all monitored.** `/migration/import` now safe-skips
+   a new series with no season monitoring data, reporting `skipped` with the reason, instead of setting
+   `MonitorAllSeasons=true`. An already-imported series still reports `exists` (its monitored state is not
+   touched by a re-import). If episode data was unavailable for an otherwise successful import, the result
+   carries a warning that episodes took their season flags and monitoring sync should be run later.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 14 passed (was 13; 1 new Migration gate test:
+  key survives loading preview, Apply is disabled until a current-source preview exists, and changing the
+  source clears it), and `npm run build` (tsc + vite) — passed, 205 KB JS (62 KB gzip).
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests added for CI: preview reports a series-only monitored change without writing; per-episode
+  exceptions inside a monitored season are preserved and an unreported episode is left alone; unknown episode
+  data leaves episodes alone while seasons still sync; the reader parses episodes and marks unknown on episode
+  read failure; and the preview-match and series-import-skip rules (including the drifted-preview case).
+  CI on PR #4 is the backend verification for these fixes as well.
+
+**Remaining verification for these fixes**
+- CI backend tests for this commit, plus a real Sonarr run: Preview sync must show per-episode exceptions
+  (e.g. a deliberately unmonitored episode inside a monitored season) as unchanged, and a series whose episode
+  read fails must appear in the unknown list with its episodes untouched.
+- A real import of a series Sonarr reports without seasons must show `skipped`, not `added`, and must not
+  create an all-monitored series.
+- Apply with a stale preview (change Sonarr monitoring between Preview and Apply) must be refused with the
+  fresh preview, and Apply must stay disabled until a new Preview for the current source is run.
+
 ## Visual library + monitoring fidelity (branch `visual-library`, from main 27fb5df, PR #3 merged)
 
 **Source of truth.** Started from main 27fb5df ("Merge pull request #3", v0.3.0 tag present on main). Nothing from
