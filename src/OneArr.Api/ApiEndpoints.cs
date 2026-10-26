@@ -36,6 +36,7 @@ public static class ApiEndpoints
     public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
     public sealed record BulkRootBody(string MediaType, string? FromRootFolder, string ToRootFolder, List<int>? Ids);
     public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null);
+    public sealed record ApplyPreviewBody(int PreviewId, bool Confirmed);
 
     public static void Map(WebApplication app)
     {
@@ -314,10 +315,190 @@ public static class ApiEndpoints
             return Results.NoContent();
         });
 
+        // Queue with client health. Raw grab Links are deliberately NOT returned: they can embed
+        // indexer API keys, and Activity never needs them.
         api.MapGet("/queue", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             await using var c = await db.CreateDbContextAsync(ct);
-            return Results.Ok(await c.DownloadJobs.AsNoTracking().OrderByDescending(j => j.Id).Take(200).ToListAsync(ct));
+            var jobs = await c.DownloadJobs.AsNoTracking().OrderByDescending(j => j.Id).Take(200).ToListAsync(ct);
+            var health = await c.DownloadClientHealth.AsNoTracking().ToListAsync(ct);
+            var clients = await c.DownloadClients.AsNoTracking().ToListAsync(ct);
+            return Results.Ok(new
+            {
+                jobs = jobs.Select(j => new
+                {
+                    j.Id, j.MediaItemId, j.EpisodeId, j.MediaType, j.ReleaseTitle, j.Hash, j.Category,
+                    j.DownloadClientId, j.ClientName, j.Status, j.Progress, j.ClientState,
+                    j.DownloadSpeedBps, j.EtaSeconds, j.ContentPath, j.Error, j.ImportFailed,
+                    j.LastSeenAt, j.CompletedAt, j.CreatedAt, j.UpdatedAt,
+                    importReady = j.Status == DownloadStatus.Completed && j.ContentPath != null,
+                }),
+                clients = clients.Select(cl => new
+                {
+                    cl.Id, cl.Name, cl.Enabled,
+                    lastSeenAt = health.FirstOrDefault(h => h.DownloadClientId == cl.Id)?.LastSeenAt,
+                    lastError = health.FirstOrDefault(h => h.DownloadClientId == cl.Id)?.LastError,
+                }),
+            });
+        });
+
+        // Import preview: plans without touching disk beyond reads. Apply requires the preview id
+        // plus explicit confirmation, runs under the same "import" lock as bulk import (so a
+        // scheduled import and a preview apply can never compete over one download), and refuses
+        // stale plans with 409 + a fresh preview.
+        api.MapPost("/queue/{id:int}/import-preview", async (int id, DownloadService downloads, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await downloads.PreviewImportAsync(id, ct)); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
+        api.MapPost("/queue/{id:int}/import-apply", async (int id, ApplyPreviewBody body, DownloadService downloads, JobRunner runner, CancellationToken ct) =>
+        {
+            if (body is null || !body.Confirmed) return Results.BadRequest(new { error = "Import apply requires explicit confirmation" });
+            // JobRunner records work exceptions instead of throwing them, so refused applies are
+            // captured here explicitly — otherwise a refused apply would look like success.
+            ImportPreviewDto? applied = null;
+            ImportPreviewDto? fresh = null;
+            string? error = null;
+            var ran = await runner.TryRunAsync("import", async t =>
+            {
+                try
+                {
+                    applied = await downloads.ApplyPreviewAsync(id, body.PreviewId, t);
+                    return "Import applied";
+                }
+                catch (StalePreviewException ex)
+                {
+                    fresh = ex.Fresh;
+                    return "Preview stale";
+                }
+                catch (ArgumentException ex)
+                {
+                    error = ex.Message;
+                    return "Apply refused";
+                }
+            }, ct);
+            if (!ran) return Results.Conflict(new { error = "Import already running" });
+            if (error is not null) return Results.BadRequest(new { error });
+            if (fresh is not null) return Results.Conflict(new { error = "The import plan changed since the preview; review the fresh preview before applying.", preview = fresh });
+            return Results.Ok(applied);
+        });
+
+        // Retry a failed import. Only Failed + ImportFailed jobs qualify; the retry resets the job
+        // to Completed and imports it again. It never deletes torrents or files and never grabs.
+        api.MapPost("/queue/{id:int}/retry-import", async (int id, DownloadService downloads, JobRunner runner, CancellationToken ct) =>
+        {
+            ImportRunSummary? summary = null;
+            string? error = null;
+            var ran = await runner.TryRunAsync("import", async t =>
+            {
+                try
+                {
+                    summary = await downloads.RetryImportAsync(id, t);
+                    return summary.Message;
+                }
+                catch (ArgumentException ex)
+                {
+                    error = ex.Message;
+                    return "Retry refused";
+                }
+            }, ct);
+            if (!ran) return Results.Conflict(new { error = "Import already running" });
+            if (error is not null) return Results.BadRequest(new { error });
+            return Results.Ok(new { message = summary?.Message ?? "", imported = summary?.Imported ?? 0, failed = summary?.Failed ?? 0 });
+        });
+
+        // Activity history: a readable timeline derived from records OneArr already keeps. No new
+        // history table, so events from before this PR are only as precise as the records kept then
+        // (CompletedAt is null for jobs completed before client tracking existed).
+        api.MapGet("/activity/history", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var jobs = await c.DownloadJobs.AsNoTracking().OrderByDescending(j => j.Id).Take(200).ToListAsync(ct);
+            var records = await c.ImportRecords.AsNoTracking().OrderByDescending(r => r.Id).Take(200).ToListAsync(ct);
+            var previews = await c.ImportPreviews.AsNoTracking().OrderByDescending(p => p.Id).Take(200).ToListAsync(ct);
+            var scans = await c.LibraryScanPlans.AsNoTracking().Where(p => p.AppliedUtc != null).OrderByDescending(p => p.Id).Take(50).ToListAsync(ct);
+            var entries = new List<(DateTimeOffset At, string Kind, string Title, int? JobId)>();
+            foreach (var j in jobs)
+            {
+                entries.Add((j.CreatedAt, "grabbed", $"Grabbed {j.ReleaseTitle}", j.Id));
+                if (j.CompletedAt is not null) entries.Add((j.CompletedAt.Value, "completed", $"Download completed: {j.ReleaseTitle}", j.Id));
+            }
+            foreach (var p in previews) entries.Add((p.CreatedAt, "preview", $"Import preview generated (job {p.DownloadJobId})", p.DownloadJobId));
+            foreach (var r in records)
+            {
+                var kind = r.Action == ImportAction.Deferred ? "deferred" : r.Success ? "imported" : "import-failed";
+                var title = r.Action == ImportAction.Deferred ? $"Import deferred: {r.SourcePath}"
+                    : r.Success ? $"Imported {r.SourcePath}" : $"Import failed: {r.SourcePath}";
+                entries.Add((r.CreatedAt, kind, title, r.DownloadJobId));
+            }
+            foreach (var s in scans) entries.Add((s.AppliedUtc!.Value, "reconciled", "Library reconciliation completed", null));
+            return Results.Ok(entries.OrderByDescending(e => e.At).Take(200).Select(e => new { at = e.At, kind = e.Kind, title = e.Title, jobId = e.JobId }));
+        });
+
+        // Activity problems: operational blockers computed from current records. Actions named here
+        // are safe by construction: refresh only re-polls, preview never writes, retry only imports.
+        api.MapGet("/activity/problems", async (IDbContextFactory<OneArrDbContext> db, SettingsStore settings, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var problems = new List<object>();
+            var clients = await c.DownloadClients.AsNoTracking().Where(x => x.Enabled).ToListAsync(ct);
+            var health = await c.DownloadClientHealth.AsNoTracking().ToListAsync(ct);
+            foreach (var cl in clients)
+            {
+                var h = health.FirstOrDefault(x => x.DownloadClientId == cl.Id);
+                if (h?.LastError is not null)
+                    problems.Add(new { kind = "client-unreachable", title = $"Download client unreachable: {cl.Name}", detail = h.LastError, jobId = (int?)null, clientId = (int?)cl.Id, actions = new[] { "refresh" } });
+            }
+            var jobs = await c.DownloadJobs.AsNoTracking().OrderByDescending(j => j.Id).Take(200).ToListAsync(ct);
+            var mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct);
+            foreach (var j in jobs)
+            {
+                switch (j.Status)
+                {
+                    case DownloadStatus.Missing:
+                        problems.Add(new { kind = "download-missing", title = $"Download missing from qBittorrent: {j.ReleaseTitle}", detail = "The torrent is no longer reported by its client. Clear it in Queue to grab again; nothing is deleted.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh", "clear-missing" } });
+                        break;
+                    case DownloadStatus.Failed when j.ImportFailed:
+                        problems.Add(new { kind = "import-failed", title = $"Import failed: {j.ReleaseTitle}", detail = j.Error ?? "See import records for the per-file reason.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "preview", "retry" } });
+                        break;
+                    case DownloadStatus.Failed:
+                        problems.Add(new { kind = "download-failed", title = $"Download failed in qBittorrent: {j.ReleaseTitle}", detail = j.Error ?? j.ClientState, jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
+                        break;
+                }
+                if (j.Status == DownloadStatus.Completed && j.MediaItemId is int mid && !string.IsNullOrWhiteSpace(mediaRoot))
+                {
+                    var item = await c.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == mid, ct);
+                    if (item is not null)
+                    {
+                        try { SafeImporter.CanonicalUnder(mediaRoot, item.RootFolder); }
+                        catch { problems.Add(new { kind = "invalid-destination", title = $"Invalid media destination: {item.Title}", detail = "The title's root folder is outside the configured media root, so its import fails closed.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "preview" } }); }
+                    }
+                    if (!string.IsNullOrWhiteSpace(j.ContentPath))
+                    {
+                        try
+                        {
+                            var root = Path.GetPathRoot(Path.GetFullPath(j.ContentPath));
+                            if (!string.IsNullOrEmpty(root) && !Directory.Exists(root))
+                                problems.Add(new { kind = "drive-offline", title = $"Media drive offline for: {j.ReleaseTitle}", detail = $"The volume {root} is not reachable; the download is not marked missing for this.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
+                        }
+                        catch { /* An unparseable recorded path is a sync concern, not a drive problem. */ }
+                    }
+                }
+                if (j.Status == DownloadStatus.Completed && j.Category.Length > 0)
+                {
+                    var known = clients.Any(cl => cl.MovieCategory == j.Category || cl.TvCategory == j.Category);
+                    if (!known)
+                        problems.Add(new { kind = "invalid-category", title = $"Unknown download category: {j.ReleaseTitle}", detail = $"Category '{j.Category}' matches no enabled client's movie or TV category.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
+                }
+            }
+            var deferred = await c.ImportRecords.AsNoTracking().Where(r => r.Action == ImportAction.Deferred).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
+            foreach (var r in deferred)
+                problems.Add(new { kind = "file-deferred", title = "Import deferred: file still changing", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry" } });
+            var badVerify = await c.ImportRecords.AsNoTracking().Where(r => !r.Success && r.Message != null && r.Message.Contains("Verification")).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
+            foreach (var r in badVerify)
+                problems.Add(new { kind = "import-verification-failed", title = "Import failed verification", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry" } });
+            return Results.Ok(problems);
         });
 
         // Explicit stuck-download reconciliation: a Missing job blocks automatic and manual grabs
