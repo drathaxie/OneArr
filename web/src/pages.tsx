@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, formatBytes, type ConnectionTestResult, type EpisodeRow, type Job, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
+import { api, ApiError, formatBytes, posterUrl, type ConnectionTestResult, type Job, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
 import { LibraryPanel, RootFolderTool } from "./library";
 
 function useLoad<T>(path: string, deps: unknown[] = []) {
@@ -67,13 +67,28 @@ export function Series() {
   return <MediaPage kind="series" />;
 }
 
+function Poster({ item, size }: { item: MediaItem; size?: "card" | "thumb" }) {
+  const url = posterUrl(item.posterPath);
+  if (!url) return <div className={size === "thumb" ? "poster-thumb poster-fallback" : "poster poster-fallback"}><span>{item.title}</span></div>;
+  return <img className={size === "thumb" ? "poster-thumb" : "poster"} src={url} alt={`${item.title} poster`} loading="lazy" />;
+}
+
 function MediaPage({ kind }: { kind: "movie" | "series" }) {
   const label = kind === "movie" ? "Movies" : "Series";
   const { data: items, error, reload } = useLoad<MediaItem[]>(`/api/media?type=${kind}`, [kind]);
   const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
-  const [openId, setOpenId] = useState<number | null>(null);
   const [filesId, setFilesId] = useState<number | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [view, setView] = useState<"grid" | "list">(() => (localStorage.getItem("onearr.view") as "grid" | "list") || "grid");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"title" | "year" | "status">("title");
+  const [filter, setFilter] = useState<"all" | "available" | "missing" | "monitored" | "unmonitored">("all");
+
+  function setViewMode(v: "grid" | "list") {
+    setView(v);
+    try { localStorage.setItem("onearr.view", v); } catch { /* view preference is best-effort */ }
+  }
 
   async function toggle(item: MediaItem) {
     await api("PATCH", `/api/media/${item.id}`, { monitored: !item.monitored }).catch((e: Error) => setMessage(e.message));
@@ -85,31 +100,92 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     reload();
   }
 
+  const filtered = (items ?? []).filter((item) => {
+    if (query && !item.title.toLowerCase().includes(query.toLowerCase())) return false;
+    if (filter === "available" && !item.hasFile) return false;
+    if (filter === "missing" && item.hasFile) return false;
+    if (filter === "monitored" && !item.monitored) return false;
+    if (filter === "unmonitored" && item.monitored) return false;
+    return true;
+  }).sort((a, b) => {
+    if (sort === "year") return (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title);
+    if (sort === "status") return Number(b.hasFile) - Number(a.hasFile) || a.title.localeCompare(b.title);
+    return a.title.localeCompare(b.title);
+  });
+
+  if (detailId !== null) {
+    return <MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} />;
+  }
+
   return (
     <>
       <h2>{label}</h2>
       <AddMedia kind={kind} profiles={profiles ?? []} onAdded={reload} />
       <RootFolderTool kind={kind} onChanged={reload} />
       <ErrorLine message={error ?? message} />
-      <div className="card table-wrap">
-        {items && items.length === 0 && <p className="muted">Nothing here yet. Search TMDb above to add a {kind === "movie" ? "movie" : "series"}.</p>}
-        {items && items.length > 0 && (
+      <div className="card">
+        <div className="row">
+          <input aria-label={`Search ${label}`} placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 200 }} />
+          <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "title" | "year" | "status")}>
+            <option value="title">Sort: title</option>
+            <option value="year">Sort: year (newest)</option>
+            <option value="status">Sort: available first</option>
+          </select>
+          <select aria-label="Filter" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+            <option value="all">All</option>
+            <option value="available">Available</option>
+            <option value="missing">Missing</option>
+            <option value="monitored">Monitored</option>
+            <option value="unmonitored">Unmonitored</option>
+          </select>
+          <div className="row" style={{ marginLeft: "auto" }}>
+            <button className={view === "grid" ? "small primary" : "small"} onClick={() => setViewMode("grid")}>Posters</button>
+            <button className={view === "list" ? "small primary" : "small"} onClick={() => setViewMode("list")}>List</button>
+          </div>
+        </div>
+        <p className="muted">Showing {filtered.length} of {(items ?? []).length}.</p>
+      </div>
+      {items && items.length === 0 && <p className="muted">Nothing here yet. Search TMDb above to add a {kind === "movie" ? "movie" : "series"}.</p>}
+      {items && items.length > 0 && filtered.length === 0 && <p className="muted">No titles match the current search and filter.</p>}
+      {view === "grid" && filtered.length > 0 && (
+        <div className="poster-grid">
+          {filtered.map((item) => (
+            <article key={item.id} className="poster-card">
+              <button className="poster-button" onClick={() => setDetailId(item.id)} aria-label={`Open ${item.title}`}>
+                <Poster item={item} />
+              </button>
+              <div className="poster-info">
+                <strong className="poster-title" onClick={() => setDetailId(item.id)} style={{ cursor: "pointer" }}>{item.title}</strong>
+                <div className="muted">{item.year ?? ""}</div>
+                <div className="row" style={{ marginTop: ".25rem" }}>
+                  <span className={item.hasFile ? "badge ok" : "badge bad"}>{item.hasFile ? "Available" : "Missing"}</span>
+                  <span className="badge">{item.monitored ? "Monitored" : "Unmonitored"}</span>
+                </div>
+                <div className="muted" style={{ fontSize: ".85rem" }}>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
+                <div className="row" style={{ marginTop: ".25rem" }}>
+                  <button className="small" onClick={() => toggle(item)}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
+                  <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {view === "list" && filtered.length > 0 && (
+        <div className="card table-wrap">
           <table>
-            <thead><tr><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>File</th><th /></tr></thead>
+            <thead><tr><th /><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>File</th><th /></tr></thead>
             <tbody>
-              {items.map((item) => (
+              {filtered.map((item) => (
                 <tr key={item.id}>
-                  <td>
-                    {item.title}
-                    {kind === "series" && openId === item.id && <EpisodeList mediaId={item.id} />}
-                  </td>
+                  <td><Poster item={item} size="thumb" /></td>
+                  <td><button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(item.id)}>{item.title}</button></td>
                   <td>{item.year ?? ""}</td>
                   <td><button className="small" onClick={() => toggle(item)}>{item.monitored ? "Yes" : "No"}</button></td>
                   <td>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</td>
                   <td>{item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
                   <td className="row">
-                    {kind === "movie" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Releases</button>}
-                    {kind === "series" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Episodes</button>}
+                    <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
                     <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
                     <button className="small danger" onClick={() => remove(item)}>Remove</button>
                   </td>
@@ -117,10 +193,145 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
+    </>
+  );
+}
+
+function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles: QualityProfile[]; onBack: () => void }) {
+  const { data, error, reload } = useLoad<MediaDetail>(`/api/media/${mediaId}/detail`, [mediaId]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [root, setRoot] = useState<string | null>(null);
+  const [showReleases, setShowReleases] = useState(false);
+  const [releaseEpisode, setReleaseEpisode] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+
+  async function patch(body: Record<string, unknown>, after?: () => void) {
+    setMessage(null);
+    try {
+      await api("PATCH", `/api/media/${mediaId}`, body);
+      reload(); after?.();
+    } catch (e) { setMessage((e as Error).message); }
+  }
+
+  function toggleSeason(seasonNumber: number, monitored: boolean) {
+    api("PATCH", `/api/media/${mediaId}/seasons/${seasonNumber}`, { monitored })
+      .then(() => reload()).catch((e: Error) => setMessage(e.message));
+  }
+  function toggleEpisode(episodeId: number, monitored: boolean) {
+    api("PATCH", `/api/media/episodes/${episodeId}`, { monitored })
+      .then(() => reload()).catch((e: Error) => setMessage(e.message));
+  }
+  function toggleCollapsed(seasonNumber: number) {
+    const next = new Set(collapsed);
+    if (next.has(seasonNumber)) next.delete(seasonNumber); else next.add(seasonNumber);
+    setCollapsed(next);
+  }
+
+  if (!data) return <><button onClick={onBack}>← Back</button><ErrorLine message={error} /></>;
+  const isSeries = data.mediaType === "Series";
+  const totalEpisodes = data.episodes.length;
+  const haveEpisodes = data.episodes.filter((e) => e.hasFile).length;
+  const wantedEpisodes = data.seasons.reduce((n, s) => n + s.wantedCount, 0);
+  const fileStatus = !isSeries
+    ? (data.hasFile ? "Available" : "Missing")
+    : totalEpisodes === 0 ? "No episodes" : haveEpisodes === totalEpisodes ? "Available" : haveEpisodes === 0 ? "Missing" : "Partial";
+
+  return (
+    <>
+      <button onClick={onBack}>← Back to {isSeries ? "Series" : "Movies"}</button>
+      <ErrorLine message={error ?? message} />
+      <div className="card detail-head">
+        {posterUrl(data.posterPath)
+          ? <img className="poster detail-poster" src={posterUrl(data.posterPath)!} alt={`${data.title} poster`} />
+          : <div className="poster poster-fallback detail-poster"><span>{data.title}</span></div>}
+        <div style={{ minWidth: 0 }}>
+          <h2>{data.title} {data.year ? `(${data.year})` : ""}</h2>
+          <p>{data.overview || <span className="muted">No overview available.</span>}</p>
+          <div className="row">
+            <span className={fileStatus === "Available" ? "badge ok" : fileStatus === "Missing" ? "badge bad" : "badge"}>{fileStatus}</span>
+            <span className="badge">{data.monitored ? "Monitored" : "Unmonitored"}</span>
+            <span className="badge">{profiles.find((p) => p.id === data.qualityProfileId)?.name ?? data.qualityProfileId}</span>
+            {isSeries && <span className="badge">Wanted episodes: {wantedEpisodes}</span>}
+          </div>
+          <p className="muted">Root folder: <code>{data.rootFolder}</code>{data.legacyPath ? <> · imported from <code>{data.legacyPath}</code> ({data.legacySource})</> : ""}</p>
+          <div className="row">
+            <button className="small" onClick={() => patch({ monitored: !data.monitored })}>{data.monitored ? "Unmonitor" : "Monitor"}</button>
+            <button className="small" onClick={() => setShowReleases(!showReleases)}>{showReleases ? "Hide releases" : "Search releases"}</button>
+          </div>
+          <form className="row" style={{ marginTop: ".5rem" }} onSubmit={(e) => { e.preventDefault(); if (root !== null) patch({ rootFolder: root }); }}>
+            <label>Root folder
+              <input value={root ?? data.rootFolder} onChange={(e) => setRoot(e.target.value)} style={{ minWidth: 280 }} />
+            </label>
+            <button className="small primary" type="submit">Save root folder</button>
+          </form>
+          <form className="row" onSubmit={(e) => { e.preventDefault(); }}>
+            <label>Quality profile
+              <select value={data.qualityProfileId} onChange={(e) => patch({ qualityProfileId: Number(e.target.value) })}>
+                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+          </form>
+        </div>
+      </div>
+      {showReleases && !isSeries && <ReleasePanel mediaId={mediaId} episodeId={null} onClose={() => setShowReleases(false)} />}
+      {isSeries && data.seasons.map((s) => {
+        const eps = data.episodes.filter((e) => e.seasonNumber === s.seasonNumber);
+        const isCollapsed = collapsed.has(s.seasonNumber);
+        return (
+          <div key={s.seasonNumber} className="card">
+            <div className="row spread">
+              <h2 style={{ margin: 0 }}>Season {s.seasonNumber}</h2>
+              <div className="row">
+                <span className="badge">{s.monitored ? "Monitored" : "Unmonitored"}</span>
+                <span className="muted">{s.hasFileCount}/{s.episodeCount} have files · {s.wantedCount} wanted</span>
+                <button className="small" onClick={() => toggleSeason(s.seasonNumber, !s.monitored)}>{s.monitored ? "Unmonitor season" : "Monitor season"}</button>
+                <button className="small" onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "Expand" : "Collapse"}</button>
+              </div>
+            </div>
+            {!isCollapsed && (
+              <div className="table-wrap"><table>
+                <thead><tr><th>Episode</th><th>Title</th><th>Air date</th><th>Monitored</th><th>File</th><th>Quality</th><th /></tr></thead>
+                <tbody>
+                  {eps.map((e) => (
+                    <tr key={e.id}>
+                      <td>S{String(e.seasonNumber).padStart(2, "0")}E{String(e.episodeNumber).padStart(2, "0")}</td>
+                      <td>{e.title}</td>
+                      <td>{e.airDate ?? ""}</td>
+                      <td><button className="small" onClick={() => toggleEpisode(e.id, !e.monitored)}>{e.monitored ? "Yes" : "No"}</button></td>
+                      <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
+                      <td>{e.resolution ? `${e.resolution}p` : "—"}</td>
+                      <td><button className="small" onClick={() => setReleaseEpisode(releaseEpisode === e.id ? null : e.id)}>Releases</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            )}
+            {releaseEpisode !== null && eps.some((e) => e.id === releaseEpisode) && (
+              <ReleasePanel mediaId={mediaId} episodeId={releaseEpisode} onClose={() => setReleaseEpisode(null)} />
+            )}
+          </div>
+        );
+      })}
+      <div className="card">
+        <h2>Linked files ({data.files.length})</h2>
+        {data.files.length === 0 ? <p className="muted">No linked files yet. Run a library scan in Settings, or import a download, and they will appear here.</p> : (
+          <div className="table-wrap"><table>
+            <thead><tr><th>File</th><th>Size</th><th>Resolution</th><th>Status</th><th>Matched by</th></tr></thead>
+            <tbody>{data.files.map((f) => (
+              <tr key={f.path}>
+                <td className="muted">{f.path}</td>
+                <td>{formatBytes(f.sizeBytes)}</td>
+                <td>{f.resolution ? `${f.resolution}p` : "—"}</td>
+                <td>{f.status}</td>
+                <td>{f.matchMethod}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
         )}
       </div>
-      {kind === "movie" && openId !== null && <ReleasePanel mediaId={openId} episodeId={null} onClose={() => setOpenId(null)} />}
-      {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
     </>
   );
 }
@@ -196,32 +407,6 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-function EpisodeList({ mediaId }: { mediaId: number }) {
-  const { data, error } = useLoad<{ episodes: EpisodeRow[] }>(`/api/media/${mediaId}`, [mediaId]);
-  const [episodeId, setEpisodeId] = useState<number | null>(null);
-  const episodes = (data as unknown as { episodes?: EpisodeRow[] } | null)?.episodes ?? [];
-  return (
-    <div style={{ marginTop: ".5rem" }}>
-      <ErrorLine message={error} />
-      {episodes.length === 0 && !error && <p className="muted">No episodes loaded.</p>}
-      <table>
-        <tbody>
-          {episodes.sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber).map((e) => (
-            <tr key={e.id}>
-              <td>S{String(e.seasonNumber).padStart(2, "0")}E{String(e.episodeNumber).padStart(2, "0")}</td>
-              <td>{e.title}</td>
-              <td>{e.airDate ?? ""}</td>
-              <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
-              <td><button className="small" onClick={() => setEpisodeId(episodeId === e.id ? null : e.id)}>Releases</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {episodeId !== null && <ReleasePanel mediaId={mediaId} episodeId={episodeId} onClose={() => setEpisodeId(null)} />}
     </div>
   );
 }
@@ -328,29 +513,108 @@ export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number;
 }
 
 export function Wanted() {
-  const { data, error } = useLoad<any>("/api/wanted");
+  const { data, error, reload } = useLoad<any>("/api/wanted");
+  const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | "movies" | "episodes">("all");
+  const [downloadFilter, setDownloadFilter] = useState<"all" | "active" | "none">("all");
+  const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+
+  if (detailId !== null) {
+    return <MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} />;
+  }
+  if (!data) return <><h2>Wanted</h2><ErrorLine message={error} /></>;
+
+  const movies = (data.movies as MediaItem[]).filter((m) =>
+    (typeFilter === "all" || typeFilter === "movies") &&
+    (!query || m.title.toLowerCase().includes(query.toLowerCase())) &&
+    (downloadFilter === "all" || (downloadFilter === "active") === !!data.movieHasActiveDownload?.[String(m.id)]));
+  const episodes = (data.episodes as any[]).filter((e) =>
+    (typeFilter === "all" || typeFilter === "episodes") &&
+    (!query || e.seriesTitle.toLowerCase().includes(query.toLowerCase()) || e.episodeTitle.toLowerCase().includes(query.toLowerCase())) &&
+    (downloadFilter === "all" || (downloadFilter === "active") === !!e.hasActiveDownload));
+  const bySeries = new Map<number, { title: string; items: any[] }>();
+  for (const e of episodes) {
+    const group: { title: string; items: any[] } = bySeries.get(e.mediaItemId) ?? { title: e.seriesTitle, items: [] };
+    group.items.push(e);
+    bySeries.set(e.mediaItemId, group);
+  }
+  function toggleSeries(id: number) {
+    const next = new Set(collapsed);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setCollapsed(next);
+  }
+
   return (
     <>
       <h2>Wanted</h2>
       <ErrorLine message={error} />
-      {data && (
-        <>
-          <div className="card">
-            <h2>Movies without a file ({data.movies.length})</h2>
-            {data.movies.length === 0 ? <p className="muted">None.</p> : <ul>{data.movies.map((m: MediaItem) => <li key={m.id}>{m.title} {m.year ? `(${m.year})` : ""}</li>)}</ul>}
-          </div>
-          <div className="card table-wrap">
-            <h2>Aired episodes without a file ({data.episodes.length})</h2>
-            {data.episodes.length === 0 ? <p className="muted">None.</p> : (
-              <table><thead><tr><th>Series</th><th>Episode</th><th>Title</th><th>Aired</th></tr></thead><tbody>
-                {data.episodes.map((e: any) => (
-                  <tr key={e.episodeId}><td>{e.seriesTitle}</td><td>S{String(e.seasonNumber).padStart(2, "0")}E{String(e.episodeNumber).padStart(2, "0")}</td><td>{e.episodeTitle}</td><td>{e.airDate}</td></tr>
-                ))}
-              </tbody></table>
-            )}
-          </div>
-        </>
+      <div className="card">
+        <p className="muted">
+          Wanted lists only monitored items with no file: {data.movies.length} movie(s) and {data.episodes.length} aired episode(s).
+          It does not include unmonitored material — {data.unmonitoredMoviesWithoutFile} movie(s) and {data.unmonitoredEpisodesWithoutFile} episode(s)
+          without a file are deliberately unmonitored, not wanted. If those numbers look wrong, check the series or season
+          monitored state in its detail view, or run the monitoring sync on Migration.
+        </p>
+        <div className="row">
+          <input aria-label="Search wanted" placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 200 }} />
+          <select aria-label="Wanted type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
+            <option value="all">Movies + episodes</option>
+            <option value="movies">Movies only</option>
+            <option value="episodes">Episodes only</option>
+          </select>
+          <select aria-label="Download state" value={downloadFilter} onChange={(e) => setDownloadFilter(e.target.value as typeof downloadFilter)}>
+            <option value="all">Any download state</option>
+            <option value="active">Download in progress</option>
+            <option value="none">No download in progress</option>
+          </select>
+        </div>
+      </div>
+      {(typeFilter === "all" || typeFilter === "movies") && (
+        <div className="card">
+          <h2>Movies without a file ({movies.length})</h2>
+          {movies.length === 0 ? <p className="muted">None matching.</p> : (
+            <ul>{movies.map((m) => (
+              <li key={m.id}>
+                <button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(m.id)}>{m.title} {m.year ? `(${m.year})` : ""}</button>
+                {" "}— no file · {data.movieHasActiveDownload?.[String(m.id)] ? "download in progress" : "no download in progress"}
+              </li>
+            ))}</ul>
+          )}
+        </div>
       )}
+      {(typeFilter === "all" || typeFilter === "episodes") && (
+        <div className="card">
+          <h2>Aired episodes without a file, by series ({episodes.length})</h2>
+          {episodes.length === 0 ? <p className="muted">None matching.</p> : [...bySeries.entries()].map(([seriesId, group]) => (
+            <div key={seriesId} style={{ marginBottom: ".75rem" }}>
+              <div className="row spread">
+                <button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(seriesId)}>{group.title} ({group.items.length})</button>
+                <button className="small" onClick={() => toggleSeries(seriesId)}>{collapsed.has(seriesId) ? "Expand" : "Collapse"}</button>
+              </div>
+              {!collapsed.has(seriesId) && (
+                <div className="table-wrap"><table><thead><tr><th>Episode</th><th>Title</th><th>Aired</th><th>Why wanted</th><th>Download</th></tr></thead><tbody>
+                  {group.items.map((e) => (
+                    <tr key={e.episodeId}>
+                      <td>S{String(e.seasonNumber).padStart(2, "0")}E{String(e.episodeNumber).padStart(2, "0")}</td>
+                      <td>{e.episodeTitle}</td>
+                      <td>{e.airDate}</td>
+                      <td>No file (monitored, aired)</td>
+                      <td>{e.hasActiveDownload ? "In progress" : "None"}</td>
+                    </tr>
+                  ))}
+                </tbody></table></div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="muted">
+        Why wanted is always "no file" here: Wanted is computed from monitored, aired items with no linked file.
+        Files that are unmatched, ambiguous, sample-only, misnumbered, or under an inaccessible folder do not appear
+        as wanted — they appear in the Library scan review in Settings, where they can be matched or acknowledged.
+      </p>
     </>
   );
 }
@@ -461,6 +725,29 @@ function ConnectionTests({ indexers, clients }: { indexers: any[]; clients: any[
   );
 }
 
+function AutomationStatus() {
+  const { data: settings } = useLoad<any>("/api/settings");
+  const { data: status } = useLoad<any>("/api/library/status");
+  if (!settings || !status) return null;
+  const on = settings.automaticGrabbing === true;
+  const gateOk = status.automation?.allowed === true;
+  return (
+    <div className="card">
+      <h2>Automation</h2>
+      <p className={on && gateOk ? "ok" : "error"}>
+        Automatic grabbing is {on ? "ON" : "OFF"}. {gateOk ? "Library reconciled." : `Blocked: ${status.automation?.reason ?? "library not reconciled"}`}
+      </p>
+      <p className="muted">
+        {on && !gateOk
+          ? "The toggle is on, but automatic searches are still paused until the library check passes. That is the safety gate, not a bug: apply a complete library scan in the Library section below, and make sure every folder is reachable and every unmatched file is reviewed."
+          : !on
+            ? "Automatic grabbing stays off until you turn it on in General below. Even then, the library gate above must pass before any automatic search runs."
+            : "Automatic searches may run for monitored wanted items with no file and no active or missing download."}
+      </p>
+    </div>
+  );
+}
+
 export function Settings() {
   const { data, error, reload } = useLoad<any>("/api/settings");
   const { data: profiles, reload: reloadProfiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
@@ -483,6 +770,7 @@ export function Settings() {
     <>
       <h2>Settings</h2>
       <ErrorLine message={error ?? message} />
+      <AutomationStatus />
       {data && <GeneralForm data={data} onSave={save} />}
       <ConnectionTests indexers={indexers ?? []} clients={clients ?? []} />
       <LibraryPanel />
@@ -616,6 +904,7 @@ export function Migration() {
   const [profileId, setProfileId] = useState<number | "">("");
   const [root, setRoot] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<any | null>(null);
 
   async function loadPreview(e: FormEvent) {
     e.preventDefault();
@@ -632,7 +921,7 @@ export function Migration() {
   }
 
   async function importSelected() {
-    const items = (preview ?? []).filter((_, idx) => picked.has(idx)).map((item) => ({ type: item.type, tmdbId: item.tmdbId, title: item.title, monitored: item.monitored, legacyPath: item.path, legacySource: kind }));
+    const items = (preview ?? []).filter((_, idx) => picked.has(idx)).map((item) => ({ type: item.type, tmdbId: item.tmdbId, title: item.title, monitored: item.monitored, legacyPath: item.path, legacySource: kind, seasons: item.seasons ?? [] }));
     if (!confirm(`Copy ${items.length} catalog entr${items.length === 1 ? "y" : "ies"} into OneArr? This only writes to OneArr's database. ${kind} is not modified.`)) return;
     try {
       const res = await api<{ results: { title: string; status: string; message?: string }[] }>("POST", "/api/migration/import", {
@@ -660,6 +949,31 @@ export function Migration() {
       </form>
       <ErrorLine message={message} />
       {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}{testResult.sampleTitles && testResult.sampleTitles.length > 0 ? ` Sample: ${testResult.sampleTitles.join(", ")}.` : ""}</p>}
+      <div className="card">
+        <h2>Monitoring sync for already-imported items</h2>
+        <p className="muted">
+          Use the same {kind} URL and key above. Preview first: it shows exactly which monitored flags would change and
+          creates nothing. Applying changes only monitored flags on items already in OneArr (matched by TMDb id); it never
+          changes titles, quality profiles, root folders, or file state, and it never creates duplicates. For series, season
+          flags from {kind} are applied to that season and its episodes; if {kind} reports no seasons for a series, only its
+          series-level flag changes and episode flags are left alone.
+        </p>
+        <div className="row">
+          <button onClick={async () => { setMessage(null); try { setSyncResult(await api<any>("POST", "/api/migration/monitoring-sync", { kind, baseUrl: url, apiKey: key, apply: false })); } catch (x) { setMessage((x as Error).message); } }}>Preview monitoring sync</button>
+          <button className="primary" onClick={async () => { if (!confirm("Apply the monitoring sync? Only monitored flags on already-imported items will change.")) return; setMessage(null); try { setSyncResult(await api<any>("POST", "/api/migration/monitoring-sync", { kind, baseUrl: url, apiKey: key, apply: true })); } catch (x) { setMessage((x as Error).message); } }}>Apply monitoring sync</button>
+        </div>
+        {syncResult && (
+          <div style={{ marginTop: ".75rem" }}>
+            <p className="muted">{syncResult.applied ? "Applied" : "Preview only — nothing was written"}: {syncResult.itemsChecked} matched, {syncResult.changes.length} with changes, {syncResult.unmatchedTitles.length} legacy items not in OneArr, {syncResult.skippedNoTmdb} skipped (no TMDb id).</p>
+            {syncResult.changes.length > 0 && (
+              <ul>{syncResult.changes.map((c: any, i: number) => (
+                <li key={i}>{c.title} ({c.type}): monitored {c.seriesMonitoredBefore ? "on" : "off"} → {c.seriesMonitoredAfter ? "on" : "off"} · {c.seasonsChanged} season(s) · {c.episodesChanged} episode(s)</li>
+              ))}</ul>
+            )}
+            {syncResult.unmatchedTitles.length > 0 && <p className="muted">Not in OneArr (not created by sync): {syncResult.unmatchedTitles.join(", ")}</p>}
+          </div>
+        )}
+      </div>
       {preview && (
         <div className="card">
           <p>{preview.length} readable item(s), {errors.length} error(s).</p>

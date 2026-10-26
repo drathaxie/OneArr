@@ -7,6 +7,102 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Visual library + monitoring fidelity (branch `visual-library`, from main 27fb5df, PR #3 merged)
+
+**Source of truth.** Started from main 27fb5df ("Merge pull request #3", v0.3.0 tag present on main). Nothing from
+the v0.3.0 branch was rebuilt: reconciliation, path mapping, backup scripts, connection tests, missing-download
+blocking, and Windows packaging are all reused as merged.
+
+**What changed, by priority**
+- P1 poster grid (Movies, Series): poster cards are now the default view, with a Posters/List toggle that is remembered
+  in localStorage. Cards show the TMDb poster (lazy-loaded, `w342`, with a title fallback when there is no poster),
+  title, year, Monitored/Unmonitored, Available/Missing, and quality profile. Search, sort (title, year, available
+  first), and filters (available, missing, monitored, unmonitored) are client-side over the existing `/api/media`
+  list, so no new list endpoint was needed. Partial is deliberately NOT shown in the grid: the list response only
+  carries a single have/missing flag per item, so a series card says Available or Missing, and the real
+  Partial/Missing/Available breakdown lives on the detail page where episode data is known.
+- P2 detail pages: clicking a card or title opens a detail view (no router change; it is page state, so Back returns
+  to the grid). It shows poster, title, year, overview, monitored state, quality profile, root folder, file status,
+  and linked files, plus release/manual search actions (movies, and per-episode for series), root-folder editing,
+  and quality-profile changing. Series detail adds a season-by-season view with collapsible seasons, per-season
+  monitored toggles, per-season have/wanted counts, and episode rows (number, title, air date, monitored,
+  have/missing, file resolution from the linked file row, not the filename). The old inline episode list in the
+  Movies/Series table was replaced by this detail view; its per-episode release action is preserved there.
+- P3 monitoring fidelity (the root cause of inflated wanted counts): the Sonarr reader previously dropped the
+  `seasons` array entirely, and migration import forced `MonitorAllSeasons=true`, so every season and episode of
+  an imported series became monitored even when Sonarr had seasons unmonitored. Now: `LegacyItem` carries seasons,
+  the reader parses them, new imports keep Sonarr's season flags, and a new `POST /api/migration/monitoring-sync`
+  (preview by default, explicit Apply with a confirmation in the Migration UI) syncs monitored flags into
+  already-imported items matched by TMDb id, without creating items or duplicates. It touches only Monitored flags
+  on the item, its seasons, and episodes in synced seasons; it never touches titles, quality profiles, root folders,
+  or file state, and it never forces episode flags when a legacy series reports no seasons array. New endpoints
+  `PATCH /api/media/{id}/seasons/{season}` (season + its episodes) and `PATCH /api/media/episodes/{episodeId}`
+  (single episode, season flag left alone) back the detail-page toggles. Wanted is computed from monitored flags
+  as before, so after a sync the wanted counts fall to the real monitored set.
+- P4 Wanted: filters by movies/episodes, search, and download state (in progress vs none); episodes are grouped by
+  series with collapse/expand; every row links to its detail view; and the page now states plainly that Wanted lists
+  only monitored items with no file, with the unmonitored without-file counts shown alongside so legacy/unmonitored
+  data is visible instead of hidden. "Why wanted" is always "no file (monitored, aired)" for this list, because that
+  is what Wanted actually computes. Unmatched, ambiguous, sample-only, misnumbered, and inaccessible files are NOT
+  wanted items — they live in the Library scan review, and the Wanted page says so with a pointer to Settings.
+  A new `hasActiveDownload` flag (Queued/Downloading/Completed jobs only; Missing/Failed do not count) distinguishes
+  "wanted, download running" from "wanted, nothing happening".
+- P5 Library/files: scan review rows now show the catalog title next to the file path (links, confirmed missing, and
+  unknown rows via mediaItemId; ambiguous rows show candidate titles), so review no longer means matching bare paths
+  to titles from memory. No file information was removed, and apply still never moves, renames, copies, or deletes a file.
+- P6 Settings: a new Automation status card at the top of Settings shows the grabbing toggle state together with the
+  library automation gate and its blocking reason, in plain language, instead of leaving the toggle and the gate in
+  separate sections. Each library root now has a live Test folder button (new read-only
+  `POST /api/library/roots/{id}/test`; it does not scan, does not update the stored last-scan state, and does not
+  touch files in the folder).
+- P7 stack discipline: still React + the existing ASP.NET Core API, no Electron, no Chromium embedding, no new UI
+  framework, no image library. Posters are plain `<img loading="lazy">` against TMDb's image CDN, and the grid is plain
+  CSS. Bundle went from 188 KB JS (57 KB gzip) to 204 KB JS (61 KB gzip) in the sandbox build — a modest increase
+  for the grid + detail views, not a new framework.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm ci`, `npm test` (vitest) — 13 passed (was 10; 3 new poster-grid/detail tests:
+  grid badges and poster fallback, search + list toggle, card → detail with linked files), and `npm run build`
+  (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests were added and must pass in CI: Sonarr seasons parsing, monitoring-sync preview (no writes)
+  then apply (season + episodes flip, series flag and file state untouched, Wanted drops to zero with the
+  unmonitored count reported), monitoring-sync without a seasons array (episodes left alone), and season/episode
+  toggle semantics. CI on this PR is the backend verification for this branch.
+
+**Real versus simulated**
+- Real: frontend tests exercise real request/response handling at the fetch layer (with a fake fetch). No real
+  Sonarr, Radarr, TMDb, qBittorrent, or library was contacted from this sandbox, and no live test is claimed.
+  The monitoring sync was verified only against the test fixtures above; the first real run must be Preview on the
+  Windows PC against the real Sonarr/Radarr, reviewed, and only then Applied.
+
+**Remaining blockers**
+- CI backend tests and the Windows acceptance run for this PR (required; backend was never compiled here).
+- Real Sonarr monitoring sync (Preview → review → Apply) on the Windows PC, especially the WWE/AEW series that
+  motivated P3, and confirmation that wanted counts fall to the real monitored set without losing wanted items
+  that should stay wanted.
+- Real poster rendering at library scale (hundreds of cards) on the Windows PC; the sandbox only checked the
+  component logic with two items, not rendering performance with a real library.
+- A release candidate and its publication, both requiring explicit authorization (not done here).
+- Automatic grabbing stays off by default throughout; enabling it on the PC is a separate, explicit decision
+  after the library is reconciled and monitoring is synced.
+
+**Exact instructions for testing on the Windows PC**
+1. Back up `%LOCALAPPDATA%\OneArr\config` first. Do not stop or change Radarr/Sonarr containers.
+2. Build this branch on Windows from a clean checkout (per README, developers only) and run it with a disposable
+   config folder, or, once authorized, use the manual `release` workflow and install that zip instead. Do not
+   install the test build over `%LOCALAPPDATA%\OneArr` until steps 3–6 pass.
+3. Open Movies and Series: confirm the poster grid is the default, search/sort/filters work, cards show the right
+   monitored and available/missing badges, and the List toggle still shows the old table.
+4. Open a series detail page: confirm seasons collapse/expand, per-season and per-episode monitored toggles work,
+   wanted counts look right, and linked files show real paths, sizes, and resolutions.
+5. On Migration, with the real Sonarr URL and key: run Preview monitoring sync first, review every change
+   (especially WWE/AEW seasons), and only then Apply. Then check Wanted: it should no longer be flooded with
+   episodes from unmonitored seasons, and the unmonitored counts should explain the remainder.
+6. In Settings → Library, use Test folder on each root, then run a preview scan and confirm titles now appear
+   next to file paths in the review lists. Keep automatic grabbing off until monitoring is synced and the
+   library shows as reconciled.
+
 ## v0.3.0 readiness (branch `v030-work`, from main 4144235)
 
 **What this branch does, and what it deliberately does not do.** It does not reimplement reconciliation,
