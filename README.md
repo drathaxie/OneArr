@@ -88,14 +88,16 @@ Optional environment variables (see `.env.example`):
 
 Without a TMDb key the app runs, and search shows a setup message instead of results.
 
-## Docker (not verified in this environment)
+## Docker (optional, not the v0.3.0 Windows path)
+
+The Windows release above is the supported path for v0.3.0 and needs no Docker, WSL, Git, Node.js, or .NET SDK. Docker remains an optional, unverified developer path only:
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build
 ```
 
-The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). It was built and started in the development sandbox, with `/health`, the UI, auth and restart persistence checked. That build needed a sandbox-specific CA workaround for package downloads; a normal host does not. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image). Bind-mounted host folders with that ownership were not tested.
+The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). It was built and started in a development sandbox, with `/health`, the UI, auth and restart persistence checked. That build needed a sandbox-specific CA workaround for package downloads; a normal host does not. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image). Bind-mounted host folders with that ownership were not tested, and the Windows release, upgrade, and rollback behaviour in `tools/windows/INSTALL.txt` does not apply to the container.
 
 ## Tests and smoke
 

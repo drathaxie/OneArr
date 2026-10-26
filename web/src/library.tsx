@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api } from "./api";
+import { api, formatBytes } from "./api";
 
 type Root = { id: number; mediaType: string; path: string; label: string | null; lastState: string; lastMessage: string | null; lastSuccessfulScanUtc: string | null };
 type Mapping = { id?: number; mediaType: string; sourcePrefix: string; targetPrefix: string };
@@ -9,7 +9,7 @@ type RootReport = { id: number; path: string; state: string; message: string | n
 type Plan = {
   planId: number;
   plan: {
-    roots: RootReport[]; links: (Entry & { sizeBytes: number; mediaItemId: number; mediaFileId: number | null })[]; missing: Entry[];
+    roots: RootReport[]; links: (Entry & { sizeBytes: number; resolution?: number | null; mediaItemId: number; mediaFileId: number | null })[]; missing: Entry[];
     unknown: (Entry & { reason?: string })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number;
     complete: boolean; warnings: string[];
   };
@@ -174,9 +174,9 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
         <>
           <h2>Will link</h2>
           <div className="table-wrap"><table>
-            <thead><tr><th /><th>File</th><th>Matched by</th></tr></thead>
+            <thead><tr><th /><th>File</th><th>Size</th><th>Resolution</th><th>Matched by</th></tr></thead>
             <tbody>{p.links.slice(0, PAGE_LIMIT).map((l) => (
-              <tr key={l.path}><td><input type="checkbox" aria-label={`Link ${l.path}`} checked={!unchecked.has(l.path)} onChange={() => onToggle(l.path)} /></td><td className="muted">{l.path}</td><td>{l.method}{l.mediaFileId ? " (update)" : ""}</td></tr>
+              <tr key={l.path}><td><input type="checkbox" aria-label={`Link ${l.path}`} checked={!unchecked.has(l.path)} onChange={() => onToggle(l.path)} /></td><td className="muted">{l.path}</td><td>{formatBytes(l.sizeBytes)}</td><td>{l.resolution ? `${l.resolution}p` : "—"}</td><td>{l.method}{l.mediaFileId ? " (update)" : ""}</td></tr>
             ))}</tbody>
           </table></div>
         </>

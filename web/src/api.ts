@@ -77,6 +77,41 @@ export interface MetadataResult {
   overview: string | null;
 }
 
+export interface MediaFile {
+  path: string;
+  sizeBytes: number;
+  resolution: number | null;
+  status: string;
+  matchMethod: string;
+}
+
+export function formatBytes(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KiB`;
+  if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / 1024 / 1024).toFixed(1)} MiB`;
+  return `${(sizeBytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  service: string;
+  name?: string;
+  detail: string;
+  categories?: { id: number; name: string }[];
+  searchAvailable?: boolean;
+  tvSearchAvailable?: boolean;
+  movieSearchAvailable?: boolean;
+  movieCategory?: string;
+  movieCount?: number;
+  tvCategory?: string;
+  tvCount?: number;
+  states?: { state: string; count: number }[];
+  anyContentPath?: boolean;
+  readableCount?: number;
+  errorCount?: number;
+  sampleTitles?: string[];
+}
+
 export interface EpisodeRow {
   id: number;
   seasonNumber: number;

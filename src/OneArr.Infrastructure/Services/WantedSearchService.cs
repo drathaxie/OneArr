@@ -19,6 +19,8 @@ public sealed record SearchPolicy
     public TimeSpan ErrorMaxDelay { get; init; } = TimeSpan.FromHours(24);
     /// <summary>Wait after a successful grab before the item is looked at again (it should be downloading by then).</summary>
     public TimeSpan AfterGrabInterval { get; init; } = TimeSpan.FromHours(24);
+    /// <summary>Wait before reconsidering an item whose previous download is missing from qBittorrent.</summary>
+    public TimeSpan MissingDownloadInterval { get; init; } = TimeSpan.FromHours(1);
 }
 
 public sealed record WantedSearchSummary(bool Enabled, int Considered, int Searched, int Grabbed, int Skipped, string Message)
@@ -73,6 +75,15 @@ public sealed class WantedSearchService
             {
                 skipped++;
                 await RecordAsync(c, SearchOutcome.SkippedActiveDownload, "A download for this item is already queued or in progress", now, ct, schedule: _policy.AfterGrabInterval);
+                continue;
+            }
+
+            // A torrent that disappeared from qBittorrent is not silently re-grabbed: it may only
+            // have been paused, moved, or temporarily unreachable. The operator clears it in Queue.
+            if (c.HasMissingDownload)
+            {
+                skipped++;
+                await RecordAsync(c, SearchOutcome.SkippedMissingDownload, "A previous download for this item is missing from qBittorrent. Clear it in Queue before it can be searched again", now, ct, schedule: _policy.MissingDownloadInterval);
                 continue;
             }
 
@@ -131,7 +142,7 @@ public sealed class WantedSearchService
         return delay > _policy.ErrorMaxDelay ? _policy.ErrorMaxDelay : delay;
     }
 
-    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt);
+    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, bool HasMissingDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt);
 
     private async Task<List<Candidate>> DueCandidatesAsync(DateOnly today, DateTimeOffset now, CancellationToken ct)
     {
@@ -151,19 +162,23 @@ public sealed class WantedSearchService
             .Where(j => ActiveStatuses.Contains(j.Status))
             .Select(j => new ValueTuple<int?, int?>(j.MediaItemId, j.EpisodeId)).ToListAsync(ct))
             .ToHashSet();
+        var missing = (await db.DownloadJobs.AsNoTracking()
+            .Where(j => j.Status == DownloadStatus.Missing)
+            .Select(j => new ValueTuple<int?, int?>(j.MediaItemId, j.EpisodeId)).ToListAsync(ct))
+            .ToHashSet();
 
         var list = new List<Candidate>();
         foreach (var m in movies)
         {
             var key = $"movie:{m.Id}";
             if (!IsDue(states, key, now)) continue;
-            list.Add(new Candidate(m.Id, null, key, active.Contains(((int?)m.Id, (int?)null)), FailuresOf(states, key), m.Title, NextOf(states, key, now)));
+            list.Add(new Candidate(m.Id, null, key, active.Contains(((int?)m.Id, (int?)null)), missing.Contains(((int?)m.Id, (int?)null)), FailuresOf(states, key), m.Title, NextOf(states, key, now)));
         }
         foreach (var e in episodes)
         {
             var key = $"episode:{e.EpisodeId}";
             if (!IsDue(states, key, now)) continue;
-            list.Add(new Candidate(e.MediaItemId, e.EpisodeId, key, active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), FailuresOf(states, key), $"{e.Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", NextOf(states, key, now)));
+            list.Add(new Candidate(e.MediaItemId, e.EpisodeId, key, active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), missing.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), FailuresOf(states, key), $"{e.Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", NextOf(states, key, now)));
         }
 
         // Never-searched items first, then the ones that have waited longest.

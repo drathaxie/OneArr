@@ -146,7 +146,7 @@ public class AppSetting
     public string Value { get; set; } = "";
 }
 
-public enum SearchOutcome { None = 0, Grabbed = 1, NoAcceptableRelease = 2, IndexerError = 3, DownloadClientError = 4, SkippedActiveDownload = 5, Rejected = 6 }
+public enum SearchOutcome { None = 0, Grabbed = 1, NoAcceptableRelease = 2, IndexerError = 3, DownloadClientError = 4, SkippedActiveDownload = 5, Rejected = 6, SkippedMissingDownload = 7 }
 
 /// <summary>
 /// Persistent per-item search state, so restarts keep backoff and never re-search an item before its next attempt is due.

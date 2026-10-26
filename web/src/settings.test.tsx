@@ -40,6 +40,7 @@ function defaultRoutes(): Record<string, Handler> {
     "GET /api/download-clients": () => ({ body: [] }),
     "GET /api/library/status": () => ({ body: { windows: false, automation: { allowed: true, reason: "All library folders are reachable and scanned" }, roots: [], mappings: [] } }),
     "PUT /api/settings": () => ({ status: 204 }),
+    "POST /api/connections/test": () => ({ body: { ok: true, service: "tmdb", detail: "TMDb answered a test search with 3 result(s)." } }),
   };
 }
 
@@ -80,7 +81,7 @@ describe("General settings", () => {
 
     await waitFor(() => expect(putCalls()).toHaveLength(1));
     const body = putCalls()[0].body!;
-    expect(body).toEqual({ torrentRoot: "/mnt/torrents", mediaRoot: "/data/media", dryRunImport: true });
+    expect(body).toEqual({ torrentRoot: "/mnt/torrents", mediaRoot: "/data/media", dryRunImport: true, automaticGrabbing: false });
     expect(JSON.stringify(body)).not.toContain("tmdbApiKey");
   });
 
@@ -100,6 +101,23 @@ describe("General settings", () => {
 
     await waitFor(() => expect(putCalls()).toHaveLength(1));
     expect(putCalls()[0].body!.dryRunImport).toBe(false);
+  });
+
+  it("submits the automatic-grabbing toggle as turned on", async () => {
+    await renderSettings();
+    fireEvent.click(screen.getByLabelText(/Automatic grabbing/));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(putCalls()).toHaveLength(1));
+    expect(putCalls()[0].body!.automaticGrabbing).toBe(true);
+  });
+
+  it("runs a TMDb connection test and shows its result", async () => {
+    await renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Test TMDb" }));
+
+    expect(await screen.findByText(/TMDb answered a test search/)).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST" && c.path === "/api/connections/test")).toBe(true);
   });
 
   it("shows the server's validation message when a path is refused", async () => {
