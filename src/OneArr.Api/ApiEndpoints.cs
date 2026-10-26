@@ -26,7 +26,9 @@ public static class ApiEndpoints
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
-    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null);
+    public sealed record SeasonSelection(int SeasonNumber, bool Monitored);
+    public sealed record MigrationSelection(string Type, int? TmdbId, string Title, bool Monitored, string? LegacyPath = null, string? LegacySource = null, List<SeasonSelection>? Seasons = null);
+    public sealed record MonitoringSyncBody(string Kind, string BaseUrl, string ApiKey, bool? Apply = null);
     public sealed record LibraryRootBody(string Type, string Path, string? Label);
     public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
     public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
@@ -135,6 +137,46 @@ public static class ApiEndpoints
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
             await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
+
+        api.MapPatch("/media/{id:int}/seasons/{season:int}", async (int id, int season, PatchMediaBody body, MediaService media, CancellationToken ct) =>
+            body.Monitored is bool m && await media.UpdateSeasonMonitoredAsync(id, season, m, ct) ? Results.NoContent() : Results.NotFound());
+
+        api.MapPatch("/media/episodes/{episodeId:int}", async (int episodeId, PatchMediaBody body, MediaService media, CancellationToken ct) =>
+            body.Monitored is bool m && await media.UpdateEpisodeMonitoredAsync(episodeId, m, ct) ? Results.NoContent() : Results.NotFound());
+
+        // Detail view: seasons, episodes, linked files, and per-episode file resolution in one read.
+        // Episode resolution comes from the linked file row, not from the filename, so a missing file has none.
+        api.MapGet("/media/{id:int}/detail", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var item = await c.MediaItems.AsNoTracking().Include(m => m.Seasons).Include(m => m.Episodes).FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+            var files = await c.MediaFiles.AsNoTracking().Where(f => f.MediaItemId == id).OrderBy(f => f.Path)
+                .Select(f => new { f.Path, f.SizeBytes, f.Resolution, f.Status, f.MatchMethod }).ToListAsync(ct);
+            var episodeIds = item.Episodes.Select(e => e.Id).ToHashSet();
+            var resolutions = await c.MediaFileEpisodes.AsNoTracking().Join(c.MediaFiles.AsNoTracking(), l => l.MediaFileId, f => f.Id,
+                (l, f) => new { l.EpisodeId, f.Resolution }).Where(x => episodeIds.Contains(x.EpisodeId)).ToListAsync(ct);
+            var resolutionByEpisode = resolutions.GroupBy(x => x.EpisodeId).ToDictionary(g => g.Key, g => g.First().Resolution);
+            var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+            return Results.Ok(new
+            {
+                item.Id, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
+                item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
+                seasons = item.Seasons.OrderBy(s => s.SeasonNumber).Select(s => new
+                {
+                    s.SeasonNumber, s.Monitored,
+                    episodeCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber),
+                    hasFileCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber && e.HasFile),
+                    wantedCount = item.Episodes.Count(e => e.SeasonNumber == s.SeasonNumber && item.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today),
+                }),
+                episodes = item.Episodes.OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber).Select(e => new
+                {
+                    e.Id, e.SeasonNumber, e.EpisodeNumber, e.Title, e.AirDate, e.Monitored, e.HasFile,
+                    resolution = resolutionByEpisode.GetValueOrDefault(e.Id),
+                }),
+                files,
+            });
+        });
 
         api.MapDelete("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
             await media.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound());
@@ -306,6 +348,17 @@ public static class ApiEndpoints
             c.LibraryRoots.Add(root);
             await c.SaveChangesAsync(ct);
             return Results.Ok(root);
+        });
+
+        // Live reachability check for one configured folder. Read-only: it does not scan, does not
+        // change the stored last-scan state, and does not touch any file in the folder.
+        api.MapPost("/library/roots/{id:int}/test", async (int id, ILibraryFileSystem fs, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var root = await c.LibraryRoots.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+            if (root is null) return Results.NotFound();
+            var check = await fs.CheckRootAsync(root.Path, ct);
+            return Results.Ok(new { root.Id, root.Path, state = check.State.ToString(), check.Message });
         });
 
         api.MapDelete("/library/roots/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
@@ -532,7 +585,7 @@ public static class ApiEndpoints
             return Results.Ok(new
             {
                 readOnly = true,
-                items = items.Where(i => i.Error is null).Select(i => new { type = i.Type == MediaType.Movie ? "movie" : "series", i.Title, i.Year, i.TmdbId, i.TvdbId, i.ImdbId, i.Path, i.Monitored }),
+                items = items.Where(i => i.Error is null).Select(i => new { type = i.Type == MediaType.Movie ? "movie" : "series", i.Title, i.Year, i.TmdbId, i.TvdbId, i.ImdbId, i.Path, i.Monitored, seasons = (i.Seasons ?? []).Select(s => new { s.SeasonNumber, s.Monitored }) }),
                 errors = items.Where(i => i.Error is not null).Select(i => new { i.Title, i.Error }),
             });
         });
@@ -549,7 +602,10 @@ public static class ApiEndpoints
                 }
                 try
                 {
-                    var r = await media.AddAsync(new AddMediaRequest(ParseType(sel.Type), tmdb.ToString(), body.QualityProfileId, body.RootFolder, sel.Monitored, null, true), ct);
+                    // New series keep Sonarr's season flags instead of forcing every season monitored.
+                    // Existing items are returned unchanged here; use /migration/monitoring-sync for them.
+                    var monitorSeasons = sel.Seasons is { Count: > 0 } ? sel.Seasons.Where(s => s.Monitored).Select(s => s.SeasonNumber).ToList() : null;
+                    var r = await media.AddAsync(new AddMediaRequest(ParseType(sel.Type), tmdb.ToString(), body.QualityProfileId, body.RootFolder, sel.Monitored, monitorSeasons, monitorSeasons is null), ct);
                     // Keep the original path so existing files can be matched. An existing value is never overwritten.
                     if (sel.LegacyPath is { Length: > 0 } legacy)
                     {
@@ -570,6 +626,22 @@ public static class ApiEndpoints
                 }
             }
             return Results.Ok(new { results });
+        });
+
+        // Monitoring sync for already-imported items. Preview by default (apply: false): no writes at all.
+        // Apply only changes Monitored flags on matched items; it never creates items, never touches file
+        // state, quality profiles, root folders, or titles, and a body-supplied key is never stored.
+        api.MapPost("/migration/monitoring-sync", async (MonitoringSyncBody body, MediaService media, ILegacyArrReader reader, CancellationToken ct) =>
+        {
+            var items = await reader.ReadAsync(new LegacyArrSource(body.Kind, body.BaseUrl, body.ApiKey), ct);
+            var result = await media.SyncLegacyMonitoringAsync(items.Where(i => i.Error is null).ToList(), body.Apply ?? false, ct);
+            return Results.Ok(new
+            {
+                applied = body.Apply ?? false,
+                result.ItemsChecked, result.SkippedNoTmdb,
+                changes = result.Changes.Select(c => new { c.Title, c.Type, c.SeriesMonitoredBefore, c.SeriesMonitoredAfter, c.SeasonsChanged, c.EpisodesChanged }),
+                unmatchedTitles = result.UnmatchedTitles,
+            });
         });
     }
 
