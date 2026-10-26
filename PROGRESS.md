@@ -7,6 +7,31 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Review fixes round 2 to PR #4 (branch `visual-library`, same PR, not merged)
+
+1. **Preview comparison is now identity-strict.** `PreviewMatches()` previously compared only the counts of
+   changed seasons and episodes, so a preview for episodes 1 and 2 would pass after the source moved to
+   episodes 3 and 4. `MonitoringChange` now carries `SeasonChanges` and `EpisodeChanges` — each with its exact
+   identifier (season number, or season + episode number) and its old and proposed monitored values — populated
+   by sync for both the per-episode and the season-fallback paths. `PreviewMatches()` compares those lists
+   by identity (order-insensitive), in addition to the previous title/series-flag/count checks. The sync
+   response now includes the detail lists, the UI shows them (e.g. `S1E2 on→off`), and the frontend sends
+   them back verbatim with the Apply request. Backend test: same counts with different episode identities,
+   different season identities, and different proposed values all reject; the identical preview still passes.
+2. **Missing Sonarr series ids now mark episodes unknown.** The reader previously skipped episode fetching
+   when the Sonarr series `id` was absent but left `EpisodesUnknown=false`, so sync fell back to season flags
+   and could overwrite per-episode exceptions. Now any Sonarr series for which an episode-level read cannot
+   be performed — missing id, not only a failed request — is marked `EpisodesUnknown`, and sync leaves its
+   episodes alone (the same handling as a failed episode read). Backend test: a series record with no `id`
+   produces `Episodes=null, EpisodesUnknown=true`, and no episode request is made for it.
+
+**Tests actually executed for round 2**
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 14 passed, and `npm run build` (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests added for CI: identity-strict preview rejection (episodes, seasons, values), sync detail
+  population for a per-episode exception, and the missing-Sonarr-id unknown case. CI on PR #4 is the backend
+  verification for these fixes as well.
+
 ## Review fixes to PR #4 (branch `visual-library`, same PR, not merged)
 
 Four review findings, all fixed on the same branch:
