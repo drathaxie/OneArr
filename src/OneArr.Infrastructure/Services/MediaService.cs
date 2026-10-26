@@ -6,7 +6,9 @@ using OneArr.Infrastructure.Persistence;
 
 namespace OneArr.Infrastructure.Services;
 
-public sealed record AddMediaRequest(MediaType Type, string ProviderId, int QualityProfileId, string RootFolder, bool Monitored, IReadOnlyList<int>? MonitorSeasons, bool MonitorAllSeasons);
+public sealed record EpisodeMonitor(int SeasonNumber, int EpisodeNumber, bool Monitored);
+
+public sealed record AddMediaRequest(MediaType Type, string ProviderId, int QualityProfileId, string RootFolder, bool Monitored, IReadOnlyList<int>? MonitorSeasons, bool MonitorAllSeasons, IReadOnlyList<EpisodeMonitor>? MonitorEpisodes = null);
 
 public sealed record AddMediaResult(MediaItem Item, bool Created);
 
@@ -82,6 +84,9 @@ public sealed class MediaService
                 write.Seasons.Add(new Season { MediaItemId = item.Id, SeasonNumber = s.SeasonNumber, Monitored = seasonMonitored });
                 foreach (var e in s.Episodes)
                 {
+                    // Per-episode flags win over the season flag when supplied (Sonarr exceptions inside
+                    // a monitored season, or unmonitored episodes inside an unmonitored season).
+                    var episodeMonitored = request.MonitorEpisodes?.FirstOrDefault(m => m.SeasonNumber == s.SeasonNumber && m.EpisodeNumber == e.EpisodeNumber)?.Monitored ?? seasonMonitored;
                     write.Episodes.Add(new Episode
                     {
                         MediaItemId = item.Id,
@@ -90,7 +95,7 @@ public sealed class MediaService
                         ProviderId = e.ProviderId,
                         Title = e.Title,
                         AirDate = e.AirDate,
-                        Monitored = seasonMonitored,
+                        Monitored = episodeMonitored,
                     });
                 }
             }
@@ -136,10 +141,13 @@ public sealed class MediaService
     /// <summary>
     /// Syncs monitored flags from a legacy Sonarr/Radarr read into already-imported items, without creating
     /// items and without touching anything except Monitored flags. Preview (apply: false) never calls SaveChanges.
-    /// Only items matched by (media type, TMDb id) are touched. For series, season flags come from the legacy
-    /// seasons array; episodes in a synced season take that season's flag. If a legacy series has no seasons
-    /// array, only its series-level flag is synced and episode flags are left alone, so a missing seasons list
-    /// can never force every episode monitored. Quality profile, root folder, titles, and file state are never touched.
+    /// Only items matched by (media type, TMDb id) are touched. Series-level, season-level, and episode-level
+    /// flags are each compared independently, so a preview reports a series-only change even when nothing else
+    /// changes. For episodes: per-episode flags win when supplied; when episode data was not supplied at all
+    /// (legacy caller), episodes in a synced season take that season's flag; when episode data is marked
+    /// unknown (Sonarr episode read failed), episodes are left alone and the series is reported, so a
+    /// per-episode exception is never silently overwritten by a season flag. Quality profile, root folder,
+    /// titles, and file state are never touched.
     /// </summary>
     public async Task<MonitoringSyncResult> SyncLegacyMonitoringAsync(IReadOnlyList<LegacyItem> legacy, bool apply, CancellationToken ct)
     {
@@ -149,6 +157,7 @@ public sealed class MediaService
 
         var changes = new List<MonitoringChange>();
         var unmatched = new List<string>();
+        var episodesUnknownTitles = new List<string>();
         var checkedCount = 0;
         var skippedNoTmdb = 0;
 
@@ -158,20 +167,16 @@ public sealed class MediaService
             if (!byKey.TryGetValue((leg.Type, tmdb.ToString()), out var item)) { unmatched.Add(leg.Title); continue; }
             checkedCount++;
 
+            // Computed before any mutation, so preview (apply: false) reports it exactly as apply would.
             var seriesBefore = item.Monitored;
+            var monitoredChanged = seriesBefore != leg.Monitored;
             var seasonsChanged = 0;
             var episodesChanged = 0;
 
-            if (leg.Type == MediaType.Movie)
+            if (apply && monitoredChanged) item.Monitored = leg.Monitored;
+
+            if (leg.Type == MediaType.Series)
             {
-                if (item.Monitored != leg.Monitored)
-                {
-                    if (apply) item.Monitored = leg.Monitored;
-                }
-            }
-            else
-            {
-                if (item.Monitored != leg.Monitored && apply) item.Monitored = leg.Monitored;
                 if (leg.Seasons is { Count: > 0 })
                 {
                     foreach (var ls in leg.Seasons)
@@ -183,6 +188,30 @@ public sealed class MediaService
                             seasonsChanged++;
                             if (apply) season.Monitored = ls.Monitored;
                         }
+                    }
+                }
+
+                if (leg.EpisodesUnknown)
+                {
+                    episodesUnknownTitles.Add(leg.Title);
+                }
+                else if (leg.Episodes is not null)
+                {
+                    var byEpisode = leg.Episodes.ToDictionary(e => (e.SeasonNumber, e.EpisodeNumber));
+                    foreach (var ep in item.Episodes)
+                    {
+                        if (byEpisode.TryGetValue((ep.SeasonNumber, ep.EpisodeNumber), out var le) && ep.Monitored != le.Monitored)
+                        {
+                            episodesChanged++;
+                            if (apply) ep.Monitored = le.Monitored;
+                        }
+                    }
+                }
+                else if (leg.Seasons is { Count: > 0 })
+                {
+                    // No episode data supplied: fall back to season flags for episodes in synced seasons.
+                    foreach (var ls in leg.Seasons)
+                    {
                         foreach (var ep in item.Episodes.Where(e => e.SeasonNumber == ls.SeasonNumber))
                         {
                             if (ep.Monitored != ls.Monitored)
@@ -195,12 +224,12 @@ public sealed class MediaService
                 }
             }
 
-            if (item.Monitored != seriesBefore || seasonsChanged > 0 || episodesChanged > 0)
-                changes.Add(new MonitoringChange(item.Title, leg.Type == MediaType.Movie ? "movie" : "series", seriesBefore, leg.Monitored, seasonsChanged, episodesChanged));
+            if (monitoredChanged || seasonsChanged > 0 || episodesChanged > 0)
+                changes.Add(new MonitoringChange(item.Title, leg.Type == MediaType.Movie ? "movie" : "series", seriesBefore, leg.Monitored, monitoredChanged, seasonsChanged, episodesChanged, leg.EpisodesUnknown, tmdb));
         }
 
         if (apply) await db.SaveChangesAsync(ct);
-        return new MonitoringSyncResult(changes, unmatched, skippedNoTmdb, checkedCount);
+        return new MonitoringSyncResult(changes, unmatched, skippedNoTmdb, checkedCount, episodesUnknownTitles);
     }
 
     /// <summary>Sets a season's monitored flag and, with it, every episode in that season. File state is untouched.</summary>
@@ -289,7 +318,7 @@ public sealed class MediaService
 
 public sealed record WantedEpisode(int MediaItemId, int EpisodeId, string SeriesTitle, int SeasonNumber, int EpisodeNumber, string EpisodeTitle, DateOnly? AirDate, bool HasActiveDownload = false);
 
-public sealed record MonitoringChange(string Title, string Type, bool SeriesMonitoredBefore, bool SeriesMonitoredAfter, int SeasonsChanged, int EpisodesChanged);
-public sealed record MonitoringSyncResult(IReadOnlyList<MonitoringChange> Changes, IReadOnlyList<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked);
+public sealed record MonitoringChange(string Title, string Type, bool SeriesMonitoredBefore, bool SeriesMonitoredAfter, bool MonitoredChanged, int SeasonsChanged, int EpisodesChanged, bool EpisodesUnknown, int TmdbId);
+public sealed record MonitoringSyncResult(IReadOnlyList<MonitoringChange> Changes, IReadOnlyList<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked, IReadOnlyList<string> EpisodesUnknownTitles);
 
 public sealed record WantedList(IReadOnlyList<MediaItem> Movies, IReadOnlyList<WantedEpisode> Episodes, int UnmonitoredMoviesWithoutFile = 0, int UnmonitoredEpisodesWithoutFile = 0, IReadOnlyDictionary<int, bool>? MovieHasActiveDownload = null);

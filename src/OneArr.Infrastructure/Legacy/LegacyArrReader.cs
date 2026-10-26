@@ -46,6 +46,7 @@ public sealed class LegacyArrReader : ILegacyArrReader
         if (doc.RootElement.ValueKind != JsonValueKind.Array) throw new ExternalServiceException($"{kind} returned an unexpected payload");
 
         var items = new List<LegacyItem>();
+        var sonarrIds = new List<int?>();
         var type = kind == "sonarr" ? MediaType.Series : MediaType.Movie;
         foreach (var e in doc.RootElement.EnumerateArray())
         {
@@ -63,6 +64,7 @@ public sealed class LegacyArrReader : ILegacyArrReader
                             seasons.Add(new LegacySeason(n, Bool(s, "monitored")));
                     }
                 }
+                sonarrIds.Add(kind == "sonarr" && tmdb is not null ? Int(e, "id") : null);
                 if (tmdb is null)
                 {
                     items.Add(new LegacyItem(kind, type, title, Int(e, "year"), null, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"),
@@ -73,10 +75,53 @@ public sealed class LegacyArrReader : ILegacyArrReader
             }
             catch (Exception ex) when (ex is FormatException or InvalidOperationException)
             {
+                sonarrIds.Add(null);
                 items.Add(new LegacyItem(kind, type, "(unreadable item)", null, null, null, null, null, false, "Malformed legacy record: " + ex.Message));
             }
         }
+
+        // Episode-level flags, one GET per Sonarr series. A failed episode read does not fail the whole
+        // read and does not fall back to season flags: that series is marked EpisodesUnknown so sync
+        // leaves its episodes alone instead of silently overwriting per-episode exceptions.
+        if (kind == "sonarr")
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (sonarrIds[i] is not int sonarrId) continue;
+                var (episodes, unknown) = await FetchEpisodesAsync(client, source.ApiKey, sonarrId, ct);
+                items[i] = items[i] with { Episodes = episodes, EpisodesUnknown = unknown };
+            }
+        }
         return items;
+    }
+
+    private static async Task<(List<LegacyEpisode>? Episodes, bool Unknown)> FetchEpisodesAsync(HttpClient client, string apiKey, int seriesId, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await OutboundHttp.SendWithRetryAsync(client, () =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, $"api/v3/episode?seriesId={seriesId}");
+                req.Headers.Add("X-Api-Key", apiKey);
+                req.Headers.Accept.ParseAdd("application/json");
+                return req;
+            }, ct);
+            if (!response.IsSuccessStatusCode) return (null, true);
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return (null, true);
+            var episodes = new List<LegacyEpisode>();
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                if (Int(e, "seasonNumber") is int season && Int(e, "episodeNumber") is int episode)
+                    episodes.Add(new LegacyEpisode(season, episode, Bool(e, "monitored")));
+            }
+            return (episodes, false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return (null, true);
+        }
     }
 
     private static string? Str(JsonElement e, string name) =>
