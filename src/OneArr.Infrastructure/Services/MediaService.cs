@@ -133,6 +133,100 @@ public sealed class MediaService
         return true;
     }
 
+    /// <summary>
+    /// Syncs monitored flags from a legacy Sonarr/Radarr read into already-imported items, without creating
+    /// items and without touching anything except Monitored flags. Preview (apply: false) never calls SaveChanges.
+    /// Only items matched by (media type, TMDb id) are touched. For series, season flags come from the legacy
+    /// seasons array; episodes in a synced season take that season's flag. If a legacy series has no seasons
+    /// array, only its series-level flag is synced and episode flags are left alone, so a missing seasons list
+    /// can never force every episode monitored. Quality profile, root folder, titles, and file state are never touched.
+    /// </summary>
+    public async Task<MonitoringSyncResult> SyncLegacyMonitoringAsync(IReadOnlyList<LegacyItem> legacy, bool apply, CancellationToken ct)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        var items = await db.MediaItems.Include(m => m.Seasons).Include(m => m.Episodes).ToListAsync(ct);
+        var byKey = items.ToDictionary(m => (m.MediaType, m.ProviderId), m => m);
+
+        var changes = new List<MonitoringChange>();
+        var unmatched = new List<string>();
+        var checkedCount = 0;
+        var skippedNoTmdb = 0;
+
+        foreach (var leg in legacy)
+        {
+            if (leg.TmdbId is not int tmdb) { skippedNoTmdb++; continue; }
+            if (!byKey.TryGetValue((leg.Type, tmdb.ToString()), out var item)) { unmatched.Add(leg.Title); continue; }
+            checkedCount++;
+
+            var seriesBefore = item.Monitored;
+            var seasonsChanged = 0;
+            var episodesChanged = 0;
+
+            if (leg.Type == MediaType.Movie)
+            {
+                if (item.Monitored != leg.Monitored)
+                {
+                    if (apply) item.Monitored = leg.Monitored;
+                }
+            }
+            else
+            {
+                if (item.Monitored != leg.Monitored && apply) item.Monitored = leg.Monitored;
+                if (leg.Seasons is { Count: > 0 })
+                {
+                    foreach (var ls in leg.Seasons)
+                    {
+                        var season = item.Seasons.FirstOrDefault(s => s.SeasonNumber == ls.SeasonNumber);
+                        if (season is null) continue;
+                        if (season.Monitored != ls.Monitored)
+                        {
+                            seasonsChanged++;
+                            if (apply) season.Monitored = ls.Monitored;
+                        }
+                        foreach (var ep in item.Episodes.Where(e => e.SeasonNumber == ls.SeasonNumber))
+                        {
+                            if (ep.Monitored != ls.Monitored)
+                            {
+                                episodesChanged++;
+                                if (apply) ep.Monitored = ls.Monitored;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (item.Monitored != seriesBefore || seasonsChanged > 0 || episodesChanged > 0)
+                changes.Add(new MonitoringChange(item.Title, leg.Type == MediaType.Movie ? "movie" : "series", seriesBefore, leg.Monitored, seasonsChanged, episodesChanged));
+        }
+
+        if (apply) await db.SaveChangesAsync(ct);
+        return new MonitoringSyncResult(changes, unmatched, skippedNoTmdb, checkedCount);
+    }
+
+    /// <summary>Sets a season's monitored flag and, with it, every episode in that season. File state is untouched.</summary>
+    public async Task<bool> UpdateSeasonMonitoredAsync(int mediaItemId, int seasonNumber, bool monitored, CancellationToken ct)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        var season = await db.Seasons.FirstOrDefaultAsync(s => s.MediaItemId == mediaItemId && s.SeasonNumber == seasonNumber, ct);
+        if (season is null) return false;
+        season.Monitored = monitored;
+        await db.Episodes.Where(e => e.MediaItemId == mediaItemId && e.SeasonNumber == seasonNumber)
+            .ExecuteUpdateAsync(e => e.SetProperty(x => x.Monitored, monitored), ct);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>Sets a single episode's monitored flag. Its season flag is left alone.</summary>
+    public async Task<bool> UpdateEpisodeMonitoredAsync(int episodeId, bool monitored, CancellationToken ct)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        var episode = await db.Episodes.FindAsync([episodeId], ct);
+        if (episode is null) return false;
+        episode.Monitored = monitored;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<bool> DeleteAsync(int id, CancellationToken ct)
     {
         // Removes OneArr's record only. Files on disk and qBittorrent torrents are never touched.
@@ -148,6 +242,11 @@ public sealed class MediaService
     {
         await using var db = await _db.CreateDbContextAsync(ct);
         var today = DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
+        // Active downloads only: a Missing/Failed job does not count, so a stuck download is visible as wanted
+        // with no download in progress rather than hidden behind an active flag.
+        var active = (await db.DownloadJobs.AsNoTracking()
+            .Where(j => j.Status == DownloadStatus.Queued || j.Status == DownloadStatus.Downloading || j.Status == DownloadStatus.Completed)
+            .Select(j => new ValueTuple<int?, int?>(j.MediaItemId, j.EpisodeId)).ToListAsync(ct)).ToHashSet();
         var movies = await db.MediaItems.AsNoTracking()
             .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
             .OrderBy(m => m.Title).ToListAsync(ct);
@@ -156,7 +255,18 @@ public sealed class MediaService
                               where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today
                               orderby m.Title, e.SeasonNumber, e.EpisodeNumber
                               select new WantedEpisode(m.Id, e.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.Title, e.AirDate)).ToListAsync(ct);
-        return new WantedList(movies, episodes);
+        // Wanted only ever lists monitored items. These counts are the unmonitored counterpart, so the UI can
+        // say plainly how much "missing" material is deliberately unmonitored rather than actually wanted.
+        var unmonitoredMovies = await db.MediaItems.CountAsync(m => m.MediaType == MediaType.Movie && !m.Monitored && !m.HasFile, ct);
+        var unmonitoredEpisodes = await (from e in db.Episodes.AsNoTracking()
+                                         join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
+                                         where (!m.Monitored || !e.Monitored) && !e.HasFile && e.AirDate != null && e.AirDate <= today
+                                         select e).CountAsync(ct);
+        return new WantedList(
+            movies,
+            episodes.Select(e => e with { HasActiveDownload = active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)) }).ToList(),
+            unmonitoredMovies, unmonitoredEpisodes,
+            movies.Select(m => (m.Id, active.Contains(((int?)m.Id, (int?)null)))).ToDictionary(x => x.Id, x => x.Item2));
     }
 
     public static void ValidateRoot(string rootFolder)
@@ -177,6 +287,9 @@ public sealed class MediaService
         db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MediaType == type && m.Provider == "tmdb" && m.ProviderId == providerId, ct);
 }
 
-public sealed record WantedEpisode(int MediaItemId, int EpisodeId, string SeriesTitle, int SeasonNumber, int EpisodeNumber, string EpisodeTitle, DateOnly? AirDate);
+public sealed record WantedEpisode(int MediaItemId, int EpisodeId, string SeriesTitle, int SeasonNumber, int EpisodeNumber, string EpisodeTitle, DateOnly? AirDate, bool HasActiveDownload = false);
 
-public sealed record WantedList(IReadOnlyList<MediaItem> Movies, IReadOnlyList<WantedEpisode> Episodes);
+public sealed record MonitoringChange(string Title, string Type, bool SeriesMonitoredBefore, bool SeriesMonitoredAfter, int SeasonsChanged, int EpisodesChanged);
+public sealed record MonitoringSyncResult(IReadOnlyList<MonitoringChange> Changes, IReadOnlyList<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked);
+
+public sealed record WantedList(IReadOnlyList<MediaItem> Movies, IReadOnlyList<WantedEpisode> Episodes, int UnmonitoredMoviesWithoutFile = 0, int UnmonitoredEpisodesWithoutFile = 0, IReadOnlyDictionary<int, bool>? MovieHasActiveDownload = null);

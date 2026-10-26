@@ -54,13 +54,22 @@ public sealed class LegacyArrReader : ILegacyArrReader
                 var title = Str(e, "title");
                 if (string.IsNullOrWhiteSpace(title)) throw new FormatException("missing title");
                 var tmdb = Int(e, "tmdbId");
+                var seasons = new List<LegacySeason>();
+                if (e.TryGetProperty("seasons", out var seasonsJson) && seasonsJson.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var s in seasonsJson.EnumerateArray())
+                    {
+                        if (Int(s, "seasonNumber") is int n)
+                            seasons.Add(new LegacySeason(n, Bool(s, "monitored")));
+                    }
+                }
                 if (tmdb is null)
                 {
                     items.Add(new LegacyItem(kind, type, title, Int(e, "year"), null, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"),
-                        "No TMDb id on this item; cannot map it to the TMDb catalog"));
+                        "No TMDb id on this item; cannot map it to the TMDb catalog", seasons));
                     continue;
                 }
-                items.Add(new LegacyItem(kind, type, title, Int(e, "year"), tmdb, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"), null));
+                items.Add(new LegacyItem(kind, type, title, Int(e, "year"), tmdb, Int(e, "tvdbId"), Str(e, "imdbId"), Str(e, "path"), Bool(e, "monitored"), null, seasons));
             }
             catch (Exception ex) when (ex is FormatException or InvalidOperationException)
             {

@@ -114,6 +114,8 @@ public sealed record ImportOutcome(ImportAction Action, string DestinationPath, 
 
 public sealed record LegacyArrSource(string Kind, string BaseUrl, string ApiKey);
 
+public sealed record LegacySeason(int SeasonNumber, bool Monitored);
+
 public sealed record LegacyItem(
     string Source,
     MediaType Type,
@@ -124,7 +126,8 @@ public sealed record LegacyItem(
     string? ImdbId,
     string? Path,
     bool Monitored,
-    string? Error);
+    string? Error,
+    IReadOnlyList<LegacySeason>? Seasons = null);
 
 public class ProviderNotConfiguredException : Exception
 {
