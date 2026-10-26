@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, type EpisodeRow, type Job, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
+import { api, ApiError, formatBytes, type ConnectionTestResult, type EpisodeRow, type Job, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
 import { LibraryPanel, RootFolderTool } from "./library";
 
 function useLoad<T>(path: string, deps: unknown[] = []) {
@@ -72,6 +72,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
   const { data: items, error, reload } = useLoad<MediaItem[]>(`/api/media?type=${kind}`, [kind]);
   const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
   const [openId, setOpenId] = useState<number | null>(null);
+  const [filesId, setFilesId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   async function toggle(item: MediaItem) {
@@ -109,6 +110,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
                   <td className="row">
                     {kind === "movie" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Releases</button>}
                     {kind === "series" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Episodes</button>}
+                    <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
                     <button className="small danger" onClick={() => remove(item)}>Remove</button>
                   </td>
                 </tr>
@@ -118,6 +120,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
         )}
       </div>
       {kind === "movie" && openId !== null && <ReleasePanel mediaId={openId} episodeId={null} onClose={() => setOpenId(null)} />}
+      {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
     </>
   );
 }
@@ -219,6 +222,39 @@ function EpisodeList({ mediaId }: { mediaId: number }) {
         </tbody>
       </table>
       {episodeId !== null && <ReleasePanel mediaId={mediaId} episodeId={episodeId} onClose={() => setEpisodeId(null)} />}
+    </div>
+  );
+}
+
+function FileList({ mediaId, onClose }: { mediaId: number; onClose: () => void }) {
+  const { data, error } = useLoad<{ itemId: number; title: string; rootFolder: string; hasFile: boolean; files: MediaFile[] }>(`/api/media/${mediaId}/files`, [mediaId]);
+  return (
+    <div className="card" style={{ marginTop: "1rem" }}>
+      <div className="row spread">
+        <h2>Linked files</h2>
+        <button onClick={onClose}>Close</button>
+      </div>
+      <p className="muted">Files OneArr has recorded for this item, from a library scan or an import. This list does not scan the disk.</p>
+      <ErrorLine message={error} />
+      {data && (
+        <>
+          <p className="muted">Root folder: <code>{data.rootFolder || "—"}</code> · {data.hasFile ? "has file" : "missing"}</p>
+          {data.files.length === 0 ? <p className="muted">No linked files yet. Run a library scan in Settings, or import a download, and they will appear here.</p> : (
+            <div className="table-wrap"><table>
+              <thead><tr><th>File</th><th>Size</th><th>Resolution</th><th>Status</th><th>Matched by</th></tr></thead>
+              <tbody>{data.files.map((f) => (
+                <tr key={f.path}>
+                  <td className="muted">{f.path}</td>
+                  <td>{formatBytes(f.sizeBytes)}</td>
+                  <td>{f.resolution ? `${f.resolution}p` : "—"}</td>
+                  <td>{f.status}</td>
+                  <td>{f.matchMethod}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -349,7 +385,7 @@ export function Queue() {
         {jobs && jobs.length === 0 && <p className="muted">No downloads yet. Grab a release from the Movies or Series pages.</p>}
         {jobs && jobs.length > 0 && (
           <table>
-            <thead><tr><th>Release</th><th>Status</th><th>Client state</th><th>Progress</th><th>Category</th><th>Hash</th></tr></thead>
+            <thead><tr><th>Release</th><th>Status</th><th>Client state</th><th>Progress</th><th>Category</th><th>Hash</th><th /></tr></thead>
             <tbody>
               {jobs.map((j) => (
                 <tr key={j.id}>
@@ -359,6 +395,7 @@ export function Queue() {
                   <td>{Math.round(j.progress * 100)}%</td>
                   <td>{j.category}</td>
                   <td className="muted">{j.hash ? j.hash.slice(0, 10) : "—"}</td>
+                  <td>{j.status === "Missing" && <button className="small" onClick={() => run("Clear missing", `/api/queue/${j.id}/clear-missing`, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -377,6 +414,50 @@ export function Queue() {
         )}
       </div>
     </>
+  );
+}
+
+function ConnectionTests({ indexers, clients }: { indexers: any[]; clients: any[] }) {
+  const [result, setResult] = useState<ConnectionTestResult | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function test(label: string, body: Record<string, unknown>) {
+    setBusy(label); setMessage(null);
+    try {
+      setResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Connection tests</h2>
+      <p className="muted">Read-only checks. Nothing is downloaded, imported, or written to another application, and no key or password is shown back.</p>
+      <div className="row">
+        <button disabled={busy !== null} onClick={() => test("tmdb", { service: "tmdb" })}>{busy === "tmdb" ? "Testing…" : "Test TMDb"}</button>
+        {indexers.map((i: any) => (
+          <button key={i.id} disabled={busy !== null} onClick={() => test(`indexer-${i.id}`, { service: "torznab", indexerId: i.id })}>Test indexer: {i.name}</button>
+        ))}
+        {clients.map((c: any) => (
+          <button key={c.id} disabled={busy !== null} onClick={() => test(`client-${c.id}`, { service: "qbittorrent", clientId: c.id })}>Test qBittorrent: {c.name}</button>
+        ))}
+      </div>
+      <ErrorLine message={message} />
+      {result && (
+        <div>
+          <p className={result.ok ? "ok" : "error"}>{result.detail}</p>
+          {result.categories && result.categories.length > 0 && (
+            <p className="muted">Categories: {result.categories.slice(0, 20).map((c) => `${c.id} ${c.name}`).join(", ")}
+              {result.categories.length > 20 ? ` (+${result.categories.length - 20} more)` : ""} · search: {result.searchAvailable ? "yes" : "no"}, TV search: {result.tvSearchAvailable ? "yes" : "no"}, movie search: {result.movieSearchAvailable ? "yes" : "no"}</p>
+          )}
+          {result.states && <p className="muted">Torrent states: {result.states.map((s) => `${s.state}: ${s.count}`).join(", ")} · content paths reported: {result.anyContentPath ? "yes" : "no"}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -403,6 +484,7 @@ export function Settings() {
       <h2>Settings</h2>
       <ErrorLine message={error ?? message} />
       {data && <GeneralForm data={data} onSave={save} />}
+      <ConnectionTests indexers={indexers ?? []} clients={clients ?? []} />
       <LibraryPanel />
 
       <div className="card">
@@ -433,8 +515,9 @@ function GeneralForm({ data, onSave }: { data: any; onSave: (body: Record<string
   const [torrentRoot, setTorrentRoot] = useState(data.torrentRoot ?? "");
   const [mediaRoot, setMediaRoot] = useState(data.mediaRoot ?? "");
   const [dry, setDry] = useState<boolean>(data.dryRunImport);
+  const [auto, setAuto] = useState<boolean>(data.automaticGrabbing ?? false);
   return (
-    <form className="card" onSubmit={(e) => { e.preventDefault(); onSave({ tmdbApiKey: tmdb || undefined, torrentRoot, mediaRoot, dryRunImport: dry }); setTmdb(""); }}>
+    <form className="card" onSubmit={(e) => { e.preventDefault(); onSave({ tmdbApiKey: tmdb || undefined, torrentRoot, mediaRoot, dryRunImport: dry, automaticGrabbing: auto }); setTmdb(""); }}>
       <h2>General</h2>
       <label>TMDb API key {data.tmdbConfigured ? <span className="ok">configured</span> : <span className="error">not set</span>}
         <input type="password" autoComplete="off" value={tmdb} onChange={(e) => setTmdb(e.target.value)} placeholder={data.tmdbConfigured ? "Leave blank to keep the stored key" : "Paste your TMDb v3 key or v4 read token"} />
@@ -446,7 +529,8 @@ function GeneralForm({ data, onSave }: { data: any; onSave: (body: Record<string
         <input value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\\Media" />
       </label>
       <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
-      <p className="muted">Automatic grabbing is not implemented in this build; all grabs are manual.</p>
+      <label className="inline"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Automatic grabbing (off by default)</label>
+      <p className="muted">Turning this on does not bypass the library check: automatic searches only run when the Library panel shows the library as reconciled, every folder is reachable, and no download is already active for an item. Until then, all grabs are manual. Keep it off during testing unless you have applied a complete library scan.</p>
       <button className="primary" type="submit">Save</button>
     </form>
   );
@@ -525,6 +609,7 @@ export function Migration() {
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
   const [preview, setPreview] = useState<any[] | null>(null);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [errors, setErrors] = useState<{ title: string; error: string }[]>([]);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
@@ -571,8 +656,10 @@ export function Migration() {
         <input aria-label="Legacy base URL" placeholder="http://radarr:7878" value={url} onChange={(e) => setUrl(e.target.value)} required style={{ minWidth: 240 }} />
         <input aria-label="Legacy API key" type="password" autoComplete="off" placeholder="API key (not stored)" value={key} onChange={(e) => setKey(e.target.value)} required />
         <button className="primary" type="submit">Load preview</button>
+        <button type="button" onClick={async () => { setMessage(null); try { setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "legacy", kind, baseUrl: url, apiKey: key })); } catch (x) { setMessage((x as Error).message); } }}>Test connection</button>
       </form>
       <ErrorLine message={message} />
+      {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}{testResult.sampleTitles && testResult.sampleTitles.length > 0 ? ` Sample: ${testResult.sampleTitles.join(", ")}.` : ""}</p>}
       {preview && (
         <div className="card">
           <p>{preview.length} readable item(s), {errors.length} error(s).</p>
