@@ -134,18 +134,28 @@ public class AvailabilityTests
     [Fact]
     public async Task ReAddingAnExistingTitleNeverOverwritesItsRootOrProfile()
     {
+        // Roots come from Path.GetTempPath so they are valid absolute paths on every platform:
+        // the previous "/original" / "/different" literals are Linux paths and ValidateRoot
+        // correctly rejects them on Windows, which failed CI run #61. Production validation is
+        // untouched; only the test data is platform-valid now.
         using var w = new TestWorld();
         await w.ConfigureAsync();
+        var originalRoot = Path.Combine(Path.GetTempPath(), "onearr-original");
+        var differentRoot = Path.Combine(Path.GetTempPath(), "onearr-different");
+        var otherProfile = await w.AddProfileAsync();
         var media = new MediaService(w.Db, new StubMetadata(), w.Time);
-        var first = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "4242", w.ProfileId, "/original", true, null, true), Ct);
+        var first = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "4242", w.ProfileId, originalRoot, true, null, true), Ct);
         Assert.True(first.Created);
 
-        var second = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "4242", w.ProfileId, "/different", false, null, true), Ct);
+        // Re-add with a different root, a different profile, and monitored off: none of it may stick.
+        var second = await media.AddAsync(new AddMediaRequest(MediaType.Movie, "4242", otherProfile, differentRoot, false, null, true), Ct);
 
         Assert.False(second.Created);
+        Assert.Equal(first.Item.Id, second.Item.Id);
         await using var db = w.Db.CreateDbContext();
         var item = await db.MediaItems.SingleAsync(m => m.Id == first.Item.Id);
-        Assert.Equal("/original", item.RootFolder);
+        Assert.Equal(originalRoot, item.RootFolder);
+        Assert.Equal(w.ProfileId, item.QualityProfileId);
         Assert.True(item.Monitored);
     }
 }
