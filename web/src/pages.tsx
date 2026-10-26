@@ -979,7 +979,7 @@ export function Migration() {
             <p className="muted">{syncResult.applied ? "Applied" : "Preview only — nothing was written"}: {syncResult.itemsChecked} matched, {syncResult.changes.length} with changes, {syncResult.unmatchedTitles.length} legacy items not in OneArr, {syncResult.skippedNoTmdb} skipped (no TMDb id).</p>
             {syncResult.changes.length > 0 && (
               <ul>{syncResult.changes.map((c: any, i: number) => (
-                <li key={i}>{c.title} ({c.type}): monitored {c.seriesMonitoredBefore ? "on" : "off"} → {c.seriesMonitoredAfter ? "on" : "off"} · {c.seasonsChanged} season(s) · {c.episodesChanged} episode(s){c.episodesUnknown ? " · episode data unavailable, episodes left alone" : ""}</li>
+                <li key={i}>{c.title} ({c.type}): monitored {c.seriesMonitoredBefore ? "on" : "off"} → {c.seriesMonitoredAfter ? "on" : "off"} · {c.seasonsChanged} season(s){c.seasonChanges?.length ? ` (${c.seasonChanges.map((s: any) => `S${s.seasonNumber} ${s.before ? "on" : "off"}→${s.after ? "on" : "off"}`).join(", ")})` : ""} · {c.episodesChanged} episode(s){c.episodeChanges?.length ? ` (${c.episodeChanges.map((e: any) => `S${e.seasonNumber}E${e.episodeNumber} ${e.before ? "on" : "off"}→${e.after ? "on" : "off"}`).join(", ")})` : ""}{c.episodesUnknown ? " · episode data unavailable, episodes left alone" : ""}</li>
               ))}</ul>
             )}
             {syncResult.unmatchedTitles.length > 0 && <p className="muted">Not in OneArr (not created by sync): {syncResult.unmatchedTitles.join(", ")}</p>}

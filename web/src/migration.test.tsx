@@ -14,7 +14,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   else if (path === "/api/migration/preview") payload = { items: [{ type: "series", title: "Show", year: 2020, tmdbId: 123, path: "/data/tv/Show", monitored: true, seasons: [{ seasonNumber: 1, monitored: true }], episodes: [], episodesUnknown: false }], errors: [] };
   else if (path === "/api/migration/monitoring-sync") payload = body?.apply
     ? { applied: true, itemsChecked: 1, skippedNoTmdb: 0, changes: [], unmatchedTitles: [], episodesUnknownTitles: [] }
-    : { applied: false, itemsChecked: 1, skippedNoTmdb: 0, changes: [{ tmdbId: 123, title: "Show", type: "series", seriesMonitoredBefore: true, seriesMonitoredAfter: false, monitoredChanged: true, seasonsChanged: 0, episodesChanged: 0, episodesUnknown: false }], unmatchedTitles: [], episodesUnknownTitles: [] };
+    : { applied: false, itemsChecked: 1, skippedNoTmdb: 0, changes: [{ tmdbId: 123, title: "Show", type: "series", seriesMonitoredBefore: true, seriesMonitoredAfter: false, monitoredChanged: true, seasonsChanged: 0, episodesChanged: 1, episodesUnknown: false, seasonChanges: [], episodeChanges: [{ seasonNumber: 1, episodeNumber: 2, before: true, after: false }] }], unmatchedTitles: [], episodesUnknownTitles: [] };
   return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } }));
 }
 
@@ -48,6 +48,8 @@ describe("migration monitoring sync gate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview monitoring sync" }));
     await screen.findByText(/Preview only/);
     expect(apply.disabled).toBe(false);
+    // The preview lists the exact episode identity, not just a count.
+    expect(screen.getByText(/S1E2 on→off/)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/Legacy base URL/), { target: { value: "http://other.test" } });
     expect(apply.disabled).toBe(true);
