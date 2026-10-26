@@ -69,6 +69,25 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.ToTable("DownloadClients");
                 });
 
+            modelBuilder.Entity("OneArr.Domain.DownloadClientHealth", b =>
+                {
+                    b.Property<int>("DownloadClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DownloadClientId");
+
+                    b.ToTable("DownloadClientHealth");
+                });
+
             modelBuilder.Entity("OneArr.Domain.DownloadJob", b =>
                 {
                     b.Property<int>("Id")
@@ -79,8 +98,15 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ClientName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ClientState")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ContentPath")
@@ -89,13 +115,28 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("DownloadClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DownloadSpeedBps")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("EpisodeId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Error")
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("EtaSeconds")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Hash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ImportFailed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Link")
@@ -127,7 +168,13 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DownloadClientId");
+
                     b.HasIndex("Hash");
+
+                    b.HasIndex("MediaItemId", "EpisodeId", "Status");
+
+                    b.HasIndex("Status");
 
                     b.ToTable("DownloadJobs");
                 });
@@ -205,6 +252,33 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("FileRecords");
+                });
+
+            modelBuilder.Entity("OneArr.Domain.ImportPreview", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DownloadJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlansJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DownloadJobId");
+
+                    b.ToTable("ImportPreviews");
                 });
 
             modelBuilder.Entity("OneArr.Domain.ImportRecord", b =>

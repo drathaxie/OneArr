@@ -50,16 +50,21 @@ public sealed class QBittorrentClient : IDownloadClient
         var items = new List<DownloadClientItem>();
         foreach (var t in doc.RootElement.EnumerateArray())
         {
-            var state = t.GetProperty("state").GetString() ?? "";
+            // Defensive parsing: a client field missing in one torrent must not abort the whole
+            // queue sync. Torrents without a hash cannot be matched to jobs and are skipped.
+            if (!t.TryGetProperty("hash", out var hashProp) || hashProp.GetString() is not { } hashValue) continue;
+            var state = t.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
             var contentPath = t.TryGetProperty("content_path", out var cp) ? cp.GetString() : null;
             items.Add(new DownloadClientItem(
-                t.GetProperty("hash").GetString()!.ToLowerInvariant(),
-                t.GetProperty("name").GetString() ?? "",
+                hashValue.ToLowerInvariant(),
+                t.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
                 state,
                 t.TryGetProperty("progress", out var pr) ? pr.GetDouble() : 0,
                 contentPath,
                 t.TryGetProperty("category", out var c) ? c.GetString() ?? "" : "",
-                t.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0));
+                t.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0,
+                t.TryGetProperty("dlspeed", out var dl) ? dl.GetInt64() : 0,
+                t.TryGetProperty("eta", out var eta) ? eta.GetInt64() : -1));
         }
         return items;
     }
