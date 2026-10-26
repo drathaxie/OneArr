@@ -7,6 +7,7 @@ using OneArr.Infrastructure.Http;
 using OneArr.Infrastructure.Library;
 using OneArr.Infrastructure.Legacy;
 using OneArr.Infrastructure.Persistence;
+using OneArr.Infrastructure.Providers;
 using OneArr.Infrastructure.Security;
 using OneArr.Infrastructure.Services;
 
@@ -30,6 +31,7 @@ public static class ApiEndpoints
     public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
     public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
     public sealed record BulkRootBody(string MediaType, string? FromRootFolder, string ToRootFolder, List<int>? Ids);
+    public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null);
 
     public static void Map(WebApplication app)
     {
@@ -118,6 +120,18 @@ public static class ApiEndpoints
 
         api.MapGet("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
             await media.GetAsync(id, ct) is { } item ? Results.Ok(item) : Results.NotFound());
+
+        // Read-only: linked files recorded in OneArr's own database by a library scan or an import.
+        // This never scans the disk and never touches a file; it only reports what OneArr already knows.
+        api.MapGet("/media/{id:int}/files", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var item = await c.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (item is null) return Results.NotFound();
+            var files = await c.MediaFiles.AsNoTracking().Where(f => f.MediaItemId == id).OrderBy(f => f.Path)
+                .Select(f => new { f.Path, f.SizeBytes, f.Resolution, f.Status, f.MatchMethod }).ToListAsync(ct);
+            return Results.Ok(new { itemId = item.Id, item.Title, item.RootFolder, item.HasFile, files });
+        });
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
             await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
@@ -219,6 +233,22 @@ public static class ApiEndpoints
         {
             await using var c = await db.CreateDbContextAsync(ct);
             return Results.Ok(await c.DownloadJobs.AsNoTracking().OrderByDescending(j => j.Id).Take(200).ToListAsync(ct));
+        });
+
+        // Explicit stuck-download reconciliation: a Missing job blocks automatic and manual grabs
+        // for its item until an operator clears it. Clearing only changes OneArr's record to Failed;
+        // it never touches a torrent, a file, or qBittorrent.
+        api.MapPost("/queue/{id:int}/clear-missing", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            var job = await c.DownloadJobs.FirstOrDefaultAsync(j => j.Id == id, ct);
+            if (job is null) return Results.NotFound();
+            if (job.Status != DownloadStatus.Missing) return Results.BadRequest(new { error = "Only a download marked Missing can be cleared" });
+            job.Status = DownloadStatus.Failed;
+            job.Error = "Cleared as missing by operator";
+            job.UpdatedAt = DateTimeOffset.UtcNow;
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(new { message = "Missing download cleared; the item can be searched or grabbed again" });
         });
 
         api.MapPost("/queue/sync", async (DownloadService downloads, JobRunner runner, CancellationToken ct) =>
@@ -411,6 +441,89 @@ public static class ApiEndpoints
             if (body.MediaRoot is not null) await settings.SetAsync(SettingKeys.MediaRoot, RequireAbsolute(body.MediaRoot), ct);
             if (body.AutomaticGrabbing is bool auto) await settings.SetAsync(SettingKeys.AutomaticGrab, auto.ToString(), ct);
             return Results.NoContent();
+        });
+
+        // Non-destructive connection tests. Nothing is added, downloaded, imported, or written to a
+        // legacy application. Stored keys/passwords are used server-side only and are never returned;
+        // a body-supplied legacy key is used for this one test and is never stored.
+        api.MapPost("/connections/test", async (ConnectionTestBody body, IDbContextFactory<OneArrDbContext> db,
+            IMetadataProvider metadata, IDownloadClient downloadClient,
+            ILegacyArrReader legacyReader, IHttpClientFactory httpFactory, CancellationToken ct) =>
+        {
+            var service = (body.Service ?? "").Trim().ToLowerInvariant();
+            try
+            {
+                await using var c = await db.CreateDbContextAsync(ct);
+                switch (service)
+                {
+                    case "tmdb":
+                    {
+                        var results = await metadata.SearchAsync(MediaType.Movie, "test", ct);
+                        return Results.Ok(new { ok = true, service, detail = $"TMDb answered a test search with {results.Count} result(s)." });
+                    }
+                    case "torznab":
+                    {
+                        if (body.IndexerId is not int indexerId) return Results.BadRequest(new { error = "indexerId is required" });
+                        var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
+                        if (indexer is null) return Results.NotFound();
+                        if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
+                        var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
+                        var http = httpFactory.CreateClient(OutboundHttp.TorznabClient);
+                        http.BaseAddress = new Uri(baseUri, "/");
+                        using var response = await OutboundHttp.SendWithRetryAsync(http,
+                            () => new HttpRequestMessage(HttpMethod.Get, "api?t=caps&apikey=" + Uri.EscapeDataString(indexer.ApiKey)), ct);
+                        if (!response.IsSuccessStatusCode)
+                            return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' returned HTTP {(int)response.StatusCode}." });
+                        var caps = TorznabClient.ParseCaps(await response.Content.ReadAsStringAsync(ct), indexer.Name);
+                        return Results.Ok(new
+                        {
+                            ok = true, service, name = indexer.Name,
+                            detail = $"Indexer '{indexer.Name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.",
+                            categories = caps.Categories.Select(x => new { x.Id, x.Name }),
+                            searchAvailable = caps.SearchAvailable, tvSearchAvailable = caps.TvSearchAvailable, movieSearchAvailable = caps.MovieSearchAvailable,
+                        });
+                    }
+                    case "qbittorrent":
+                    {
+                        if (body.ClientId is not int clientId) return Results.BadRequest(new { error = "clientId is required" });
+                        var client = await c.DownloadClients.AsNoTracking().FirstOrDefaultAsync(x => x.Id == clientId, ct);
+                        if (client is null) return Results.NotFound();
+                        if (!client.Enabled) return Results.Ok(new { ok = false, service, detail = $"Download client '{client.Name}' is disabled." });
+                        var movies = await downloadClient.ListAsync(client, client.MovieCategory, ct);
+                        var tv = await downloadClient.ListAsync(client, client.TvCategory, ct);
+                        var all = movies.Concat(tv).ToList();
+                        return Results.Ok(new
+                        {
+                            ok = true, service, name = client.Name,
+                            detail = $"qBittorrent '{client.Name}' signed in and listed {movies.Count} torrent(s) in '{client.MovieCategory}' and {tv.Count} in '{client.TvCategory}'.",
+                            movieCategory = client.MovieCategory, movieCount = movies.Count,
+                            tvCategory = client.TvCategory, tvCount = tv.Count,
+                            states = all.GroupBy(t => t.State).Select(g => new { state = g.Key, count = g.Count() }),
+                            anyContentPath = all.Any(t => !string.IsNullOrEmpty(t.ContentPath)),
+                        });
+                    }
+                    case "legacy":
+                    {
+                        if (string.IsNullOrWhiteSpace(body.Kind) || string.IsNullOrWhiteSpace(body.BaseUrl) || string.IsNullOrWhiteSpace(body.ApiKey))
+                            return Results.BadRequest(new { error = "kind, baseUrl and apiKey are required for a legacy test" });
+                        var items = await legacyReader.ReadAsync(new LegacyArrSource(body.Kind, body.BaseUrl, body.ApiKey), ct);
+                        var readable = items.Where(i => i.Error is null).ToList();
+                        return Results.Ok(new
+                        {
+                            ok = true, service, name = body.Kind,
+                            detail = $"{body.Kind} answered with {readable.Count} readable catalog item(s) and {items.Count - readable.Count} item error(s). No item was copied or modified.",
+                            readableCount = readable.Count, errorCount = items.Count - readable.Count,
+                            sampleTitles = readable.Take(3).Select(i => i.Title),
+                        });
+                    }
+                    default:
+                        return Results.BadRequest(new { error = "Unknown service; use tmdb, torznab, qbittorrent or legacy" });
+                }
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException or InvalidOperationException)
+            {
+                return Results.Ok(new { ok = false, service, detail = OutboundHttp.Redact(ex.Message) });
+            }
         });
 
         api.MapPost("/migration/preview", async (MigrationPreviewBody body, ILegacyArrReader reader, CancellationToken ct) =>

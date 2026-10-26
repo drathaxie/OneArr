@@ -78,6 +78,10 @@ public sealed class ReleaseService
             && j.EpisodeId == request.EpisodeId
             && (j.Status == DownloadStatus.Queued || j.Status == DownloadStatus.Downloading || j.Status == DownloadStatus.Completed), ct);
         if (alreadyActive) throw new ArgumentException("An active download already exists for this item");
+        var missing = await db.DownloadJobs.AnyAsync(j => j.MediaItemId == request.MediaItemId
+            && j.EpisodeId == request.EpisodeId
+            && j.Status == DownloadStatus.Missing, ct);
+        if (missing) throw new ArgumentException("A previous download for this item is missing from qBittorrent. Clear it in Queue before grabbing again");
 
         var item = await db.MediaItems.AsNoTracking().FirstAsync(m => m.Id == request.MediaItemId, ct);
         var clients = await db.DownloadClients.AsNoTracking().Where(c => c.Enabled).OrderBy(c => c.Id).ToListAsync(ct);
