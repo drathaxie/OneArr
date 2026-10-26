@@ -7,6 +7,34 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## PR #5 review fixes (branch `settings-ui-overhaul`, same PR, still open and unmerged)
+
+Both points from the PR #5 review were addressed; neither changes the UI architecture, and neither
+merges, publishes, or enables automatic grabbing.
+
+1. **No more shared-root fallback for adds.** `MediaDefaults.ResolveRoot` no longer takes a legacy
+   root at all: a per-type default, or empty. `POST /api/media` with no explicit root and no per-type
+   default now returns 400 naming the type and where to set the default, instead of silently landing a
+   series in `D:\Media\Movies` (or a movie in the TV folder) whenever that path was the shared root.
+   The Add dialog mirrors this: it starts empty when its type has no saved default, shows guidance
+   pointing at Settings → Media Management, keeps Add disabled until a folder is typed, and no longer
+   reads the legacy localStorage root at all. The media root itself stays as a real setting, relabelled
+   "Media root (imports must stay inside it)": it is the import containment root (imports fail closed
+   outside it), and Settings now says plainly that it is not an Add default. A title's root should sit
+   inside the media root, or its later imports will fail closed.
+2. **Settings saves are atomic.** `PUT /api/settings` now validates the entire request first (absolute
+   paths, profile existence) and only then commits everything with one new
+   `SettingsStore.SetManyAsync` call (one context, one SaveChanges). A failed field can no longer leave
+   earlier fields changed while returning an error — including the automatic-grabbing toggle, which is
+   the field where a half-applied save would be dangerous. The endpoint's request/response shape is
+   unchanged, and existing settings tests still pass against it.
+- New tests for these fixes (backend for CI, frontend executed here): `AvailabilityTests` ResolveRoot
+  cases now assert empty with no per-type default; `SettingsDefaultsApiTests.FailedPutWritesNothingIncludingGrabbing`
+  asserts a failed PUT (bad root, then bad profile id) leaves grabbing, torrent root, and series root
+  untouched; `add-dialog-defaults.test.tsx` asserts a series dialog with no series default but a
+  movies-looking shared root starts empty, shows the guidance, keeps Add disabled, and posts only the
+  typed folder. Frontend suite is now 24 passed, build 224 KB JS.
+
 ## Settings & Library UI overhaul (branch `settings-ui-overhaul`, from main d81cdf9 — PR #4 merged)
 
 Note: PR #4 was merged into main (d81cdf9, tag v0.4.0) before this work started, so this branch is

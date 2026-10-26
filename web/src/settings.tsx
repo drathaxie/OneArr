@@ -184,8 +184,11 @@ function DefaultRootsForm({ data, onSaved }: { data: SettingsData; onSaved: () =
       <h2>Default root folders</h2>
       <p className="muted">
         The Add Movie and Add Series dialogs start from these folders, separately per media type — the movie
-        default can never become the series default. Leave one blank to fall back to the media root below for
-        that type. Changing a default never rewrites any title already in OneArr.
+        default can never become the series default, and neither type ever falls back to the shared media
+        root below. Leave one blank and the dialog for that type starts empty instead, so a folder must be
+        typed there (the Add button stays disabled until it is). A title's root folder should sit inside the
+        media root below, or later imports for it will fail closed. Changing a default never rewrites any
+        title already in OneArr.
       </p>
       <label>Default movie root folder
         <input aria-label="Default movie root folder" value={movieRoot} onChange={(e) => setMovieRoot(e.target.value)} placeholder="D:\Media\Movies" />
@@ -207,12 +210,12 @@ function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
   return (
     <form className="card" onSubmit={(e) => { e.preventDefault(); void saveSettings({ torrentRoot, mediaRoot, dryRunImport: dry }, setMessage, onSaved); }}>
       <h2>Import paths</h2>
-      <p className="muted">Where downloads live, the fallback media root used when a per-type default is blank, and whether imports are dry-run only.</p>
+      <p className="muted">Where downloads live, the media root that imports must stay inside, and whether imports are dry-run only. The media root is NOT an Add default: it never supplies a folder for a new title.</p>
       <label>Torrent download root (absolute)
         <input aria-label="Torrent download root" value={torrentRoot} onChange={(e) => setTorrentRoot(e.target.value)} placeholder="D:\Downloads\Torrents" />
       </label>
-      <label>Media root (fallback)
-        <input aria-label="Media root (fallback)" value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\Media" />
+      <label>Media root (imports must stay inside it)
+        <input aria-label="Media root (imports)" value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\Media" />
       </label>
       <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
       <ErrorLine message={message} />

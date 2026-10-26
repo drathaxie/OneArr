@@ -134,17 +134,19 @@ public static class ApiEndpoints
 
         api.MapPost("/media", async (AddMediaBody body, MediaService media, SettingsStore settings, CancellationToken ct) =>
         {
-            // An explicit root folder wins. Otherwise the per-type default wins, then the legacy single
-            // media root. The movie default can never become a series root, or vice versa: ResolveRoot
-            // only ever reads the default for the requested type. Re-adding an existing title never
+            // An explicit root folder wins. Otherwise the per-type default wins — and nothing else.
+            // There is deliberately no fallback to the legacy shared media root: when that root was a
+            // Movies folder, series adds silently landed in it. With no per-type default, the request
+            // fails with a clear message instead of guessing a folder. Re-adding an existing title never
             // overwrites its stored root folder, profile, or monitoring (AddAsync returns it unchanged).
             var root = body.RootFolder;
             if (string.IsNullOrWhiteSpace(root))
             {
                 var movieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct);
                 var seriesRoot = await settings.GetAsync(SettingKeys.DefaultSeriesRoot, ct);
-                var legacyRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct);
-                root = MediaDefaults.ResolveRoot(ParseType(body.Type), movieRoot, seriesRoot, legacyRoot);
+                root = MediaDefaults.ResolveRoot(ParseType(body.Type), movieRoot, seriesRoot);
+                if (string.IsNullOrWhiteSpace(root))
+                    throw new ArgumentException($"No default root folder is set for {body.Type.ToLowerInvariant()} titles. Set one in Settings → Media Management → Default root folders, or provide a root folder with this request.");
             }
             var result = await media.AddAsync(new AddMediaRequest(ParseType(body.Type), body.ProviderId, body.QualityProfileId, root, body.Monitored, body.Seasons, body.AllSeasons ?? true), ct);
             return result.Created ? Results.Created($"/api/media/{result.Item.Id}", result) : Results.Ok(result);
@@ -533,18 +535,25 @@ public static class ApiEndpoints
 
         api.MapPut("/settings", async (SettingsBody body, SettingsStore settings, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
-            if (body.TmdbApiKey is not null) await settings.SetAsync(SettingKeys.TmdbApiKey, string.IsNullOrWhiteSpace(body.TmdbApiKey) ? null : body.TmdbApiKey.Trim(), ct);
-            if (body.DryRunImport is bool dry) await settings.SetAsync(SettingKeys.DryRunImport, dry.ToString(), ct);
-            if (body.TorrentRoot is not null) await settings.SetAsync(SettingKeys.TorrentRoot, RequireAbsolute(body.TorrentRoot), ct);
-            if (body.MediaRoot is not null) await settings.SetAsync(SettingKeys.MediaRoot, RequireAbsolute(body.MediaRoot), ct);
-            if (body.AutomaticGrabbing is bool auto) await settings.SetAsync(SettingKeys.AutomaticGrab, auto.ToString(), ct);
+            // Validate the ENTIRE request before writing anything. The old sequential saves could
+            // leave earlier fields changed when a later root or profile failed validation, even though
+            // the request returned an error — including the automatic-grabbing toggle, which must never
+            // flip on the back of a failed save. Only after every check passes does the single
+            // SetManyAsync call commit the changes together.
             // Per-type defaults are stored independently, so saving the movie default can never change
-            // the series default. An empty string clears a root default (falling back to the legacy
-            // media root); a null field means "not provided" and leaves the stored value alone.
-            if (body.DefaultMovieRoot is not null) await settings.SetAsync(SettingKeys.DefaultMovieRoot, string.IsNullOrWhiteSpace(body.DefaultMovieRoot) ? null : RequireAbsolute(body.DefaultMovieRoot), ct);
-            if (body.DefaultSeriesRoot is not null) await settings.SetAsync(SettingKeys.DefaultSeriesRoot, string.IsNullOrWhiteSpace(body.DefaultSeriesRoot) ? null : RequireAbsolute(body.DefaultSeriesRoot), ct);
-            if (body.DefaultMovieProfileId is int movieProfile) await settings.SetAsync(SettingKeys.DefaultMovieProfile, (await RequireProfileAsync(db, movieProfile, ct)).ToString(), ct);
-            if (body.DefaultSeriesProfileId is int seriesProfile) await settings.SetAsync(SettingKeys.DefaultSeriesProfile, (await RequireProfileAsync(db, seriesProfile, ct)).ToString(), ct);
+            // the series default. An empty string clears a root default (adds for that type then require
+            // an explicit folder); a null field means "not provided" and leaves the stored value alone.
+            var values = new Dictionary<string, string?>();
+            if (body.TmdbApiKey is not null) values[SettingKeys.TmdbApiKey] = string.IsNullOrWhiteSpace(body.TmdbApiKey) ? null : body.TmdbApiKey.Trim();
+            if (body.DryRunImport is bool dry) values[SettingKeys.DryRunImport] = dry.ToString();
+            if (body.TorrentRoot is not null) values[SettingKeys.TorrentRoot] = RequireAbsolute(body.TorrentRoot);
+            if (body.MediaRoot is not null) values[SettingKeys.MediaRoot] = RequireAbsolute(body.MediaRoot);
+            if (body.AutomaticGrabbing is bool auto) values[SettingKeys.AutomaticGrab] = auto.ToString();
+            if (body.DefaultMovieRoot is not null) values[SettingKeys.DefaultMovieRoot] = string.IsNullOrWhiteSpace(body.DefaultMovieRoot) ? null : RequireAbsolute(body.DefaultMovieRoot);
+            if (body.DefaultSeriesRoot is not null) values[SettingKeys.DefaultSeriesRoot] = string.IsNullOrWhiteSpace(body.DefaultSeriesRoot) ? null : RequireAbsolute(body.DefaultSeriesRoot);
+            if (body.DefaultMovieProfileId is int movieProfile) values[SettingKeys.DefaultMovieProfile] = (await RequireProfileAsync(db, movieProfile, ct)).ToString();
+            if (body.DefaultSeriesProfileId is int seriesProfile) values[SettingKeys.DefaultSeriesProfile] = (await RequireProfileAsync(db, seriesProfile, ct)).ToString();
+            await settings.SetManyAsync(values, ct);
             return Results.NoContent();
         });
 

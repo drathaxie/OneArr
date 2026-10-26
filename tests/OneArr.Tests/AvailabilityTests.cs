@@ -110,14 +110,16 @@ public class AvailabilityTests
     }
 
     [Fact]
-    public void DefaultRootsNeverCrossMediaTypes()
+    public void DefaultRootsNeverCrossMediaTypesAndNeverFallBackToASharedRoot()
     {
-        Assert.Equal("/movies", MediaDefaults.ResolveRoot(MediaType.Movie, "/movies", "/tv", "/media"));
-        Assert.Equal("/tv", MediaDefaults.ResolveRoot(MediaType.Series, "/movies", "/tv", "/media"));
-        Assert.Equal("/media", MediaDefaults.ResolveRoot(MediaType.Movie, null, "/tv", "/media"));
-        Assert.Equal("/media", MediaDefaults.ResolveRoot(MediaType.Series, "/movies", null, "/media"));
-        Assert.Equal("", MediaDefaults.ResolveRoot(MediaType.Series, null, null, null));
-        Assert.Equal("/media", MediaDefaults.ResolveRoot(MediaType.Movie, "   ", null, "/media"));
+        Assert.Equal("/movies", MediaDefaults.ResolveRoot(MediaType.Movie, "/movies", "/tv"));
+        Assert.Equal("/tv", MediaDefaults.ResolveRoot(MediaType.Series, "/movies", "/tv"));
+        // No per-type default means empty — never the other type's folder, and never a shared root.
+        // A stored media root of D:\Media\Movies must not silently become a series root.
+        Assert.Equal("", MediaDefaults.ResolveRoot(MediaType.Movie, null, "/tv"));
+        Assert.Equal("", MediaDefaults.ResolveRoot(MediaType.Series, "/movies", null));
+        Assert.Equal("", MediaDefaults.ResolveRoot(MediaType.Series, null, null));
+        Assert.Equal("/movies", MediaDefaults.ResolveRoot(MediaType.Movie, "  /movies  ", null));
     }
 
     [Fact]
@@ -210,6 +212,30 @@ public class SettingsDefaultsApiTests
 
         var relative = await client.PutAsJsonAsync("/api/settings", new { defaultSeriesRoot = "relative/tv" });
         Assert.Equal(HttpStatusCode.BadRequest, relative.StatusCode);
+    }
+
+    [Fact]
+    public async Task FailedPutWritesNothingIncludingGrabbing()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var torrentRoot = Path.Combine(Path.GetTempPath(), "onearr-torrents");
+        var ok = await client.PutAsJsonAsync("/api/settings", new { torrentRoot, automaticGrabbing = true });
+        Assert.Equal(HttpStatusCode.NoContent, ok.StatusCode);
+
+        // A later field fails validation: the whole save is rejected, including the grabbing toggle
+        // sent earlier in the same request. A partial save here could silently flip grabbing on.
+        var badRoot = await client.PutAsJsonAsync("/api/settings", new { automaticGrabbing = false, defaultSeriesRoot = "relative/tv" });
+        Assert.Equal(HttpStatusCode.BadRequest, badRoot.StatusCode);
+        var afterBadRoot = await GetSettingsAsync(client);
+        Assert.True(afterBadRoot.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.Equal(torrentRoot, afterBadRoot.GetProperty("torrentRoot").GetString());
+        Assert.True(afterBadRoot.GetProperty("defaultSeriesRoot").ValueKind == JsonValueKind.Null);
+
+        // Same guarantee when the failing field is a profile id, not a path.
+        var badProfile = await client.PutAsJsonAsync("/api/settings", new { automaticGrabbing = false, defaultMovieProfileId = 999999 });
+        Assert.Equal(HttpStatusCode.BadRequest, badProfile.StatusCode);
+        Assert.True((await GetSettingsAsync(client)).GetProperty("automaticGrabbing").GetBoolean());
     }
 
     [Fact]

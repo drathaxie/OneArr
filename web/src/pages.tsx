@@ -366,25 +366,33 @@ function AddMediaDialog({ kind, profiles, onAdded, onClose }: { kind: "movie" | 
   const [profileId, setProfileId] = useState<number | "">("");
   const [root, setRoot] = useState("");
   const [rootTouched, setRootTouched] = useState(false);
+  // Whether the server had a saved default for this type. When false, the root starts empty on
+  // purpose: the dialog must never silently prefill the other type's folder (or the old shared
+  // media root) for this title. The user types a folder, or sets a per-type default in Settings.
+  const [hasDefaultRoot, setHasDefaultRoot] = useState(true);
   const [monitorScope, setMonitorScope] = useState<"all" | "first" | "none">("all");
   const [monitored, setMonitored] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Defaults load when the dialog opens, from the server, per media type. The legacy single
-  // localStorage root is only a last-resort fallback for users who set one before per-type
-  // defaults existed; it is never written again and never becomes a default for the other type.
+  // Defaults load when the dialog opens, from the server, per media type — and only per media type.
+  // There is no fallback to the shared media root or to any previously used folder: either of those
+  // could silently put a series in the Movies folder (or a movie in the TV folder). With no saved
+  // default for this type, the root starts empty and the Add button stays disabled until the user
+  // types one. The legacy localStorage root is no longer read at all.
   useEffect(() => {
     api<SettingsData>("GET", "/api/settings")
       .then((s) => {
         setSettings(s);
         const perTypeRoot = kind === "movie" ? s.defaultMovieRoot : s.defaultSeriesRoot;
         const perTypeProfile = kind === "movie" ? s.defaultMovieProfileId : s.defaultSeriesProfileId;
-        setRoot(perTypeRoot || s.mediaRoot || (() => { try { return localStorage.getItem("onearr.root") ?? ""; } catch { return ""; } })());
+        setHasDefaultRoot(!!perTypeRoot);
+        setRoot(perTypeRoot ?? "");
         if (perTypeProfile != null) setProfileId(perTypeProfile);
       })
       .catch(() => {
         setMessage("Could not load saved defaults; check Settings → Media Management. You can still type a root folder manually.");
+        setHasDefaultRoot(false);
         setSettings({ tmdbConfigured: false, dryRunImport: true, torrentRoot: null, mediaRoot: null, automaticGrabbing: false, defaultMovieRoot: null, defaultSeriesRoot: null, defaultMovieProfileId: null, defaultSeriesProfileId: null });
       });
   }, [kind]);
@@ -453,6 +461,9 @@ function AddMediaDialog({ kind, profiles, onAdded, onClose }: { kind: "movie" | 
             ))}
           </ul>
         )}
+        {settings !== null && !hasDefaultRoot && (
+          <p className="muted">No saved {kind === "movie" ? "movie" : "series"} default root folder. Set one in Settings → Media Management → Default root folders, or type a folder here.</p>
+        )}
         <div className="row" style={{ marginTop: ".5rem" }}>
               <label style={{ minWidth: 200 }}>Root folder
                 <input aria-label="Root folder" value={root} onChange={(e) => { setRoot(e.target.value); setRootTouched(true); }} placeholder={kind === "movie" ? "D:\\Media\\Movies" : "D:\\Media\\TV"} />
@@ -479,7 +490,7 @@ function AddMediaDialog({ kind, profiles, onAdded, onClose }: { kind: "movie" | 
             <div className="card" style={{ marginTop: ".75rem" }}>
               <p className="muted">Confirm before adding:</p>
               <p><strong>{selected.title}{selected.year ? ` (${selected.year})` : ""}</strong> → <code>{root || "(no root folder)"}</code> · profile {effectiveProfile?.name ?? "—"} · {kind === "movie" ? (monitored ? "monitored" : "unmonitored") : monitorScope === "all" ? "all seasons monitored" : monitorScope === "first" ? "first season monitored" : "unmonitored"}</p>
-              <p className="muted">Adding only writes to OneArr's database. It does not move files or change any title already in OneArr.{rootTouched ? "" : " The root folder came from your saved default for this media type."}</p>
+              <p className="muted">Adding only writes to OneArr's database. It does not move files or change any title already in OneArr.{rootTouched || !hasDefaultRoot ? "" : " The root folder came from your saved default for this media type."}</p>
               <button className="primary" disabled={busy || !root.trim()} onClick={add}>Add {selected.title}</button>
             </div>
           </>
