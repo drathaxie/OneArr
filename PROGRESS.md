@@ -7,6 +7,105 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## v0.3.0 readiness (branch `v030-work`, from main 4144235)
+
+**What this branch does, and what it deliberately does not do.** It does not reimplement reconciliation,
+path mapping, automatic-grabbing safeguards, native Windows hardlinks, backup scripts, or validation tooling:
+all of those are already merged on main. It adds only the missing controls and diagnostics needed to use them
+on a real Windows PC, and it does not merge, publish a release, enable automatic grabbing by default, delete,
+rename, move, or modify any media file, or touch Radarr, Sonarr, or any other container.
+
+**Implemented**
+- Automatic grabbing toggle in Settings → General (Phase 5). It uses the existing `PUT /api/settings`
+  `automaticGrabbing` field, which previously had no UI control, and replaces the stale "Automatic grabbing is
+  not implemented in this build" text. Default remains off. Turning it on does not bypass the reconciliation
+  gate: searches still only run when the Library panel shows the library as reconciled, every folder is
+  reachable, and no download is active for an item.
+- Linked files for a catalog item (Phase 2). New read-only `GET /api/media/{id}/files` returns the files
+  OneArr already recorded in its own database (path, size, resolution, status, match method) plus the item's
+  root folder and have/missing state. It never scans the disk. Movies and Series pages gain a Files button
+  showing that list. The Library preview "Will link" table now also shows file size and detected resolution,
+  which were already in the preview response but not rendered.
+- Non-destructive connection tests (Phase 3/5). New `POST /api/connections/test` with Settings buttons for
+  TMDb, each Torznab indexer, and each qBittorrent client, and a Test connection button on the Migration
+  page for Radarr/Sonarr. TMDb: one test search. Torznab: the caps document (categories and search/TV/movie
+  search availability) via a new pure `TorznabClient.ParseCaps`. qBittorrent: sign-in plus torrent counts
+  per configured category, torrent states, and whether any item reports a content path (paths themselves are
+  not returned). Radarr/Sonarr: one read-only catalog read, reporting readable/error counts and sample
+  titles. Nothing is added, downloaded, imported, or written to a legacy application. Stored keys/passwords
+  are used server-side only and never returned; a body-supplied legacy key is used for one test and never
+  stored. Failures return a clear `ok: false` diagnostic instead of a bare HTTP error.
+- Stuck-download reconciliation (Phase 4). A download marked Missing in qBittorrent no longer silently
+  triggers a re-grab: automatic search skips it with a new `SkippedMissingDownload` outcome (reconsidered
+  after 1 hour, not immediately), and a manual grab is refused with a message pointing at Queue. Queue gains
+  a Clear missing button for Missing jobs only, which changes OneArr's record to Failed and leaves every
+  torrent and file untouched. Only then can the item be searched or grabbed again.
+- Phase 1 version and docs: product version in `OneArr.Api` and `OneArr.Updates` is now 0.3.0 (the release
+  workflow still sets the exact version at publish time). README's Docker section now says Docker is an
+  optional, unverified developer path, not the v0.3.0 Windows path. The upgrade/rollback machinery itself
+  was audited and not changed: the release workflow gates on tests and an acceptance run, EF Core
+  `MigrateAsync` upgrades the database at startup, the updater backs up the database before an update and
+  preserves a failed update's database, and `INSTALL.txt` already documents that config and backups survive
+  updates and uninstall. The tray-acceptance default of v0.2.0 was left alone on purpose: it tests a
+  published tag, and v0.3.0 is not published yet.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm ci`, `npm test` (vitest) — 10 passed (was 8; the 2 new tests cover
+  the automatic-grabbing toggle submitting `true` and the TMDb connection-test button showing its result),
+  and `npm run build` (tsc + vite) — passed, web bundle 188 KB JS (57 KB gzip).
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend regression tests were added and must pass in CI: `TorznabClient.ParseCaps` (categories/search
+  flags, rejection of non-caps and invalid XML) and two missing-download tests (automatic search skips a
+  Missing job with `SkippedMissingDownload` and no second grab; manual grab is refused while Missing).
+  Existing backend tests are unchanged in intent; CI on this PR is the backend verification for this branch.
+
+**Real versus simulated**
+- Real: the frontend tests exercise real request/response handling at the fetch layer (with a fake fetch).
+  The connection-test endpoints, when run on a Windows PC with real services, make real read-only calls.
+- Simulated / not live: no real TMDb, Torznab, qBittorrent, Radarr, or Sonarr service was contacted from
+  this sandbox, and no live test is claimed. The new backend tests use the existing fake indexer/qBittorrent
+  fixtures. The staging end-to-end workflow (Catalog → Search → Release evaluation → qBittorrent submission
+  → Download status → Safe import → Library reconciliation → Available) already exists as
+  `tools/windows/staging-check.ps1` and is the procedure for real-service testing, not something re-run here.
+
+**Resource measurements**
+- No new Windows runtime measurements were taken in this sandbox (Linux, no .NET, no Windows runner here).
+  The last Windows measurements on main remain the run 40205398175 acceptance numbers (16/16 checks,
+  startup 1.83 s, idle private memory 36.2 MB, idle CPU 0.44%). New Windows startup/idle/scan measurements
+  for this branch must come from CI's acceptance run and from the PC test below; do not carry the old
+  numbers forward as this branch's results.
+
+**Remaining blockers**
+- CI backend tests and the Windows acceptance run for this PR (required before any release candidate).
+- Real-service connection tests on the Windows PC (TMDb, Torznab caps, qBittorrent, Radarr/Sonarr) — the
+  in-app buttons plus `tools/windows/staging-check.ps1` with disposable folders and authorized test content.
+- Reconciliation of the real movie/TV libraries on that PC, including a complete scan apply and the
+  Automatic grabbing panel showing "reconciled".
+- A v0.3.0 release candidate and its publication, both requiring explicit authorization (not done here).
+- Automatic grabbing stays off by default throughout; enabling it on the PC is a separate, explicit decision
+  after the library is reconciled, and it is not part of this branch's verification.
+
+**Exact instructions for testing the release on your Windows PC (controlled test, no production changes)**
+1. Back up your existing data first: copy `%LOCALAPPDATA%\OneArr\config` somewhere safe. Do not point
+   this test at your production config, and do not stop or change your Radarr/Sonarr containers.
+2. Build the branch on Windows from a clean checkout (per README, developers only): `cd web; npm ci; npm run build; cd ..; dotnet build OneArr.slnx -c Release`, then run it with a disposable config folder,
+   e.g. `ONEARR_CONFIG_DIR=C:\OneArrTest\config dotnet run --project src\OneArr.Api` — or, once authorized,
+   use the manual `release` workflow with version 0.3.0 and install that zip instead. Do not install the
+   test build over `%LOCALAPPDATA%\OneArr` until steps 3–6 pass.
+3. Sign in, open Settings, and use the new Connection tests: Test TMDb, each indexer, each qBittorrent
+   client. On Migration, use Test connection for Radarr and Sonarr before Load preview. Expect a clear
+   ok/error message for each; no key or password should ever appear in the UI.
+4. In Settings → Library, add your Windows movie and TV folders, add Docker-to-Windows path mappings from
+   the suggestions, then Preview scan. Check the Will link table (now with size and resolution), Ambiguous,
+   Unmatched, Unknown, and Confirmed missing lists. Apply only after a complete scan, with unmatched files
+   acknowledged if you intend to allow automatic grabbing later.
+5. On Movies and Series, open Files for reconciled items and confirm the actual paths, sizes, and
+   resolutions match the files on disk. Confirm items that were previously shown as "missing" now show
+   as having files, without any file being moved, renamed, or deleted.
+6. In Queue, confirm any Missing download is not re-grabbed automatically, and that Clear missing (only
+   for Missing jobs) lets that item be searched again. Keep automatic grabbing off until step 4 shows the
+   library as reconciled, then decide explicitly whether to turn it on in Settings.
+
 ## Windows validation (branch `library-validation`, verified at 064ab97)
 
 **GitHub state.** PR #1 (library reconciliation) was merged by `drathaxie` into `main` at `6ee76f8`. No release has been

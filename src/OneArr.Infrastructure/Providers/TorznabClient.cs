@@ -98,4 +98,35 @@ public sealed class TorznabClient : IIndexerClient
         }
         return results;
     }
+
+    /// <summary>Parses a Torznab caps document. Returns top-level categories and which search types the indexer offers.</summary>
+    public static TorznabCaps ParseCaps(string xml, string indexerName)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(xml, LoadOptions.None);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException)
+        {
+            throw new ExternalServiceException($"Indexer '{indexerName}' returned invalid XML");
+        }
+
+        if (doc.Root?.Name.LocalName != "caps")
+            throw new ExternalServiceException($"Indexer '{indexerName}' did not return a caps document");
+
+        var categories = new List<TorznabCategory>();
+        foreach (var c in doc.Descendants("category"))
+        {
+            if (!int.TryParse(c.Attribute("id")?.Value, out var id)) continue;
+            categories.Add(new TorznabCategory(id, c.Attribute("name")?.Value ?? ""));
+        }
+
+        var searching = doc.Root.Element("searching");
+        bool Available(string name) => searching?.Element(name)?.Attribute("available")?.Value == "yes";
+        return new TorznabCaps(categories, Available("search"), Available("tv-search"), Available("movie-search"));
+    }
 }
+
+public sealed record TorznabCategory(int Id, string Name);
+public sealed record TorznabCaps(IReadOnlyList<TorznabCategory> Categories, bool SearchAvailable, bool TvSearchAvailable, bool MovieSearchAvailable);

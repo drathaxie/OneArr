@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>OneArr.Updates</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
 </Project>
