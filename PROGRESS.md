@@ -159,13 +159,18 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   history/problems tabs), plus the preserved PR #4/PR #5 suites. Frontend in the Linux sandbox:
   27/27 vitest + tsc/vite build passed (230 KB JS). Backend tests were NOT run in the sandbox
   (no .NET SDK); CI is their verification.
-- CI acceptance: a new synthetic lifecycle script (tools/windows/lifecycle-acceptance.ps1) wired
-  into ci.yml after the existing acceptance run, driving setup → settings → profile → stub client
-  + connection test → add series (stub TMDb via ONEARR_TMDB_BASE_URL) → wanted → manual grab →
-  stub downloading → sync → restart → stub completed → sync → import preview (nothing written) →
-  confirmed apply → file association → Library available → Wanted cleared → restart → still
-  consistent, against generated fixtures and stub qBittorrent/TMDb servers; it never touches real
-  media. Its JSON output is uploaded as the windows-lifecycle-acceptance artifact.
+- CI acceptance: a new synthetic lifecycle script (tools/windows/lifecycle-acceptance.ps1) that
+  drives setup → settings → profile → stub client + connection test → add series (stub TMDb via
+  ONEARR_TMDB_BASE_URL) → wanted → manual grab → stub downloading → sync → restart → stub
+  completed → sync → import preview (nothing written) → confirmed apply → file association →
+  Library available → Wanted cleared → restart → still consistent, against generated fixtures and
+  stub qBittorrent/TMDb servers; it never touches real media. The ci.yml step that would run it
+  after the existing acceptance run (and upload its JSON as windows-lifecycle-acceptance) is
+  prepared in the local tree but could NOT be pushed by the GitHub App: GitHub refuses workflow
+  file changes from an app without workflow scope (403 on the tree containing .github/workflows/
+  ci.yml). Until that step is added by hand (one edit to ci.yml in the GitHub web UI, or an app
+  with workflow scope), run the script manually against a release-shaped build; the script itself
+  is in the repo and is the acceptance procedure.
 - Verification status at push time: frontend verified locally (27/27 + build); backend and the two
   Windows acceptance scripts are verified by CI on this PR, not in the sandbox. The migration was
   hand-written (no dotnet/ef tooling in the sandbox) following the existing migration format, with
