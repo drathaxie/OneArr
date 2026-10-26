@@ -80,14 +80,20 @@ public sealed class LegacyArrReader : ILegacyArrReader
             }
         }
 
-        // Episode-level flags, one GET per Sonarr series. A failed episode read does not fail the whole
-        // read and does not fall back to season flags: that series is marked EpisodesUnknown so sync
-        // leaves its episodes alone instead of silently overwriting per-episode exceptions.
+        // Episode-level flags, one GET per Sonarr series. Whenever an episode-level read cannot be
+        // performed — not only when the request fails, but also when the Sonarr series id is absent —
+        // the series is marked EpisodesUnknown. Without that, the missing-data case left Episodes null
+        // with EpisodesUnknown false, and sync would fall back to season flags and silently overwrite
+        // per-episode exceptions. A failed read never fails the whole read.
         if (kind == "sonarr")
         {
             for (var i = 0; i < items.Count; i++)
             {
-                if (sonarrIds[i] is not int sonarrId) continue;
+                if (sonarrIds[i] is not int sonarrId)
+                {
+                    items[i] = items[i] with { EpisodesUnknown = true };
+                    continue;
+                }
                 var (episodes, unknown) = await FetchEpisodesAsync(client, source.ApiKey, sonarrId, ct);
                 items[i] = items[i] with { Episodes = episodes, EpisodesUnknown = unknown };
             }

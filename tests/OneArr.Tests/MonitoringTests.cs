@@ -205,7 +205,13 @@ public class MonitoringTests
 
         var result = await media.SyncLegacyMonitoringAsync([legacy], apply: true, Ct);
 
-        Assert.Equal(1, Assert.Single(result.Changes).EpisodesChanged);
+        var change = Assert.Single(result.Changes);
+        Assert.Equal(1, change.EpisodesChanged);
+        var episodeChange = Assert.Single(change.EpisodeChanges);
+        Assert.Equal(1, episodeChange.SeasonNumber);
+        Assert.Equal(2, episodeChange.EpisodeNumber);
+        Assert.True(episodeChange.Before);
+        Assert.False(episodeChange.After);
         await using (var db = w.Db.CreateDbContext())
         {
             var eps = await db.Episodes.OrderBy(e => e.EpisodeNumber).ToListAsync();
@@ -269,18 +275,66 @@ public class MonitoringTests
     }
 
     [Fact]
+    public async Task ReaderMarksEpisodesUnknownWhenSonarrIdIsAbsent()
+    {
+        // No "id" on the series record: no episode request can be made, so the series must be marked
+        // unknown rather than left in the ambiguous Episodes-null / EpisodesUnknown-false state that
+        // sync would treat as "fall back to season flags".
+        var seriesWithoutId = "[{\"title\":\"Show\",\"year\":2020,\"tmdbId\":123,\"path\":\"/data/tv/Show\",\"monitored\":true,"
+            + "\"seasons\":[{\"seasonNumber\":1,\"monitored\":true}]}]";
+        var reader = new LegacyArrReader(new FakeFactory(new FakeHandler(req =>
+            req.RequestUri!.AbsolutePath.Contains("/episode")
+                ? throw new InvalidOperationException("no episode request should be made without a series id")
+                : FakeHandler.Text(seriesWithoutId))));
+
+        var items = await reader.ReadAsync(new LegacyArrSource("sonarr", "http://sonarr.test", "key"), Ct);
+
+        var item = Assert.Single(items);
+        Assert.Null(item.Episodes);
+        Assert.True(item.EpisodesUnknown);
+    }
+
+    [Fact]
     public void PreviewGateAndSeriesImportSkipRules()
     {
         var fresh = new MonitoringSyncResult(
-            [new MonitoringChange("Show", "series", true, false, true, 0, 0, false, 123)], [], 0, 1, []);
+            [new MonitoringChange("Show", "series", true, false, true, 0, 0, false, 123, [], [])], [], 0, 1, []);
         var matching = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
-            [new MonitoringChange("Show", "series", true, false, true, 0, 0, false, 123)], [], 0, 1, []);
+            [new MonitoringChange("Show", "series", true, false, true, 0, 0, false, 123, [], [])], [], 0, 1, []);
         var drifted = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
-            [new MonitoringChange("Show", "series", true, true, false, 0, 0, false, 123)], [], 0, 1, []);
+            [new MonitoringChange("Show", "series", true, true, false, 0, 0, false, 123, [], [])], [], 0, 1, []);
 
         Assert.True(OneArr.Api.ApiEndpoints.PreviewMatches(fresh, matching));
         Assert.False(OneArr.Api.ApiEndpoints.PreviewMatches(fresh, drifted));
         Assert.False(OneArr.Api.ApiEndpoints.PreviewMatches(fresh, matching with { ItemsChecked = 2 }));
+
+        // Same counts, different identities: a preview for episodes 1 and 2 must NOT pass after the
+        // source moves to episodes 3 and 4, and a preview for season 1 must not pass for season 2.
+        var freshIdentities = new MonitoringSyncResult(
+            [new MonitoringChange("Show", "series", false, false, false, 1, 2, false, 123,
+                [new SeasonChange(1, true, false)],
+                [new EpisodeChange(1, 1, true, false), new EpisodeChange(1, 2, true, false)])], [], 0, 1, []);
+        var sameCountDifferentEpisodes = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
+            [new MonitoringChange("Show", "series", false, false, false, 1, 2, false, 123,
+                [new SeasonChange(1, true, false)],
+                [new EpisodeChange(1, 3, true, false), new EpisodeChange(1, 4, true, false)])], [], 0, 1, []);
+        var sameCountDifferentSeason = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
+            [new MonitoringChange("Show", "series", false, false, false, 1, 2, false, 123,
+                [new SeasonChange(2, true, false)],
+                [new EpisodeChange(1, 1, true, false), new EpisodeChange(1, 2, true, false)])], [], 0, 1, []);
+        var sameCountDifferentValue = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
+            [new MonitoringChange("Show", "series", false, false, false, 1, 2, false, 123,
+                [new SeasonChange(1, true, false)],
+                [new EpisodeChange(1, 1, true, false), new EpisodeChange(1, 2, false, true)])], [], 0, 1, []);
+        var identical = new OneArr.Api.ApiEndpoints.MonitoringSyncPreview(
+            [new MonitoringChange("Show", "series", false, false, false, 1, 2, false, 123,
+                [new SeasonChange(1, true, false)],
+                [new EpisodeChange(1, 1, true, false), new EpisodeChange(1, 2, true, false)])], [], 0, 1, []);
+
+        Assert.False(OneArr.Api.ApiEndpoints.PreviewMatches(freshIdentities, sameCountDifferentEpisodes));
+        Assert.False(OneArr.Api.ApiEndpoints.PreviewMatches(freshIdentities, sameCountDifferentSeason));
+        Assert.False(OneArr.Api.ApiEndpoints.PreviewMatches(freshIdentities, sameCountDifferentValue));
+        Assert.True(OneArr.Api.ApiEndpoints.PreviewMatches(freshIdentities, identical));
 
         Assert.True(OneArr.Api.ApiEndpoints.ShouldSkipNewSeriesImport(MediaType.Series, null, exists: false));
         Assert.True(OneArr.Api.ApiEndpoints.ShouldSkipNewSeriesImport(MediaType.Series, [], exists: false));

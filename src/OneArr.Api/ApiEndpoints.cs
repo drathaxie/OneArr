@@ -684,7 +684,7 @@ public static class ApiEndpoints
     {
         applied,
         result.ItemsChecked, result.SkippedNoTmdb,
-        changes = result.Changes.Select(c => new { c.TmdbId, c.Title, c.Type, c.SeriesMonitoredBefore, c.SeriesMonitoredAfter, c.MonitoredChanged, c.SeasonsChanged, c.EpisodesChanged, c.EpisodesUnknown }),
+        changes = result.Changes.Select(c => new { c.TmdbId, c.Title, c.Type, c.SeriesMonitoredBefore, c.SeriesMonitoredAfter, c.MonitoredChanged, c.SeasonsChanged, c.EpisodesChanged, c.EpisodesUnknown, seasonChanges = c.SeasonChanges.Select(s => new { s.SeasonNumber, s.Before, s.After }), episodeChanges = c.EpisodeChanges.Select(e => new { e.SeasonNumber, e.EpisodeNumber, e.Before, e.After }) }),
         unmatchedTitles = result.UnmatchedTitles,
         episodesUnknownTitles = result.EpisodesUnknownTitles,
     };
@@ -704,6 +704,18 @@ public static class ApiEndpoints
             if (f.Title != p.Title || f.SeriesMonitoredBefore != p.SeriesMonitoredBefore || f.SeriesMonitoredAfter != p.SeriesMonitoredAfter
                 || f.MonitoredChanged != p.MonitoredChanged || f.SeasonsChanged != p.SeasonsChanged || f.EpisodesChanged != p.EpisodesChanged
                 || f.EpisodesUnknown != p.EpisodesUnknown) return false;
+            // Counts alone are not enough: the exact seasons and episodes, with their old and proposed
+            // values, must match, or a preview for episodes 1 and 2 would pass after the source moved to 3 and 4.
+            var freshSeasons = (f.SeasonChanges ?? []).ToDictionary(s => s.SeasonNumber, s => (s.Before, s.After));
+            var previewSeasons = (p.SeasonChanges ?? []).ToDictionary(s => s.SeasonNumber, s => (s.Before, s.After));
+            if (freshSeasons.Count != previewSeasons.Count) return false;
+            foreach (var (season, values) in freshSeasons)
+                if (!previewSeasons.TryGetValue(season, out var pv) || pv != values) return false;
+            var freshEpisodes = (f.EpisodeChanges ?? []).ToDictionary(e => (e.SeasonNumber, e.EpisodeNumber), e => (e.Before, e.After));
+            var previewEpisodes = (p.EpisodeChanges ?? []).ToDictionary(e => (e.SeasonNumber, e.EpisodeNumber), e => (e.Before, e.After));
+            if (freshEpisodes.Count != previewEpisodes.Count) return false;
+            foreach (var (episode, values) in freshEpisodes)
+                if (!previewEpisodes.TryGetValue(episode, out var pv) || pv != values) return false;
         }
         return true;
     }

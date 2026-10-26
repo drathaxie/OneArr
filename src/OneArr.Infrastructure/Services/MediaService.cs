@@ -170,8 +170,8 @@ public sealed class MediaService
             // Computed before any mutation, so preview (apply: false) reports it exactly as apply would.
             var seriesBefore = item.Monitored;
             var monitoredChanged = seriesBefore != leg.Monitored;
-            var seasonsChanged = 0;
-            var episodesChanged = 0;
+            var seasonChanges = new List<SeasonChange>();
+            var episodeChanges = new List<EpisodeChange>();
 
             if (apply && monitoredChanged) item.Monitored = leg.Monitored;
 
@@ -185,7 +185,7 @@ public sealed class MediaService
                         if (season is null) continue;
                         if (season.Monitored != ls.Monitored)
                         {
-                            seasonsChanged++;
+                            seasonChanges.Add(new SeasonChange(ls.SeasonNumber, season.Monitored, ls.Monitored));
                             if (apply) season.Monitored = ls.Monitored;
                         }
                     }
@@ -202,7 +202,7 @@ public sealed class MediaService
                     {
                         if (byEpisode.TryGetValue((ep.SeasonNumber, ep.EpisodeNumber), out var le) && ep.Monitored != le.Monitored)
                         {
-                            episodesChanged++;
+                            episodeChanges.Add(new EpisodeChange(ep.SeasonNumber, ep.EpisodeNumber, ep.Monitored, le.Monitored));
                             if (apply) ep.Monitored = le.Monitored;
                         }
                     }
@@ -216,7 +216,7 @@ public sealed class MediaService
                         {
                             if (ep.Monitored != ls.Monitored)
                             {
-                                episodesChanged++;
+                                episodeChanges.Add(new EpisodeChange(ep.SeasonNumber, ep.EpisodeNumber, ep.Monitored, ls.Monitored));
                                 if (apply) ep.Monitored = ls.Monitored;
                             }
                         }
@@ -224,8 +224,8 @@ public sealed class MediaService
                 }
             }
 
-            if (monitoredChanged || seasonsChanged > 0 || episodesChanged > 0)
-                changes.Add(new MonitoringChange(item.Title, leg.Type == MediaType.Movie ? "movie" : "series", seriesBefore, leg.Monitored, monitoredChanged, seasonsChanged, episodesChanged, leg.EpisodesUnknown, tmdb));
+            if (monitoredChanged || seasonChanges.Count > 0 || episodeChanges.Count > 0)
+                changes.Add(new MonitoringChange(item.Title, leg.Type == MediaType.Movie ? "movie" : "series", seriesBefore, leg.Monitored, monitoredChanged, seasonChanges.Count, episodeChanges.Count, leg.EpisodesUnknown, tmdb, seasonChanges, episodeChanges));
         }
 
         if (apply) await db.SaveChangesAsync(ct);
@@ -318,7 +318,11 @@ public sealed class MediaService
 
 public sealed record WantedEpisode(int MediaItemId, int EpisodeId, string SeriesTitle, int SeasonNumber, int EpisodeNumber, string EpisodeTitle, DateOnly? AirDate, bool HasActiveDownload = false);
 
-public sealed record MonitoringChange(string Title, string Type, bool SeriesMonitoredBefore, bool SeriesMonitoredAfter, bool MonitoredChanged, int SeasonsChanged, int EpisodesChanged, bool EpisodesUnknown, int TmdbId);
+/// <summary>One season's monitored change: the season's identity, its current value, and the proposed value.</summary>
+public sealed record SeasonChange(int SeasonNumber, bool Before, bool After);
+/// <summary>One episode's monitored change: the episode's identity, its current value, and the proposed value.</summary>
+public sealed record EpisodeChange(int SeasonNumber, int EpisodeNumber, bool Before, bool After);
+public sealed record MonitoringChange(string Title, string Type, bool SeriesMonitoredBefore, bool SeriesMonitoredAfter, bool MonitoredChanged, int SeasonsChanged, int EpisodesChanged, bool EpisodesUnknown, int TmdbId, IReadOnlyList<SeasonChange> SeasonChanges, IReadOnlyList<EpisodeChange> EpisodeChanges);
 public sealed record MonitoringSyncResult(IReadOnlyList<MonitoringChange> Changes, IReadOnlyList<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked, IReadOnlyList<string> EpisodesUnknownTitles);
 
 public sealed record WantedList(IReadOnlyList<MediaItem> Movies, IReadOnlyList<WantedEpisode> Episodes, int UnmonitoredMoviesWithoutFile = 0, int UnmonitoredEpisodesWithoutFile = 0, IReadOnlyDictionary<int, bool>? MovieHasActiveDownload = null);
