@@ -30,7 +30,7 @@ function stateClass(state: string) {
   return state === "Accessible" ? "ok" : state === "Unknown" ? "muted" : "error";
 }
 
-export function LibraryPanel() {
+export function LibraryPanel({ showMappings = true }: { showMappings?: boolean } = {}) {
   const [status, setStatus] = useState<Status | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
@@ -128,7 +128,7 @@ export function LibraryPanel() {
         <AddRootForm windows={status.windows} disabled={busy} onAdded={() => run(refresh)} />
       </div>
 
-      <MappingsForm mappings={status.mappings} windows={status.windows} disabled={busy} onSaved={() => run(refresh)} />
+      {showMappings && <MappingsForm mappings={status.mappings} windows={status.windows} disabled={busy} onSaved={() => run(refresh)} />}
 
       <div className="card">
         <h2>Scan and link existing media</h2>

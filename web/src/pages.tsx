@@ -1,21 +1,19 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, formatBytes, posterUrl, type ConnectionTestResult, type Job, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
-import { LibraryPanel, RootFolderTool } from "./library";
+import { useEffect, useState, type FormEvent } from "react";
+import { api, ApiError, formatBytes, posterUrl, type Job, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult, type SettingsData } from "./api";
+import { ErrorLine, useLoad } from "./common";
 
-function useLoad<T>(path: string, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(() => {
-    api<T>("GET", path)
-      .then((d) => { setData(d); setError(null); })
-      .catch((e: Error) => setError(e.message));
-  }, [path]);
-  useEffect(() => { reload(); }, [reload, ...deps]);
-  return { data, error, reload };
+export { Settings } from "./settings";
+export { Migration } from "./migration";
+
+function availabilityClass(status: string | null | undefined): string {
+  if (status === "Complete" || status === "Available") return "badge ok";
+  if (status === "Missing") return "badge bad";
+  if (status === "Partial") return "badge warn";
+  return "badge";
 }
 
-function ErrorLine({ message }: { message: string | null }) {
-  return message ? <div className="error" role="alert">{message}</div> : null;
+function seriesAvailability(item: MediaItem): string {
+  return item.availability ?? "Unknown";
 }
 
 export function Dashboard() {
@@ -83,7 +81,8 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
   const [view, setView] = useState<"grid" | "list">(() => (localStorage.getItem("onearr.view") as "grid" | "list") || "grid");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"title" | "year" | "status">("title");
-  const [filter, setFilter] = useState<"all" | "available" | "missing" | "monitored" | "unmonitored">("all");
+  const [filter, setFilter] = useState<string>("all");
+  const [showAdd, setShowAdd] = useState(false);
 
   function setViewMode(v: "grid" | "list") {
     setView(v);
@@ -100,16 +99,21 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     reload();
   }
 
+  const availabilityRank = (item: MediaItem) => {
+    if (kind === "movie") return item.hasFile ? 0 : 1;
+    return { Complete: 0, Partial: 1, Missing: 2, Unknown: 3 }[seriesAvailability(item)] ?? 3;
+  };
   const filtered = (items ?? []).filter((item) => {
     if (query && !item.title.toLowerCase().includes(query.toLowerCase())) return false;
     if (filter === "available" && !item.hasFile) return false;
     if (filter === "missing" && item.hasFile) return false;
     if (filter === "monitored" && !item.monitored) return false;
     if (filter === "unmonitored" && item.monitored) return false;
+    if (kind === "series" && ["Complete", "Partial", "Missing", "Unknown"].includes(filter) && seriesAvailability(item) !== filter) return false;
     return true;
   }).sort((a, b) => {
     if (sort === "year") return (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title);
-    if (sort === "status") return Number(b.hasFile) - Number(a.hasFile) || a.title.localeCompare(b.title);
+    if (sort === "status") return availabilityRank(a) - availabilityRank(b) || a.title.localeCompare(b.title);
     return a.title.localeCompare(b.title);
   });
 
@@ -120,8 +124,11 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
   return (
     <>
       <h2>{label}</h2>
-      <AddMedia kind={kind} profiles={profiles ?? []} onAdded={reload} />
-      <RootFolderTool kind={kind} onChanged={reload} />
+      <div className="row" style={{ marginBottom: "1rem" }}>
+        <button className="primary" onClick={() => setShowAdd(true)}>Add {kind === "movie" ? "Movie" : "Series"}</button>
+        <span className="muted">Root folders, profiles, and bulk changes live in Settings → Media Management.</span>
+      </div>
+      {showAdd && <AddMediaDialog kind={kind} profiles={profiles ?? []} onAdded={() => { setShowAdd(false); reload(); }} onClose={() => setShowAdd(false)} />}
       <ErrorLine message={error ?? message} />
       <div className="card">
         <div className="row">
@@ -131,10 +138,10 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
             <option value="year">Sort: year (newest)</option>
             <option value="status">Sort: available first</option>
           </select>
-          <select aria-label="Filter" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+          <select aria-label="Filter" value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="all">All</option>
-            <option value="available">Available</option>
-            <option value="missing">Missing</option>
+            {kind === "movie" && (<><option value="available">Available</option><option value="missing">Missing</option></>)}
+            {kind === "series" && (<><option value="Complete">Complete</option><option value="Partial">Partial</option><option value="Missing">Missing</option><option value="Unknown">Unknown</option></>)}
             <option value="monitored">Monitored</option>
             <option value="unmonitored">Unmonitored</option>
           </select>
@@ -145,7 +152,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
         </div>
         <p className="muted">Showing {filtered.length} of {(items ?? []).length}.</p>
       </div>
-      {items && items.length === 0 && <p className="muted">Nothing here yet. Search TMDb above to add a {kind === "movie" ? "movie" : "series"}.</p>}
+      {items && items.length === 0 && <p className="muted">Nothing here yet. Use Add {kind === "movie" ? "Movie" : "Series"} above to search TMDb.</p>}
       {items && items.length > 0 && filtered.length === 0 && <p className="muted">No titles match the current search and filter.</p>}
       {view === "grid" && filtered.length > 0 && (
         <div className="poster-grid">
@@ -155,12 +162,20 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
                 <Poster item={item} />
               </button>
               <div className="poster-info">
-                <strong className="poster-title" onClick={() => setDetailId(item.id)} style={{ cursor: "pointer" }}>{item.title}</strong>
+                <strong className="poster-title" title={item.title} onClick={() => setDetailId(item.id)} style={{ cursor: "pointer" }}>{item.title}</strong>
                 <div className="muted">{item.year ?? ""}</div>
                 <div className="row" style={{ marginTop: ".25rem" }}>
-                  <span className={item.hasFile ? "badge ok" : "badge bad"}>{item.hasFile ? "Available" : "Missing"}</span>
+                  {kind === "movie"
+                    ? <span className={item.hasFile ? "badge ok" : "badge bad"}>{item.hasFile ? "Available" : "Missing"}</span>
+                    : <span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}</span>}
                   <span className="badge">{item.monitored ? "Monitored" : "Unmonitored"}</span>
                 </div>
+                {kind === "series" && item.applicableEpisodes != null && item.applicableEpisodes > 0 && (
+                  <div className="muted" style={{ fontSize: ".85rem" }}>{item.availableEpisodes ?? 0} / {item.applicableEpisodes} monitored aired episodes available</div>
+                )}
+                {kind === "series" && (item.applicableEpisodes == null || item.applicableEpisodes === 0) && (
+                  <div className="muted" style={{ fontSize: ".85rem" }}>Episode data insufficient to classify</div>
+                )}
                 <div className="muted" style={{ fontSize: ".85rem" }}>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
                 <div className="row" style={{ marginTop: ".25rem" }}>
                   <button className="small" onClick={() => toggle(item)}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
@@ -183,7 +198,9 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
                   <td>{item.year ?? ""}</td>
                   <td><button className="small" onClick={() => toggle(item)}>{item.monitored ? "Yes" : "No"}</button></td>
                   <td>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</td>
-                  <td>{item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
+                  <td>{kind === "movie"
+                    ? (item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>)
+                    : (<span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}{item.applicableEpisodes != null && item.applicableEpisodes > 0 ? ` ${item.availableEpisodes ?? 0}/${item.applicableEpisodes}` : ""}</span>)}</td>
                   <td className="row">
                     <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
                     <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
@@ -232,12 +249,11 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
 
   if (!data) return <><button onClick={onBack}>← Back</button><ErrorLine message={error} /></>;
   const isSeries = data.mediaType === "Series";
-  const totalEpisodes = data.episodes.length;
-  const haveEpisodes = data.episodes.filter((e) => e.hasFile).length;
   const wantedEpisodes = data.seasons.reduce((n, s) => n + s.wantedCount, 0);
-  const fileStatus = !isSeries
-    ? (data.hasFile ? "Available" : "Missing")
-    : totalEpisodes === 0 ? "No episodes" : haveEpisodes === totalEpisodes ? "Available" : haveEpisodes === 0 ? "Missing" : "Partial";
+  // Availability comes from the server: monitored, aired episodes only. A series with one downloaded
+  // episode is never Complete just because its series-level HasFile flag is true, and unaired or
+  // unmonitored episodes never count as missing.
+  const fileStatus = data.availability ?? (isSeries ? "Unknown" : data.hasFile ? "Available" : "Missing");
 
   return (
     <>
@@ -251,11 +267,17 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           <h2>{data.title} {data.year ? `(${data.year})` : ""}</h2>
           <p>{data.overview || <span className="muted">No overview available.</span>}</p>
           <div className="row">
-            <span className={fileStatus === "Available" ? "badge ok" : fileStatus === "Missing" ? "badge bad" : "badge"}>{fileStatus}</span>
+            <span className={availabilityClass(fileStatus)}>{fileStatus}</span>
             <span className="badge">{data.monitored ? "Monitored" : "Unmonitored"}</span>
             <span className="badge">{profiles.find((p) => p.id === data.qualityProfileId)?.name ?? data.qualityProfileId}</span>
             {isSeries && <span className="badge">Wanted episodes: {wantedEpisodes}</span>}
           </div>
+          {isSeries && data.applicableEpisodes != null && data.applicableEpisodes > 0 && (
+            <p className="muted">{data.availableEpisodes ?? 0} / {data.applicableEpisodes} monitored aired episodes available</p>
+          )}
+          {isSeries && (data.applicableEpisodes == null || data.applicableEpisodes === 0) && (
+            <p className="muted">Episode data insufficient to classify availability.</p>
+          )}
           <p className="muted">Root folder: <code>{data.rootFolder}</code>{data.legacyPath ? <> · imported from <code>{data.legacyPath}</code> ({data.legacySource})</> : ""}</p>
           <div className="row">
             <button className="small" onClick={() => patch({ monitored: !data.monitored })}>{data.monitored ? "Unmonitor" : "Monitor"}</button>
@@ -336,14 +358,40 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   );
 }
 
-function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profiles: QualityProfile[]; onAdded: () => void }) {
+function AddMediaDialog({ kind, profiles, onAdded, onClose }: { kind: "movie" | "series"; profiles: QualityProfile[]; onAdded: () => void; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MetadataResult[]>([]);
+  const [selected, setSelected] = useState<MetadataResult | null>(null);
+  const [settings, setSettings] = useState<SettingsData | null>(null);
   const [profileId, setProfileId] = useState<number | "">("");
-  const [root, setRoot] = useState(() => localStorage.getItem("onearr.root") ?? "");
+  const [root, setRoot] = useState("");
+  const [rootTouched, setRootTouched] = useState(false);
+  const [monitorScope, setMonitorScope] = useState<"all" | "first" | "none">("all");
   const [monitored, setMonitored] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Defaults load when the dialog opens, from the server, per media type. The legacy single
+  // localStorage root is only a last-resort fallback for users who set one before per-type
+  // defaults existed; it is never written again and never becomes a default for the other type.
+  useEffect(() => {
+    api<SettingsData>("GET", "/api/settings")
+      .then((s) => {
+        setSettings(s);
+        const perTypeRoot = kind === "movie" ? s.defaultMovieRoot : s.defaultSeriesRoot;
+        const perTypeProfile = kind === "movie" ? s.defaultMovieProfileId : s.defaultSeriesProfileId;
+        setRoot(perTypeRoot || s.mediaRoot || (() => { try { return localStorage.getItem("onearr.root") ?? ""; } catch { return ""; } })());
+        if (perTypeProfile != null) setProfileId(perTypeProfile);
+      })
+      .catch(() => {
+        setMessage("Could not load saved defaults; check Settings → Media Management. You can still type a root folder manually.");
+        setSettings({ tmdbConfigured: false, dryRunImport: true, torrentRoot: null, mediaRoot: null, automaticGrabbing: false, defaultMovieRoot: null, defaultSeriesRoot: null, defaultMovieProfileId: null, defaultSeriesProfileId: null });
+      });
+  }, [kind]);
+
+  useEffect(() => {
+    if (profileId === "" && profiles.length > 0) setProfileId(profiles[0].id);
+  }, [profiles, profileId]);
 
   async function search(e: FormEvent) {
     e.preventDefault();
@@ -351,6 +399,7 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
     setMessage(null);
     try {
       setResults(await api<MetadataResult[]>("GET", `/api/metadata/search?type=${kind}&q=${encodeURIComponent(query)}`));
+      setSelected(null);
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -358,19 +407,21 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
     }
   }
 
-  async function add(r: MetadataResult) {
+  async function add() {
+    if (!selected) return;
     const pid = profileId === "" ? profiles[0]?.id : profileId;
     if (!pid) return setMessage("Create a quality profile in Settings first");
-    if (!/^([A-Za-z]:[\\/]|\\\\|\/)/.test(root)) return setMessage("Enter a folder path, e.g. D:\\Media\\Movies");
-    try {
-      localStorage.setItem("onearr.root", root);
-    } catch { /* storage unavailable */ }
+    if (!/^([A-Za-z]:[\\]|\\\\|\/)/.test(root)) return setMessage("Enter a folder path, e.g. D:\\Media\\Movies");
     setBusy(true);
     try {
-      const res = await api<{ created: boolean; item: MediaItem }>("POST", "/api/media", {
-        type: kind, providerId: r.providerId, qualityProfileId: pid, rootFolder: root, monitored, seasons: null, allSeasons: true,
-      });
-      setMessage(res.created ? `Added ${r.title}` : `${r.title} is already in OneArr`);
+      const body: Record<string, unknown> = {
+        type: kind, providerId: selected.providerId, qualityProfileId: pid, rootFolder: root,
+        monitored: kind === "movie" ? monitored : monitorScope !== "none",
+        seasons: kind === "series" && monitorScope === "first" ? [1] : null,
+        allSeasons: kind === "series" ? monitorScope === "all" : true,
+      };
+      const res = await api<{ created: boolean; item: MediaItem }>("POST", "/api/media", body);
+      setMessage(res.created ? `Added ${selected.title}` : `${selected.title} is already in OneArr`);
       onAdded();
     } catch (err) {
       setMessage(err instanceof ApiError ? err.message : (err as Error).message);
@@ -379,34 +430,63 @@ function AddMedia({ kind, profiles, onAdded }: { kind: "movie" | "series"; profi
     }
   }
 
+  const effectiveProfile = profiles.find((p) => p.id === profileId) ?? profiles[0];
+
   return (
-    <div className="card">
-      <form className="row" onSubmit={search}>
-        <input aria-label="Search TMDb" placeholder={`Search TMDb for a ${kind === "movie" ? "movie" : "series"}`} value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-        <button className="primary" type="submit" disabled={busy || !query.trim()}>Search</button>
-      </form>
-      <div className="row" style={{ marginTop: ".5rem" }}>
-        <label style={{ minWidth: 200 }}>Root folder
-          <input aria-label="Root folder" value={root} onChange={(e) => setRoot(e.target.value)} placeholder="D:\\Media\\Movies" />
-        </label>
-        <label>Quality profile
-          <select value={profileId} onChange={(e) => setProfileId(e.target.value ? Number(e.target.value) : "")}>
-            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-        <label className="inline"><input type="checkbox" checked={monitored} onChange={(e) => setMonitored(e.target.checked)} /> Monitor</label>
+    <div className="dialog-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog card" role="dialog" aria-modal="true" aria-label={`Add ${kind === "movie" ? "Movie" : "Series"}`}>
+        <div className="row spread">
+          <h2>Add {kind === "movie" ? "Movie" : "Series"}</h2>
+          <button onClick={onClose}>Close</button>
+        </div>
+        <form className="row" onSubmit={search}>
+          <input aria-label="Search TMDb" placeholder={`Search TMDb for a ${kind === "movie" ? "movie" : "series"}`} value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+          <button className="primary" type="submit" disabled={busy || !query.trim()}>Search</button>
+        </form>
+        {results.length > 0 && (
+          <ul className="results">
+            {results.slice(0, 15).map((r) => (
+              <li key={r.providerId} className="row spread" style={{ padding: ".3rem 0" }}>
+                <span>{r.title}{r.year ? ` (${r.year})` : ""} <span className="muted">#{r.providerId}</span></span>
+                <button className="small primary" disabled={selected?.providerId === r.providerId} onClick={() => setSelected(r)}>{selected?.providerId === r.providerId ? "Selected" : "Select"}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="row" style={{ marginTop: ".5rem" }}>
+              <label style={{ minWidth: 200 }}>Root folder
+                <input aria-label="Root folder" value={root} onChange={(e) => { setRoot(e.target.value); setRootTouched(true); }} placeholder={kind === "movie" ? "D:\\Media\\Movies" : "D:\\Media\\TV"} />
+              </label>
+              <label>Quality profile
+                <select aria-label="Quality profile" value={profileId} onChange={(e) => setProfileId(e.target.value ? Number(e.target.value) : "")}>
+                  {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </label>
+              {kind === "movie" ? (
+                <label className="inline"><input type="checkbox" checked={monitored} onChange={(e) => setMonitored(e.target.checked)} /> Monitor</label>
+              ) : (
+                <label>Monitor
+                  <select aria-label="Monitor scope" value={monitorScope} onChange={(e) => setMonitorScope(e.target.value as "all" | "first" | "none")}>
+                    <option value="all">All seasons</option>
+                    <option value="first">First season only</option>
+                    <option value="none">None (unmonitored)</option>
+                  </select>
+                </label>
+              )}
+        </div>
+        {selected && (
+          <>
+            <div className="card" style={{ marginTop: ".75rem" }}>
+              <p className="muted">Confirm before adding:</p>
+              <p><strong>{selected.title}{selected.year ? ` (${selected.year})` : ""}</strong> → <code>{root || "(no root folder)"}</code> · profile {effectiveProfile?.name ?? "—"} · {kind === "movie" ? (monitored ? "monitored" : "unmonitored") : monitorScope === "all" ? "all seasons monitored" : monitorScope === "first" ? "first season monitored" : "unmonitored"}</p>
+              <p className="muted">Adding only writes to OneArr's database. It does not move files or change any title already in OneArr.{rootTouched ? "" : " The root folder came from your saved default for this media type."}</p>
+              <button className="primary" disabled={busy || !root.trim()} onClick={add}>Add {selected.title}</button>
+            </div>
+          </>
+        )}
+        <ErrorLine message={message} />
+        {!selected && settings === null && <p className="muted">Loading saved defaults…</p>}
       </div>
-      <ErrorLine message={message} />
-      {results.length > 0 && (
-        <ul className="results">
-          {results.slice(0, 15).map((r) => (
-            <li key={r.providerId} className="row spread" style={{ padding: ".3rem 0" }}>
-              <span>{r.title}{r.year ? ` (${r.year})` : ""} <span className="muted">#{r.providerId}</span></span>
-              <button className="small" disabled={busy} onClick={() => add(r)}>Add</button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -677,344 +757,6 @@ export function Queue() {
           </tbody></table>
         )}
       </div>
-    </>
-  );
-}
-
-function ConnectionTests({ indexers, clients }: { indexers: any[]; clients: any[] }) {
-  const [result, setResult] = useState<ConnectionTestResult | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function test(label: string, body: Record<string, unknown>) {
-    setBusy(label); setMessage(null);
-    try {
-      setResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <div className="card">
-      <h2>Connection tests</h2>
-      <p className="muted">Read-only checks. Nothing is downloaded, imported, or written to another application, and no key or password is shown back.</p>
-      <div className="row">
-        <button disabled={busy !== null} onClick={() => test("tmdb", { service: "tmdb" })}>{busy === "tmdb" ? "Testing…" : "Test TMDb"}</button>
-        {indexers.map((i: any) => (
-          <button key={i.id} disabled={busy !== null} onClick={() => test(`indexer-${i.id}`, { service: "torznab", indexerId: i.id })}>Test indexer: {i.name}</button>
-        ))}
-        {clients.map((c: any) => (
-          <button key={c.id} disabled={busy !== null} onClick={() => test(`client-${c.id}`, { service: "qbittorrent", clientId: c.id })}>Test qBittorrent: {c.name}</button>
-        ))}
-      </div>
-      <ErrorLine message={message} />
-      {result && (
-        <div>
-          <p className={result.ok ? "ok" : "error"}>{result.detail}</p>
-          {result.categories && result.categories.length > 0 && (
-            <p className="muted">Categories: {result.categories.slice(0, 20).map((c) => `${c.id} ${c.name}`).join(", ")}
-              {result.categories.length > 20 ? ` (+${result.categories.length - 20} more)` : ""} · search: {result.searchAvailable ? "yes" : "no"}, TV search: {result.tvSearchAvailable ? "yes" : "no"}, movie search: {result.movieSearchAvailable ? "yes" : "no"}</p>
-          )}
-          {result.states && <p className="muted">Torrent states: {result.states.map((s) => `${s.state}: ${s.count}`).join(", ")} · content paths reported: {result.anyContentPath ? "yes" : "no"}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AutomationStatus() {
-  const { data: settings } = useLoad<any>("/api/settings");
-  const { data: status } = useLoad<any>("/api/library/status");
-  if (!settings || !status) return null;
-  const on = settings.automaticGrabbing === true;
-  const gateOk = status.automation?.allowed === true;
-  return (
-    <div className="card">
-      <h2>Automation</h2>
-      <p className={on && gateOk ? "ok" : "error"}>
-        Automatic grabbing is {on ? "ON" : "OFF"}. {gateOk ? "Library reconciled." : `Blocked: ${status.automation?.reason ?? "library not reconciled"}`}
-      </p>
-      <p className="muted">
-        {on && !gateOk
-          ? "The toggle is on, but automatic searches are still paused until the library check passes. That is the safety gate, not a bug: apply a complete library scan in the Library section below, and make sure every folder is reachable and every unmatched file is reviewed."
-          : !on
-            ? "Automatic grabbing stays off until you turn it on in General below. Even then, the library gate above must pass before any automatic search runs."
-            : "Automatic searches may run for monitored wanted items with no file and no active or missing download."}
-      </p>
-    </div>
-  );
-}
-
-export function Settings() {
-  const { data, error, reload } = useLoad<any>("/api/settings");
-  const { data: profiles, reload: reloadProfiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
-  const { data: indexers, reload: reloadIndexers } = useLoad<any[]>("/api/indexers");
-  const { data: clients, reload: reloadClients } = useLoad<any[]>("/api/download-clients");
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function save(body: Record<string, unknown>) {
-    setMessage(null);
-    try {
-      await api("PUT", "/api/settings", body);
-      setMessage("Saved");
-      reload();
-    } catch (e) {
-      setMessage((e as Error).message);
-    }
-  }
-
-  return (
-    <>
-      <h2>Settings</h2>
-      <ErrorLine message={error ?? message} />
-      <AutomationStatus />
-      {data && <GeneralForm data={data} onSave={save} />}
-      <ConnectionTests indexers={indexers ?? []} clients={clients ?? []} />
-      <LibraryPanel />
-
-      <div className="card">
-        <h2>Quality profiles</h2>
-        <ul>{profiles?.map((p) => <li key={p.id}>{p.name}: minimum {p.minResolution}p, cutoff {p.cutoffResolution}p {p.allowWebSources ? "" : "(no web sources)"}</li>)}</ul>
-        <ProfileForm onCreated={reloadProfiles} />
-      </div>
-
-      <div className="card">
-        <h2>Indexers (Torznab / Newznab)</h2>
-        <p className="muted">Keys are stored server-side and never shown again.</p>
-        <ul>{indexers?.map((i) => <li key={i.id} className="row spread">{i.name} <span className="muted">{i.baseUrl}</span> <button className="small danger" onClick={async () => { await api("DELETE", `/api/indexers/${i.id}`); reloadIndexers(); }}>Delete</button></li>)}</ul>
-        <IndexerForm onCreated={reloadIndexers} />
-      </div>
-
-      <div className="card">
-        <h2>Download clients (qBittorrent)</h2>
-        <p className="muted">Credentials are stored server-side and never returned to the browser.</p>
-        <ul>{clients?.map((c) => <li key={c.id} className="row spread">{c.name} <span className="muted">{c.baseUrl} · {c.movieCategory} / {c.tvCategory}</span> <button className="small danger" onClick={async () => { await api("DELETE", `/api/download-clients/${c.id}`); reloadClients(); }}>Delete</button></li>)}</ul>
-        <ClientForm onCreated={reloadClients} />
-      </div>
-    </>
-  );
-}
-
-function GeneralForm({ data, onSave }: { data: any; onSave: (body: Record<string, unknown>) => void }) {
-  const [tmdb, setTmdb] = useState("");
-  const [torrentRoot, setTorrentRoot] = useState(data.torrentRoot ?? "");
-  const [mediaRoot, setMediaRoot] = useState(data.mediaRoot ?? "");
-  const [dry, setDry] = useState<boolean>(data.dryRunImport);
-  const [auto, setAuto] = useState<boolean>(data.automaticGrabbing ?? false);
-  return (
-    <form className="card" onSubmit={(e) => { e.preventDefault(); onSave({ tmdbApiKey: tmdb || undefined, torrentRoot, mediaRoot, dryRunImport: dry, automaticGrabbing: auto }); setTmdb(""); }}>
-      <h2>General</h2>
-      <label>TMDb API key {data.tmdbConfigured ? <span className="ok">configured</span> : <span className="error">not set</span>}
-        <input type="password" autoComplete="off" value={tmdb} onChange={(e) => setTmdb(e.target.value)} placeholder={data.tmdbConfigured ? "Leave blank to keep the stored key" : "Paste your TMDb v3 key or v4 read token"} />
-      </label>
-      <label>Torrent download root (absolute)
-        <input value={torrentRoot} onChange={(e) => setTorrentRoot(e.target.value)} placeholder="D:\\Downloads\\Torrents" />
-      </label>
-      <label>Media root (absolute, imports go here)
-        <input value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\\Media" />
-      </label>
-      <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
-      <label className="inline"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Automatic grabbing (off by default)</label>
-      <p className="muted">Turning this on does not bypass the library check: automatic searches only run when the Library panel shows the library as reconciled, every folder is reachable, and no download is already active for an item. Until then, all grabs are manual. Keep it off during testing unless you have applied a complete library scan.</p>
-      <button className="primary" type="submit">Save</button>
-    </form>
-  );
-}
-
-function ProfileForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [min, setMin] = useState(720);
-  const [cutoff, setCutoff] = useState(1080);
-  const [web, setWeb] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/quality-profiles", { name, minResolution: min, cutoffResolution: cutoff, allowWebSources: web }); setName(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Profile name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <select aria-label="Minimum resolution" value={min} onChange={(e) => setMin(Number(e.target.value))}>{[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>min {r}p</option>)}</select>
-      <select aria-label="Cutoff resolution" value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))}>{[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>cutoff {r}p</option>)}</select>
-      <label className="inline"><input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /> allow web sources</label>
-      <button type="submit">Add profile</button>
-      <ErrorLine message={err} />
-    </form>
-  );
-}
-
-function IndexerForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [key, setKey] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/indexers", { name, baseUrl: url, apiKey: key, enabled: true }); setName(""); setUrl(""); setKey(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Indexer name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <input aria-label="Indexer URL" placeholder="https://indexer.example/api/…torznab" value={url} onChange={(e) => setUrl(e.target.value)} required style={{ minWidth: 260 }} />
-      <input aria-label="Indexer API key" type="password" autoComplete="off" placeholder="API key" value={key} onChange={(e) => setKey(e.target.value)} />
-      <button type="submit">Add indexer</button>
-      <ErrorLine message={err} />
-    </form>
-  );
-}
-
-function ClientForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("qBittorrent");
-  const [url, setUrl] = useState("");
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
-  const [movie, setMovie] = useState("onearr-movies");
-  const [tv, setTv] = useState("onearr-tv");
-  const [err, setErr] = useState<string | null>(null);
-  return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/download-clients", { name, baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv, enabled: true }); setPass(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Client name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <input aria-label="Client URL" placeholder="http://qbittorrent:8080" value={url} onChange={(e) => setUrl(e.target.value)} required style={{ minWidth: 220 }} />
-      <input aria-label="Client username" value={user} onChange={(e) => setUser(e.target.value)} />
-      <input aria-label="Client password" type="password" autoComplete="off" value={pass} onChange={(e) => setPass(e.target.value)} />
-      <input aria-label="Movie category" value={movie} onChange={(e) => setMovie(e.target.value)} />
-      <input aria-label="TV category" value={tv} onChange={(e) => setTv(e.target.value)} />
-      <button type="submit">Add client</button>
-      <ErrorLine message={err} />
-    </form>
-  );
-}
-
-export function Migration() {
-  const [kind, setKind] = useState<"sonarr" | "radarr">("radarr");
-  const [url, setUrl] = useState("");
-  const [key, setKey] = useState("");
-  const [preview, setPreview] = useState<any[] | null>(null);
-  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
-  const [errors, setErrors] = useState<{ title: string; error: string }[]>([]);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
-  const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
-  const [profileId, setProfileId] = useState<number | "">("");
-  const [root, setRoot] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<any | null>(null);
-  // The preview Apply is bound to: same kind + URL, and the exact result the user saw.
-  // Changing kind, URL, or key clears it, so Apply can never run on a stale preview.
-  const [syncPreview, setSyncPreview] = useState<{ kind: string; url: string; result: any } | null>(null);
-
-  function clearSyncPreview() {
-    setSyncResult(null);
-    setSyncPreview(null);
-  }
-
-  async function loadPreview(e: FormEvent) {
-    e.preventDefault();
-    setMessage(null);
-    try {
-      const res = await api<any>("POST", "/api/migration/preview", { kind, baseUrl: url, apiKey: key });
-      setPreview(res.items);
-      setErrors(res.errors);
-      setPicked(new Set(res.items.map((_: unknown, i: number) => i)));
-      // The key is deliberately kept in this session's state (never stored): the monitoring sync
-      // below needs the same key, and clearing it here used to force retyping it after every preview.
-    } catch (x) {
-      setMessage((x as Error).message);
-    }
-  }
-
-  async function importSelected() {
-    const items = (preview ?? []).filter((_, idx) => picked.has(idx)).map((item) => ({ type: item.type, tmdbId: item.tmdbId, title: item.title, monitored: item.monitored, legacyPath: item.path, legacySource: kind, seasons: item.seasons ?? [], episodes: item.episodes ?? [], episodesUnknown: item.episodesUnknown ?? false }));
-    if (!confirm(`Copy ${items.length} catalog entr${items.length === 1 ? "y" : "ies"} into OneArr? This only writes to OneArr's database. ${kind} is not modified.`)) return;
-    try {
-      const res = await api<{ results: { title: string; status: string; message?: string }[] }>("POST", "/api/migration/import", {
-        items, qualityProfileId: profileId === "" ? profiles?.[0]?.id : profileId, rootFolder: root,
-      });
-      setMessage(res.results.map((r) => `${r.title}: ${r.status}${r.message ? ` (${r.message})` : ""}`).join("\n"));
-    } catch (x) {
-      setMessage((x as Error).message);
-    }
-  }
-
-  return (
-    <>
-      <h2>Migration Preview</h2>
-      <p className="muted">Read-only: OneArr issues GET requests to the legacy API and never writes to it. Nothing is copied until you confirm. Existing files are not moved. After importing, map the legacy paths and run a library scan in Settings so existing files are recognised.</p>
-      <form className="card row" onSubmit={loadPreview}>
-        <select aria-label="Legacy application" value={kind} onChange={(e) => { setKind(e.target.value as "sonarr" | "radarr"); clearSyncPreview(); }}>
-          <option value="radarr">Radarr (movies)</option>
-          <option value="sonarr">Sonarr (series)</option>
-        </select>
-        <input aria-label="Legacy base URL" placeholder="http://radarr:7878" value={url} onChange={(e) => { setUrl(e.target.value); clearSyncPreview(); }} required style={{ minWidth: 240 }} />
-        <input aria-label="Legacy API key" type="password" autoComplete="off" placeholder="API key (not stored)" value={key} onChange={(e) => { setKey(e.target.value); clearSyncPreview(); }} required />
-        <button className="primary" type="submit">Load preview</button>
-        <button type="button" onClick={async () => { setMessage(null); try { setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "legacy", kind, baseUrl: url, apiKey: key })); } catch (x) { setMessage((x as Error).message); } }}>Test connection</button>
-      </form>
-      <ErrorLine message={message} />
-      {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}{testResult.sampleTitles && testResult.sampleTitles.length > 0 ? ` Sample: ${testResult.sampleTitles.join(", ")}.` : ""}</p>}
-      <div className="card">
-        <h2>Monitoring sync for already-imported items</h2>
-        <p className="muted">
-          Use the same {kind} URL and key above. Preview first: it shows exactly which monitored flags would change and
-          creates nothing. Apply is only enabled for the preview you just saw, for this same source — changing the source
-          or key clears it, and the server re-checks the preview against the current source and database before writing,
-          refusing if anything moved. Applying changes only monitored flags on items already in OneArr (matched by TMDb id);
-          it never changes titles, quality profiles, root folders, or file state, and it never creates duplicates. Per-episode
-          flags from {kind} are preserved inside a season; if episode data cannot be read for a series, its episodes are left
-          alone and the series is listed below as unknown instead of being forced to its season flag.
-        </p>
-        <div className="row">
-          <button onClick={async () => { setMessage(null); try { const res = await api<any>("POST", "/api/migration/monitoring-sync", { kind, baseUrl: url, apiKey: key, apply: false }); setSyncResult(res); setSyncPreview({ kind, url, result: res }); } catch (x) { setMessage((x as Error).message); } }}>Preview monitoring sync</button>
-          <button className="primary" disabled={!syncPreview || syncPreview.kind !== kind || syncPreview.url !== url} onClick={async () => { if (!syncPreview) return; if (!confirm("Apply the monitoring sync preview you just saw? Only the monitored flags listed below will change.")) return; setMessage(null); try { const res = await api<any>("POST", "/api/migration/monitoring-sync", { kind, baseUrl: url, apiKey: key, apply: true, preview: { changes: syncPreview.result.changes, unmatchedTitles: syncPreview.result.unmatchedTitles, skippedNoTmdb: syncPreview.result.skippedNoTmdb, itemsChecked: syncPreview.result.itemsChecked, episodesUnknownTitles: syncPreview.result.episodesUnknownTitles ?? [] } }); setSyncResult(res); setSyncPreview(null); } catch (x) { setMessage(`${(x as Error).message} Run Preview again to see the fresh changes.`); setSyncPreview(null); } }}>Apply monitoring sync</button>
-        </div>
-        {!syncPreview && !syncResult?.applied && <p className="muted">Apply is disabled until you run Preview for the current source.</p>}
-        {syncResult && (
-          <div style={{ marginTop: ".75rem" }}>
-            <p className="muted">{syncResult.applied ? "Applied" : "Preview only — nothing was written"}: {syncResult.itemsChecked} matched, {syncResult.changes.length} with changes, {syncResult.unmatchedTitles.length} legacy items not in OneArr, {syncResult.skippedNoTmdb} skipped (no TMDb id).</p>
-            {syncResult.changes.length > 0 && (
-              <ul>{syncResult.changes.map((c: any, i: number) => (
-                <li key={i}>{c.title} ({c.type}): monitored {c.seriesMonitoredBefore ? "on" : "off"} → {c.seriesMonitoredAfter ? "on" : "off"} · {c.seasonsChanged} season(s){c.seasonChanges?.length ? ` (${c.seasonChanges.map((s: any) => `S${s.seasonNumber} ${s.before ? "on" : "off"}→${s.after ? "on" : "off"}`).join(", ")})` : ""} · {c.episodesChanged} episode(s){c.episodeChanges?.length ? ` (${c.episodeChanges.map((e: any) => `S${e.seasonNumber}E${e.episodeNumber} ${e.before ? "on" : "off"}→${e.after ? "on" : "off"}`).join(", ")})` : ""}{c.episodesUnknown ? " · episode data unavailable, episodes left alone" : ""}</li>
-              ))}</ul>
-            )}
-            {syncResult.unmatchedTitles.length > 0 && <p className="muted">Not in OneArr (not created by sync): {syncResult.unmatchedTitles.join(", ")}</p>}
-            {syncResult.episodesUnknownTitles?.length > 0 && <p className="error">Episode data could not be read for: {syncResult.episodesUnknownTitles.join(", ")}. Their episodes were not changed.</p>}
-          </div>
-        )}
-      </div>
-      {preview && (
-        <div className="card">
-          <p>{preview.length} readable item(s), {errors.length} error(s).</p>
-          <div className="row" style={{ marginBottom: ".5rem" }}>
-            <label>Quality profile
-              <select value={profileId} onChange={(e) => setProfileId(e.target.value ? Number(e.target.value) : "")}>
-                {profiles?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </label>
-            <label>Root folder
-              <input value={root} onChange={(e) => setRoot(e.target.value)} placeholder={kind === "radarr" ? "D:\\Media\\Movies" : "D:\\Media\\TV"} />
-            </label>
-            <button className="primary" onClick={importSelected} disabled={picked.size === 0 || !root}>Import {picked.size} selected</button>
-          </div>
-          <div className="table-wrap"><table>
-            <thead><tr><th /><th>Title</th><th>Year</th><th>TMDb</th><th>Path</th><th>Monitored</th></tr></thead>
-            <tbody>
-              {preview.map((i, idx) => (
-                <tr key={idx}>
-                  <td><input type="checkbox" checked={picked.has(idx)} onChange={(e) => { const n = new Set(picked); e.target.checked ? n.add(idx) : n.delete(idx); setPicked(n); }} /></td>
-                  <td>{i.title}</td><td>{i.year ?? ""}</td><td>{i.tmdbId ?? <span className="error">none</span>}</td><td className="muted">{i.path}</td><td>{i.monitored ? "yes" : "no"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
-          {errors.length > 0 && <div style={{ marginTop: ".75rem" }}><h2>Per-item errors</h2><ul>{errors.map((e, i) => <li key={i}>{e.title}: {e.error}</li>)}</ul></div>}
-        </div>
-      )}
     </>
   );
 }

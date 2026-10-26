@@ -22,7 +22,7 @@ public static class ApiEndpoints
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash);
     public sealed record IndexerBody(string Name, string BaseUrl, string ApiKey, bool Enabled);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string Password, string? MovieCategory, string? TvCategory, bool Enabled);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
@@ -112,12 +112,40 @@ public static class ApiEndpoints
             return Results.Ok(await metadata.SearchAsync(mt, q.Trim(), ct));
         });
 
+        // List view: series carry episode-based availability (Complete/Partial/Missing/Unknown plus counts)
+        // from one aggregate query, not from the series-level HasFile flag, which is true as soon as any
+        // single episode has a file. Movies keep Available/Missing from HasFile.
         api.MapGet("/media", async (string type, MediaService media, CancellationToken ct) =>
-            Results.Ok(await media.ListAsync(ParseType(type), ct)));
+        {
+            var mt = ParseType(type);
+            var items = await media.ListAsync(mt, ct);
+            var availability = mt == MediaType.Series ? await media.SeriesAvailabilityAsync(ct) : new Dictionary<int, SeriesAvailability>();
+            return Results.Ok(items.Select(m => new
+            {
+                m.Id, m.MediaType, m.ProviderId, m.Title, m.Year, m.Overview, m.PosterPath, m.Monitored,
+                m.QualityProfileId, m.RootFolder, m.HasFile, m.LegacyPath, m.LegacySource,
+                availability = mt == MediaType.Movie
+                    ? (m.HasFile ? "Available" : "Missing")
+                    : availability.TryGetValue(m.Id, out var a) ? a.Status : "Unknown",
+                availableEpisodes = mt == MediaType.Series ? availability.TryGetValue(m.Id, out var av) ? av.AvailableEpisodes : 0 : (int?)null,
+                applicableEpisodes = mt == MediaType.Series ? availability.TryGetValue(m.Id, out var ap) ? ap.ApplicableEpisodes : 0 : (int?)null,
+            }));
+        });
 
         api.MapPost("/media", async (AddMediaBody body, MediaService media, SettingsStore settings, CancellationToken ct) =>
         {
-            var root = body.RootFolder ?? await settings.GetAsync(SettingKeys.MediaRoot, ct) ?? "";
+            // An explicit root folder wins. Otherwise the per-type default wins, then the legacy single
+            // media root. The movie default can never become a series root, or vice versa: ResolveRoot
+            // only ever reads the default for the requested type. Re-adding an existing title never
+            // overwrites its stored root folder, profile, or monitoring (AddAsync returns it unchanged).
+            var root = body.RootFolder;
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                var movieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct);
+                var seriesRoot = await settings.GetAsync(SettingKeys.DefaultSeriesRoot, ct);
+                var legacyRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct);
+                root = MediaDefaults.ResolveRoot(ParseType(body.Type), movieRoot, seriesRoot, legacyRoot);
+            }
             var result = await media.AddAsync(new AddMediaRequest(ParseType(body.Type), body.ProviderId, body.QualityProfileId, root, body.Monitored, body.Seasons, body.AllSeasons ?? true), ct);
             return result.Created ? Results.Created($"/api/media/{result.Item.Id}", result) : Results.Ok(result);
         });
@@ -160,10 +188,21 @@ public static class ApiEndpoints
                 (l, f) => new { l.EpisodeId, f.Resolution }).Where(x => episodeIds.Contains(x.EpisodeId)).ToListAsync(ct);
             var resolutionByEpisode = resolutions.GroupBy(x => x.EpisodeId).ToDictionary(g => g.Key, g => g.First().Resolution);
             var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+            // Same rule as the list view: monitored, aired episodes only. The old detail status counted
+            // every episode, so a series with one downloaded episode and many unmonitored or unaired
+            // episodes could still read as Partial, and a series with any file read as Available.
+            var applicableEpisodes = item.Episodes.Where(e => e.Monitored && e.AirDate != null && e.AirDate <= today).ToList();
+            var availableEpisodes = applicableEpisodes.Count(e => e.HasFile);
+            var seriesAvailability = item.MediaType == MediaType.Series
+                ? MediaDefaults.ClassifySeries(availableEpisodes, applicableEpisodes.Count)
+                : item.HasFile ? "Available" : "Missing";
             return Results.Ok(new
             {
                 item.Id, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
                 item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
+                availability = seriesAvailability,
+                availableEpisodes = item.MediaType == MediaType.Series ? availableEpisodes : (int?)null,
+                applicableEpisodes = item.MediaType == MediaType.Series ? applicableEpisodes.Count : (int?)null,
                 seasons = item.Seasons.OrderBy(s => s.SeasonNumber).Select(s => new
                 {
                     s.SeasonNumber, s.Monitored,
@@ -485,16 +524,27 @@ public static class ApiEndpoints
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
                 automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
+                defaultMovieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct),
+                defaultSeriesRoot = await settings.GetAsync(SettingKeys.DefaultSeriesRoot, ct),
+                defaultMovieProfileId = ParseProfileId(await settings.GetAsync(SettingKeys.DefaultMovieProfile, ct)),
+                defaultSeriesProfileId = ParseProfileId(await settings.GetAsync(SettingKeys.DefaultSeriesProfile, ct)),
             });
         });
 
-        api.MapPut("/settings", async (SettingsBody body, SettingsStore settings, CancellationToken ct) =>
+        api.MapPut("/settings", async (SettingsBody body, SettingsStore settings, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             if (body.TmdbApiKey is not null) await settings.SetAsync(SettingKeys.TmdbApiKey, string.IsNullOrWhiteSpace(body.TmdbApiKey) ? null : body.TmdbApiKey.Trim(), ct);
             if (body.DryRunImport is bool dry) await settings.SetAsync(SettingKeys.DryRunImport, dry.ToString(), ct);
             if (body.TorrentRoot is not null) await settings.SetAsync(SettingKeys.TorrentRoot, RequireAbsolute(body.TorrentRoot), ct);
             if (body.MediaRoot is not null) await settings.SetAsync(SettingKeys.MediaRoot, RequireAbsolute(body.MediaRoot), ct);
             if (body.AutomaticGrabbing is bool auto) await settings.SetAsync(SettingKeys.AutomaticGrab, auto.ToString(), ct);
+            // Per-type defaults are stored independently, so saving the movie default can never change
+            // the series default. An empty string clears a root default (falling back to the legacy
+            // media root); a null field means "not provided" and leaves the stored value alone.
+            if (body.DefaultMovieRoot is not null) await settings.SetAsync(SettingKeys.DefaultMovieRoot, string.IsNullOrWhiteSpace(body.DefaultMovieRoot) ? null : RequireAbsolute(body.DefaultMovieRoot), ct);
+            if (body.DefaultSeriesRoot is not null) await settings.SetAsync(SettingKeys.DefaultSeriesRoot, string.IsNullOrWhiteSpace(body.DefaultSeriesRoot) ? null : RequireAbsolute(body.DefaultSeriesRoot), ct);
+            if (body.DefaultMovieProfileId is int movieProfile) await settings.SetAsync(SettingKeys.DefaultMovieProfile, (await RequireProfileAsync(db, movieProfile, ct)).ToString(), ct);
+            if (body.DefaultSeriesProfileId is int seriesProfile) await settings.SetAsync(SettingKeys.DefaultSeriesProfile, (await RequireProfileAsync(db, seriesProfile, ct)).ToString(), ct);
             return Results.NoContent();
         });
 
@@ -739,5 +789,15 @@ public static class ApiEndpoints
     {
         if (!Path.IsPathRooted(path) || path.Contains("..", StringComparison.Ordinal)) throw new ArgumentException("Path must be absolute and must not contain '..'");
         return path.Trim();
+    }
+
+    private static int? ParseProfileId(string? stored) =>
+        stored is not null && int.TryParse(stored, out var id) ? id : null;
+
+    private static async Task<int> RequireProfileAsync(IDbContextFactory<OneArrDbContext> db, int profileId, CancellationToken ct)
+    {
+        await using var c = await db.CreateDbContextAsync(ct);
+        if (!await c.QualityProfiles.AnyAsync(p => p.Id == profileId, ct)) throw new ArgumentException("Quality profile does not exist");
+        return profileId;
     }
 }

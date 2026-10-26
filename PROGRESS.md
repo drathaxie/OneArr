@@ -7,6 +7,92 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Settings & Library UI overhaul (branch `settings-ui-overhaul`, from main d81cdf9 — PR #4 merged)
+
+Note: PR #4 was merged into main (d81cdf9, tag v0.4.0) before this work started, so this branch is
+based on main and its PR targets main, not `visual-library`. Nothing here merges, publishes, or enables
+automatic grabbing; grabbing stays off by default and is only changeable from Settings → Automation.
+
+### Settings navigation (new `web/src/settings.tsx`)
+- Settings overview with a card per category, a persistent sidebar with expandable categories and
+  subsection links, clear active-section highlighting, and a Show Advanced / Hide Advanced toggle
+  (stored in localStorage `onearr.advanced`, default on). Advanced items are path mappings and
+  connection tests; hiding them never removes the underlying functionality. Below 860px the sidebar
+  stacks above the content. Theme handling is unchanged (system theme; dark when the system is dark).
+- Categories, all backed by existing functionality only: Media Management (per-type default roots,
+  import paths, bulk root folders, library folders/scan/review, path mappings), Profiles (quality
+  profiles + per-type default profiles), Indexers, Download Clients, Metadata (TMDb), Automation
+  (toggle + safety gate), Migration (the existing Migration component, unchanged), General
+  (application note + security status; there is deliberately no password-change screen, which OneArr
+  does not support), UI (Posters/List preference + advanced toggle).
+- The old flat Settings page was split: TMDb into Metadata, torrent/media roots and dry-run into
+  Media Management, the grabbing toggle into Automation. Profile/indexer/client creation forms are
+  unchanged in behaviour; connection tests are now scoped per category (TMDb only in Metadata, etc.).
+
+### Per-type defaults (backend, no database migration)
+- New `AppSetting` keys only (no schema change): `media.defaultRoot.movie`,
+  `media.defaultRoot.series`, `profile.default.movie`, `profile.default.series`. GET/PUT `/api/settings`
+  exposes them; PUT validates roots as absolute (empty clears, null leaves unchanged) and rejects
+  unknown profile ids. Pure helper `MediaDefaults.ResolveRoot` resolves movie defaults only from the
+  movie default and series defaults only from the series default, falling back to the legacy single
+  media root — so a movie root can never become a series default. POST `/api/media` uses it when no
+  explicit root folder is sent; re-adding an existing title still returns it unchanged (root, profile,
+  and monitoring are never overwritten by a later add).
+
+### Movies/Series pages and the Add dialog
+- The permanent TMDb add/search panel and the bulk root-folder panel are gone from both pages.
+  An Add Movie / Add Series button opens a dialog: TMDb search, result selection, root folder and
+  quality profile prefilled from the per-type server defaults, monitoring scope (movie: Monitor
+  checkbox; series: All seasons / First season only / None), and a confirmation summary before the
+  Add button sends anything. The legacy localStorage root is only a last-resort fallback on first run
+  and is never written again.
+- Poster grid, List view, search, sort, filters, and per-title monitoring controls are retained.
+  Series filters now include Complete/Partial/Missing/Unknown. Per-title root, profile, and monitoring
+  overrides remain on each title's Details page. Bulk root-folder changes live in Settings → Media
+  Management, per media type.
+
+### Accurate series availability (backend, one aggregate query)
+- `GET /api/media?type=series` and `GET /api/media/{id}/detail` now report episode-based availability:
+  Complete / Partial / Missing / Unknown plus `availableEpisodes` / `applicableEpisodes` counts
+  (e.g. "126 / 180 monitored aired episodes available"). Applicable means monitored with a known air
+  date on or before today; unaired episodes and unmonitored episodes (including Sonarr per-episode
+  exceptions inside a monitored season) never count as missing. Applicable == 0 (no episodes, no
+  monitored episodes, or no monitored episode with a known air date) is Unknown, never Complete or
+  Missing. The series-level `HasFile` flag is no longer used for the series badge: a series with one
+  downloaded episode cannot read as Complete. Movies keep Available/Missing from `HasFile`.
+  `MediaService.SeriesAvailabilityAsync` is one grouped query for the whole library, not one request
+  per poster card. Scan-review and manual-search behaviour are untouched, and monitoring sync still
+  touches only Monitored flags (see the PR #4 sections below).
+
+### Poster grid polish (CSS only, no new dependencies)
+- Two-line titles via line clamping with a fixed two-line height so cards stay aligned; full title
+  on hover via the `title` attribute; consistent 2/3 poster aspect ratio including the fallback;
+  cards are equal-height flex columns; badges are legible and distinct (Complete green, Partial
+  amber, Missing red, Unknown neutral); lazy loading and the poster fallback are unchanged.
+  Bundle: 223 KB JS (66 KB gzip), up from 205 KB (62 KB) — the new Settings/dialog code, no new framework.
+
+### Tests actually executed
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 23 passed (was 14; new: settings navigation
+  and per-type defaults, Add Series dialog incl. first-season scope, series availability badges, plus
+  updated settings tests for the split forms), and `npm run build` (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is
+  claimed. New backend tests added for CI: `AvailabilityTests` (Complete/Partial/Missing, no-episode
+  Unknown, unaired + unmonitored exclusion, unknown-air-date Unknown, ResolveRoot cross-type
+  separation, classification boundaries, re-add never overwrites) and `SettingsDefaultsApiTests`
+  over the real API host (defaults start empty, per-type independence, empty-string clearing,
+  relative-root rejection, profile existence validation). CI on the new PR is the backend verification.
+
+### Remaining verification (not done here)
+- CI backend tests for this branch, and a Windows run with a real or realistic large library
+  (including ~205 series) to check poster-grid performance, the new Settings layout at narrow
+  widths, and the Add dialog against a real TMDb key.
+- Screenshots for the PR (Settings overview, sidebar, simplified Series page, Add Series dialog,
+  Complete/Partial/Missing cards) were not captured in this sandbox: the frontend build runs, but
+  there is no live backend here to sign into and render a populated library. They should be taken
+  from the Windows run and attached to the PR before it is reviewed as final.
+- General → Security honestly notes there is no password-change screen yet; that is a missing
+  feature, not a setting that was hidden.
+
 ## Review fixes round 2 to PR #4 (branch `visual-library`, same PR, not merged)
 
 1. **Preview comparison is now identity-strict.** `PreviewMatches()` previously compared only the counts of

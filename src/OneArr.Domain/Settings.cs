@@ -10,4 +10,10 @@ public static class SettingKeys
     public const string DryRunImport = "import.dryRun";
     public const string TorrentRoot = "paths.torrents";
     public const string MediaRoot = "paths.media";
+    /// <summary>Per-type default root folders for the Add dialog. Each type falls back to MediaRoot when unset.</summary>
+    public const string DefaultMovieRoot = "media.defaultRoot.movie";
+    public const string DefaultSeriesRoot = "media.defaultRoot.series";
+    /// <summary>Per-type default quality profile ids for the Add dialog, stored as the profile id string.</summary>
+    public const string DefaultMovieProfile = "profile.default.movie";
+    public const string DefaultSeriesProfile = "profile.default.series";
 }
