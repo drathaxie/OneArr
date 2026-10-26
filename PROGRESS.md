@@ -51,12 +51,24 @@ any real library. Figures are one run each.
 | Phase | Windows (GitHub runner, 4 logical CPUs) | Linux sandbox (4 logical CPUs) |
 |---|---|---|
 | Enumerate folders and files | 987 ms wall, 1,109 ms CPU, 32 MB allocated | 396 ms wall, 571 ms CPU, 37 MB |
-| Match files (indexed) | 179 ms wall, 92 MB allocated | 534 ms wall, 72 MB |
-| Preview (enumerate, match, probe, store plan) | 1,796 ms wall, 227 MB allocated | 1,361 ms wall, 184 MB |
+| Match files (indexed) | 179 ms wall, 188 ms CPU, 92 MB allocated | 534 ms wall, 72 MB |
+| Preview (enumerate, match, probe, store plan) | 1,796 ms wall, 1,938 ms CPU, 227 MB allocated | 1,361 ms wall, 184 MB |
 | Apply (re-scan, writes, recalculation) | 4,937 ms wall, 5,766 ms CPU, 965 MB allocated | 4,013 ms wall, 934 MB |
-| Second preview, no changes | 820 ms wall, 191 MB allocated | 382 ms wall, 167 MB |
+| Second preview, no changes | 820 ms wall, 922 ms CPU, 191 MB allocated | 382 ms wall, 167 MB |
 | Cancel a preview 50 ms in: stopped after | 163 ms | 301 ms |
 | Peak working set of test process | 338 MB | 561 MB |
+
+Cross-checked against the downloaded `windows-library-benchmark` artifact from run 40205398175
+(`build/library-benchmark-windows.txt`): every Windows figure above matches the artifact exactly. Two
+artifact lines were not in the table before and are added here for completeness, clearly labelled:
+fixture generation (not reconciler work) took 24,419 ms wall, 8,266 ms CPU, 47 MB allocated, and the
+benchmark test itself passed in 59 s (1 test, 0 failed).
+
+**Acceptance run, same Windows job (run 40205398175, `windows-measurements` artifact,
+`build/measurements.json`).** This is the release-shaped build acceptance run, not the synthetic-library
+benchmark and not a real user library: 16 of 16 checks passed, startup 1.83 s, graceful stop 0.56 s
+(exit 0), idle CPU 0.44% over 60 s, idle private memory 36.2 MB, idle working set 108.1 MB, 14 threads,
+release folder 224.4 MB (361 files), database 172.0 KB, config folder 212.1 KB.
 
 Apply's memory is the largest cost and it grows linearly: at 40,000 movies (Linux sandbox) it allocated 1.86 GB, against 934 MB at
 20,000. Before this change, apply allocated 2.2 GB at 20,000 files. The remaining cost is spread across the re-scan, the inserts,
