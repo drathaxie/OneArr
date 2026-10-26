@@ -116,6 +116,9 @@ public sealed record LegacyArrSource(string Kind, string BaseUrl, string ApiKey)
 
 public sealed record LegacySeason(int SeasonNumber, bool Monitored);
 
+/// <summary>One episode's monitored flag from Sonarr. Season/episode numbers are Sonarr's, not TMDb's.</summary>
+public sealed record LegacyEpisode(int SeasonNumber, int EpisodeNumber, bool Monitored);
+
 public sealed record LegacyItem(
     string Source,
     MediaType Type,
@@ -127,7 +130,11 @@ public sealed record LegacyItem(
     string? Path,
     bool Monitored,
     string? Error,
-    IReadOnlyList<LegacySeason>? Seasons = null);
+    IReadOnlyList<LegacySeason>? Seasons = null,
+    // Null means episode data was not supplied (caller falls back to season flags, if any).
+    // EpisodesUnknown means the reader tried and failed to get episode data: sync must leave episodes alone.
+    IReadOnlyList<LegacyEpisode>? Episodes = null,
+    bool EpisodesUnknown = false);
 
 public class ProviderNotConfiguredException : Exception
 {
