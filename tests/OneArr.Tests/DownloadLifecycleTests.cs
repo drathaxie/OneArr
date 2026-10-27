@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using OneArr.Application;
 using OneArr.Domain;
 using OneArr.Infrastructure.Files;
@@ -549,6 +550,26 @@ public class DownloadLifecycleTests
         var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
         Assert.True(eps[0].HasFile);
         Assert.True(eps[1].HasFile);
+    }
+
+    [Fact]
+    public async Task SchedulerPass_NeverImportsPhysically_EvenWhenDryRunImportIsOff()
+    {
+        using var world = await WorldAsync(); // ConfigureAsync already sets DryRunImport=false
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune (2021) 1080p.mkv", "movie-bytes");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(file));
+        Assert.False(await world.Settings.GetBoolAsync(SettingKeys.DryRunImport, true));
+        // Tick 5 runs the import step but skips the wanted search (5 % 15 != 0). On the old
+        // code this pass would physically import because DryRunImport is off; the scheduler
+        // must stay read-only regardless of that setting.
+        var scheduler = new BackgroundScheduler(world.Runner, world.Downloads, world.Settings, world.Search, NullLogger<BackgroundScheduler>.Instance);
+        await scheduler.RunPassAsync(5, default);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(File.Exists(Path.Combine(world.Dirs.Media, "movies", "Dune (2021)", "Dune (2021) 1080p.mkv")));
+        await using var db = world.Db.CreateDbContext();
+        Assert.Empty(await db.ImportRecords.AsNoTracking().Where(r => r.DownloadJobId == jobId).ToListAsync());
     }
 
     [Fact]

@@ -278,6 +278,23 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   ~44s on Linux); CI remains the backend verification, now backed by the empty EF probe
   above rather than by hand inspection.
 
+### Scheduler preview bypass (third PR #6 review: BackgroundScheduler)
+
+- The scheduler ran `ImportCompletedAsync(dry, t)` every fifth tick with `dry` read from
+  the persisted `DryRunImport` setting, so flipping that setting to false let the
+  background service physically import downloads with no preview or approval — automatic
+  grabbing being off did not prevent this path. Fixed by extracting the tick body into a
+  testable `RunPassAsync(tick, ct)` and hardcoding the import step to dry-run `true`: the
+  scheduled importer is read-only by construction, and physical imports happen only
+  through the confirmed preview/apply workflow (per-job import-apply or bulk import with
+  confirmed pairs). After this change no production caller passes `false` to
+  `ImportCompletedAsync` (API endpoint passes `true` for planning; the `false` path
+  survives only in tests as the bulk real-import engine).
+- New regression test `SchedulerPass_NeverImportsPhysically_EvenWhenDryRunImportIsOff`:
+  with `DryRunImport=false` (the test world's default), a tick-5 scheduler pass leaves
+  the Completed job untouched, writes no file, and creates no import records. On the old
+  code this test fails, because the pass would have physically imported.
+
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 
 - No client picker on grab (first enabled client), no multi-client category mapping UI, no
