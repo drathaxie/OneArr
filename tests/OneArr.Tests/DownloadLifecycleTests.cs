@@ -552,7 +552,6 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
-    [Fact]
     public async Task BulkImport_PreviewAloneNeverAuthorizesAPhysicalImport()
     {
         using var world = await WorldAsync();

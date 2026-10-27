@@ -253,6 +253,31 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   Completed with no file and no import records, and only the confirmed pair for the
   job's actual preview applies it.
 
+### Root cause found with EF tooling (CI run #76: Designer alone did not fix it)
+
+- Run #76 still failed with 22 pending-model-changes errors, so the missing Designer was
+  not the whole story. With a .NET 10 SDK installed in the sandbox, `dotnet ef migrations
+  add TempProbe` reported exactly ONE difference between the model and the snapshot:
+  `DownloadClientHealth.DownloadClientId` needed `Sqlite:Autoincrement` — i.e. the snapshot
+  was missing `.ValueGeneratedOnAdd()` on that key. (An integer primary key gets
+  ValueGeneratedOnAdd by EF convention even when its name is not `Id`; the hand-written
+  snapshot omitted it.) Fix applied to the snapshot and to the migration Designer (kept
+  byte-identical), plus the matching `.Annotation("Sqlite:Autoincrement", true)` on the
+  `CreateTable` column in the migration's `Up()` for schema fidelity. A second probe
+  migration then came back with an EMPTY `Up()` — EF itself confirms zero remaining
+  differences, which is the exact check `MigrateAsync` performs in CI.
+- Two compile errors in the bulk-gate push were caught by the local build (not by CI yet)
+  and fixed here: `BulkApproval`/`BulkApplyResult` had been declared nested inside
+  `DownloadService`, so `ApiEndpoints` could not see them (CS0246) — both records moved to
+  namespace scope; and the new bulk test had a duplicated `[Fact]` attribute (CS0579) —
+  removed. The local API build now succeeds.
+- Local backend test execution is blocked by a sandbox-only testhost problem: vstest
+  spawns the testhost process but never connects to it (90s and 300s timeouts, also via
+  direct `dotnet vstest`), even though loopback TCP and Unix sockets both work in this
+  sandbox. This does not affect the product or CI (whose runners execute the suite in
+  ~44s on Linux); CI remains the backend verification, now backed by the empty EF probe
+  above rather than by hand inspection.
+
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 
 - No client picker on grab (first enabled client), no multi-client category mapping UI, no

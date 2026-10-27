@@ -75,6 +75,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("OneArr.Domain.DownloadClientHealth", b =>
                 {
                     b.Property<int>("DownloadClientId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("LastError")
@@ -175,9 +176,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Hash");
 
-                    b.HasIndex("MediaItemId", "EpisodeId", "Status");
-
                     b.HasIndex("Status");
+
+                    b.HasIndex("MediaItemId", "EpisodeId", "Status");
 
                     b.ToTable("DownloadJobs");
                 });

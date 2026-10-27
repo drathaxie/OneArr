@@ -38,6 +38,12 @@ public sealed class StalePreviewException : Exception
     public ImportPreviewDto Fresh { get; }
 }
 
+/// <summary>One confirmed bulk approval: a specific job's specific preview. A preview that was
+/// merely generated authorizes nothing; only a pair the operator confirmed does.</summary>
+public sealed record BulkApproval(int JobId, int PreviewId);
+
+public sealed record BulkApplyResult(int Applied, int SkippedStale, int Failed, string Message);
+
 /// <summary>
 /// Syncs qBittorrent state into job records and imports completed downloads through SafeImporter.
 /// Queue identity rule: a job belongs to exactly one client (DownloadClientId, recorded at grab).
@@ -429,12 +435,6 @@ public sealed class DownloadService
         if (deferred) msg += "; some files deferred";
         return new ImportRunSummary(0, imported, failed, 0, msg);
     }
-
-    /// <summary>One confirmed bulk approval: a specific job's specific preview. A preview that was
-    /// merely generated authorizes nothing; only a pair the operator confirmed does.</summary>
-    public sealed record BulkApproval(int JobId, int PreviewId);
-
-    public sealed record BulkApplyResult(int Applied, int SkippedStale, int Failed, string Message);
 
     /// <summary>Bulk import for production: applies ONLY the explicitly confirmed (job, preview)
     /// pairs. A stored preview that was merely inspected is never applied by this path — without

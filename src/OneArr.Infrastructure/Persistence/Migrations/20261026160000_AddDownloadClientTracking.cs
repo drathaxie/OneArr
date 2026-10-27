@@ -76,7 +76,8 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                 name: "DownloadClientHealth",
                 columns: table => new
                 {
-                    DownloadClientId = table.Column<int>(type: "INTEGER", nullable: false),
+                    DownloadClientId = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
                     LastSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                     LastError = table.Column<string>(type: "TEXT", nullable: true),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
