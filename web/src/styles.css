@@ -35,34 +35,56 @@
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
 h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
 h2 { font-size: 1.15rem; margin: 0 0 .75rem; }
+h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
 .muted { color: var(--muted); }
 .error { color: var(--danger); margin: .5rem 0; }
 .ok { color: var(--ok); }
 .center { display: grid; place-items: center; min-height: 100vh; }
-.shell { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
-.sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 1rem .75rem; display: flex; flex-direction: column; gap: .25rem; }
-.brand { font-weight: 700; font-size: 1.2rem; padding: .25rem .5rem 1rem; }
-.nav { text-align: left; background: none; border: 0; color: var(--text); padding: .5rem .75rem; border-radius: 6px; cursor: pointer; font: inherit; }
+
+/* App shell: a fixed-width sidebar plus content that fills the rest of the viewport.
+   The content column deliberately has NO max-width: the old 1200px cap left a third of
+   a 1728px window empty and squeezed every page into a narrow column. */
+.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 1rem .75rem; display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.brand { font-weight: 700; font-size: 1.2rem; padding: .25rem .5rem 1rem; flex: none; }
+.nav { text-align: left; background: none; border: 0; color: var(--text); padding: .5rem .75rem; border-radius: 6px; cursor: pointer; font: inherit; white-space: nowrap; }
 .nav:hover { background: var(--bg); }
 .nav.active { background: var(--accent); color: #fff; }
+/* The generic button:hover rule below is more specific than .nav.active, so without this
+   the active nav item went pale (but kept its white text) whenever the cursor rested on it. */
+.nav.active:hover { background: var(--accent); color: #fff; }
 .signout { margin-top: auto; color: var(--muted); }
-.content { padding: 1.25rem; max-width: 1200px; width: 100%; min-width: 0; }
+.content { padding: 1.25rem 1.5rem; width: 100%; min-width: 0; }
+
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 .stat { font-size: 1.8rem; font-weight: 700; }
-.row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; min-width: 0; }
 .spread { justify-content: space-between; }
+
+/* Library / page toolbars: the search input grows, selects keep their natural size, and
+   the view switch sits at the end. Everything wraps instead of overflowing. */
+.toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; min-width: 0; }
+.toolbar > input { flex: 1 1 220px; min-width: 0; }
+.toolbar > select { flex: 0 1 auto; }
+.toolbar-actions { margin-left: auto; display: flex; gap: .5rem; flex: none; }
+
 input, select { font: inherit; padding: .45rem .6rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); min-width: 0; }
-label { display: grid; gap: .25rem; margin-bottom: .6rem; }
+label { display: grid; gap: .25rem; margin-bottom: .6rem; min-width: 0; }
 label.inline { display: flex; align-items: center; gap: .4rem; }
 label.inline input { min-width: auto; }
 button { font: inherit; padding: .45rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+button:hover:not(:disabled) { background: var(--bg); }
 button:disabled { opacity: .6; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
 button.small { padding: .2rem .5rem; font-size: .85rem; }
 button.danger { color: var(--danger); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: .5rem .4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th, td { text-align: left; padding: .5rem .4rem; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: break-word; }
+/* NOTE: do not use overflow-wrap:anywhere here — it shrinks every cell's min-content to one
+   character, which starves short columns (Year/Monitored wrapped mid-word in List view). */
 th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 .badge { display: inline-block; padding: .05rem .45rem; border-radius: 999px; border: 1px solid var(--border); font-size: .8rem; white-space: nowrap; }
 .badge.ok { border-color: var(--ok); color: var(--ok); }
@@ -73,39 +95,61 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 }
 .reasons { font-size: .85rem; color: var(--muted); margin: .25rem 0 0; padding-left: 1rem; }
 .auth { max-width: 380px; margin: 12vh auto; }
-.poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-.poster-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.results { list-style: none; margin: 0; padding: 0; }
+
+/* Poster grid: columns are fluid (180-210px on desktop), never a hardcoded count, so the
+   grid fills whatever content width the viewport gives it. */
+.poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.poster-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 .poster-button { border: 0; padding: 0; background: none; width: 100%; cursor: pointer; display: block; flex: none; }
+.poster-button:hover { background: none; }
 .poster { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; display: block; background: var(--bg); }
-.poster-thumb { width: 48px; height: 72px; object-fit: cover; display: block; background: var(--bg); border-radius: 4px; }
+.poster-thumb { width: 48px; height: 72px; object-fit: cover; display: block; background: var(--bg); border-radius: 4px; flex: none; }
 .poster-fallback { display: grid; place-items: center; padding: .75rem; text-align: center; color: var(--muted); font-size: .9rem; aspect-ratio: 2 / 3; }
 .poster-fallback span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
-.poster-info { padding: .6rem .75rem .75rem; flex: 1; display: flex; flex-direction: column; }
-.poster-title { display: block; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; min-height: 2.6em; }
-.settings-shell { display: grid; grid-template-columns: 230px 1fr; gap: 1rem; align-items: start; }
-.settings-sidebar { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .75rem; display: flex; flex-direction: column; gap: .25rem; position: sticky; top: 1rem; }
+.poster-info { padding: .6rem .75rem .75rem; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.poster-title { display: block; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; min-height: 2.6em; overflow-wrap: anywhere; }
+.poster-meta { font-size: .85rem; }
+.card-actions { margin-top: auto; padding-top: .5rem; }
+
+/* Settings: one navigation pattern — the sidebar. The overview is orientation (what each
+   category contains), not a second set of navigation buttons. */
+.settings-shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.settings-sidebar { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .75rem; display: flex; flex-direction: column; gap: .25rem; position: sticky; top: 1rem; min-width: 0; }
 .settings-sidebar .nav.sub { margin-left: 1rem; font-size: .9rem; }
 .settings-content { min-width: 0; }
+.settings-overview-list { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .9rem; }
 .dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: grid; place-items: start center; padding: 4vh 1rem 1rem; overflow-y: auto; z-index: 50; }
-.dialog { width: min(680px, 100%); max-height: none; }
-.detail-head { display: grid; grid-template-columns: 200px 1fr; gap: 1rem; align-items: start; }
+.dialog { width: min(720px, 100%); max-height: none; }
+.detail-head { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 1rem; align-items: start; }
 .detail-poster { max-width: 200px; border-radius: 8px; }
-@media (max-width: 860px) {
-  .settings-shell { grid-template-columns: 1fr; }
-  .settings-sidebar { position: static; flex-direction: row; flex-wrap: wrap; }
-  .settings-sidebar .nav.sub { margin-left: 0; }
-}
-@media (max-width: 720px) {
-  .poster-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
-  .detail-head { grid-template-columns: 1fr; }
+.table-wrap { overflow-x: auto; }
+
+@media (max-width: 1100px) {
+  .shell { grid-template-columns: 180px minmax(0, 1fr); }
+  .content { padding: 1rem 1.25rem; }
+  .detail-head { grid-template-columns: 160px minmax(0, 1fr); }
   .detail-poster { max-width: 160px; }
 }
-.table-wrap { overflow-x: auto; }
+@media (max-width: 860px) {
+  /* Narrow windows: both sidebars become a single horizontally scrolling row instead of
+     a tall wrapped block. In Settings, only the active category's subsections stay visible. */
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: .5rem; }
+  .brand { padding: .25rem .5rem .25rem .25rem; }
+  .sidebar .nav { flex: none; padding: .4rem .5rem; font-size: .9rem; }
+  .signout { margin-top: 0; margin-left: auto; }
+  .settings-shell { grid-template-columns: minmax(0, 1fr); }
+  .settings-sidebar { position: static; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; }
+  .settings-sidebar .nav { flex: none; }
+  .settings-sidebar .nav.sub { display: none; margin-left: 0; }
+  .settings-sidebar div:has(.nav.active) .nav.sub { display: block; }
+  .settings-sidebar > .nav, .settings-sidebar > div { flex: none; }
+}
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); padding: .5rem; }
-  .brand { padding: .25rem; width: 100%; }
-  .nav { padding: .4rem .5rem; font-size: .9rem; }
-  .signout { margin-top: 0; }
+  .poster-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .detail-head { grid-template-columns: minmax(0, 1fr); }
+  .detail-poster { max-width: 160px; }
   .content { padding: 1rem; }
+  .dialog-backdrop { padding: 2vh .5rem .5rem; }
 }

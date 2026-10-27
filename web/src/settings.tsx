@@ -104,7 +104,7 @@ export function Settings() {
         {!advanced && <p className="muted">Advanced items (path mappings, connection tests) are hidden.</p>}
       </aside>
       <div className="settings-content">
-        {section === "overview" && <Overview onOpen={openSection} advanced={advanced} />}
+        {section === "overview" && <Overview advanced={advanced} />}
         {section === "media" && <MediaSection advanced={advanced} />}
         {section === "profiles" && <ProfilesSection />}
         {section === "indexers" && <IndexersSection advanced={advanced} />}
@@ -119,18 +119,24 @@ export function Settings() {
   );
 }
 
-function Overview({ onOpen, advanced }: { onOpen: (id: SectionId) => void; advanced: boolean }) {
+// The overview is orientation, not navigation: it says what each category contains, and the
+// sidebar is the one way to open a category. The old per-card "Open" buttons duplicated the
+// sidebar exactly, giving three paths (app sidebar, settings sidebar, overview buttons) to
+// the same page. Categories stay discoverable here; opening one happens in the sidebar.
+function Overview({ advanced }: { advanced: boolean }) {
   return (
     <>
       <h2>Settings</h2>
-      <p className="muted">OneArr's configuration, organised like Sonarr and Radarr. Pick a category to change it; the poster library itself is unchanged.</p>
+      <p className="muted">OneArr's configuration, organised like Sonarr and Radarr. Choose a category in the sidebar to change it; the poster library itself is unchanged.</p>
       {!advanced && <p className="muted">Advanced items (path mappings, connection tests) are hidden. Use Show Advanced in the sidebar to reveal them.</p>}
       <div className="grid">
         {CATEGORIES.map((cat) => (
           <div key={cat.id} className="card" style={{ marginBottom: 0 }}>
             <h2>{cat.label}</h2>
             <p className="muted">{cat.description}</p>
-            <button className="primary" onClick={() => onOpen(cat.id)}>Open {cat.label}</button>
+            <ul className="settings-overview-list">
+              {cat.subsections.filter((s) => advanced || !s.advanced).map((s) => <li key={s.id}>{s.label}</li>)}
+            </ul>
           </div>
         ))}
       </div>

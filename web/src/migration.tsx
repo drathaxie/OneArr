@@ -56,12 +56,12 @@ export function Migration() {
     <>
       <h2>Migration Preview</h2>
       <p className="muted">Read-only: OneArr issues GET requests to the legacy API and never writes to it. Nothing is copied until you confirm. Existing files are not moved. After importing, map the legacy paths and run a library scan in Settings so existing files are recognised.</p>
-      <form className="card row" onSubmit={loadPreview}>
+      <form className="card toolbar" onSubmit={loadPreview}>
         <select aria-label="Legacy application" value={kind} onChange={(e) => { setKind(e.target.value as "sonarr" | "radarr"); clearSyncPreview(); }}>
           <option value="radarr">Radarr (movies)</option>
           <option value="sonarr">Sonarr (series)</option>
         </select>
-        <input aria-label="Legacy base URL" placeholder="http://radarr:7878" value={url} onChange={(e) => { setUrl(e.target.value); clearSyncPreview(); }} required style={{ minWidth: 240 }} />
+        <input aria-label="Legacy base URL" placeholder="http://radarr:7878" value={url} onChange={(e) => { setUrl(e.target.value); clearSyncPreview(); }} required />
         <input aria-label="Legacy API key" type="password" autoComplete="off" placeholder="API key (not stored)" value={key} onChange={(e) => { setKey(e.target.value); clearSyncPreview(); }} required />
         <button className="primary" type="submit">Load preview</button>
         <button type="button" onClick={async () => { setMessage(null); try { setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "legacy", kind, baseUrl: url, apiKey: key })); } catch (x) { setMessage((x as Error).message); } }}>Test connection</button>

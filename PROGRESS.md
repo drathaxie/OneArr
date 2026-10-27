@@ -1019,6 +1019,44 @@ attached to releases; they are not yet read back from a release.
 - The tray does not update itself. To update the tray, run the installer from the newer release folder while the old tray
   is closed.
 
+## UI responsive overhaul (branch ui-responsive-overhaul, unmerged)
+
+Root cause of the narrow layout: `.content` in `web/src/styles.css` capped every page at
+`max-width: 1200px`, so on a 1728px window a third of the viewport sat empty and every page
+— Series, Movies, Settings — was squeezed into one column. The fix removes that cap: content
+now fills the viewport (sidebar stays a consistent 210px, 180px below 1100px, a scrolling
+row below 860px), and the poster grid is fluid (`repeat(auto-fill, minmax(180px, 1fr))`,
+~180–210px cards on desktop, 140px floor on phones) instead of a hardcoded column count.
+
+- Shared design tokens in `styles.css`: full-width content, `.toolbar` (growing search input,
+  wrapping controls, view switch pinned right), `.card-actions` (actions pinned to card
+  bottoms for equal-height cards), focus-visible outlines, button hover states, table cells
+  that wrap long paths/titles, dialogs widened to 720px.
+- Availability vs monitoring, presentation only: an unmonitored title now headlines
+  "Unmonitored" with availability as secondary text ("Missing · 0 / 368 episodes available"),
+  so an intentionally unmonitored series is never headlined Missing. Monitored titles keep
+  the availability badge primary plus the Monitored badge. Applied to poster cards, List
+  view (Status column), and detail headers. No monitoring calculation, Wanted eligibility,
+  or database record changed.
+- Settings: the sidebar is now the single navigation pattern. The overview is orientation
+  (category descriptions + subsection lists), not a second set of Open buttons.
+- Pages touched: Dashboard (jobs table wrapped), Movies/Series (grid, toolbar, list),
+  Wanted (toolbar), Activity (preview table wrapped), Settings (overview + narrow
+  sidebar), Migration Preview (toolbar), detail pages, Add dialogs (unchanged behaviour).
+- Tests: 31 frontend tests pass (was 27), including new status-presentation and
+  poster/list filter-preservation tests; two existing tests updated to the new intended
+  presentation (overview navigation via sidebar; unmonitored movie headlines Unmonitored).
+  Backend untouched; backend suites run in CI on the PR.
+- Visual acceptance: real backend + seeded test library screenshotted locally (see PR).
+  Screenshots caught and fixed two real defects before the PR: (1) the active nav item
+  went white-on-pale whenever the cursor rested on it — the generic `button:hover` rule
+  out-specifics `.nav.active`; fixed with an explicit `.nav.active:hover` rule.
+  (2) List-view Year/Monitored columns wrapped mid-word — `overflow-wrap: anywhere` on
+  table cells shrinks min-content to one character; changed to `break-word`.
+  Poster art did not load in the sandbox (external image host unreachable there), so
+  screenshots show poster frames with alt text; layout, aspect, and spacing are verified.
+  Jesse's real 205-series library on his PC remains the final visual check.
+
 ## Next
 
 0. Library: check that the Windows CI job ran `LibraryWindowsTests`, then preview a real library folder before applying.
