@@ -101,6 +101,10 @@ public sealed class ReleaseService
             Link = request.Link,
             Hash = hash,
             Category = category,
+            // Client identity is recorded at grab time: queue sync may only ever match this job
+            // against this client's list, so another client's silence can never mark it missing.
+            DownloadClientId = client.Id,
+            ClientName = client.Name,
             Status = DownloadStatus.Queued,
             CreatedAt = _time.GetUtcNow(),
             UpdatedAt = _time.GetUtcNow(),

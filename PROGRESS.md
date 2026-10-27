@@ -7,6 +7,325 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## PR #6 — Complete download lifecycle & operational readiness (branch `download-lifecycle`, stacked on `settings-ui-overhaul` / PR #5, which is still unmerged)
+
+Base: PR #5 head 2131e2b (main still d81cdf9). This branch contains PR #5 plus the work below; its PR
+targets `settings-ui-overhaul`, not main. Nothing here merges, publishes, enables automatic grabbing,
+touches real user media, deletes torrents, alters monitoring preferences, or performs a real import
+without explicit authorization. Dry-run stays the default.
+
+### Audit — what the lifecycle looked like before PR #6 (all verified in code, not assumed)
+
+Flow: Torznab indexer → ReleaseService search/rank → manual grab → qBittorrent (first enabled
+client, chosen category) → DownloadJob → BackgroundScheduler queue sync (1 min) + import (5 min, dry
+by default) → SafeImporter → MediaItem/Episode HasFile → Library availability → Wanted.
+
+What already worked:
+- Grab guards: server-side re-evaluation of the release, one active download per movie/episode, a
+  Missing job blocks re-grab until an operator clears it (clear-missing touches only OneArr's record).
+- SafeImporter guarantees: boundary-correct containment (trailing-separator prefix check), no links/
+  junctions/reparse redirections below either root, no overwrite (identical content is a no-op,
+  different content fails), 30 s quiet period deferring still-changing files, hardlink-or-verified-
+  copy (SHA-256), source opened shared and never deleted or modified, stale-temp sweep limited to
+  OneArr's own temp pattern.
+- Scheduler + JobRunner: per-named-job locks so scheduled and manual runs of the same job cannot
+  overlap; failures recorded in JobHistory, not thrown into the host; wanted search only when
+  grabbing is on (off by default).
+- Wanted consistency basis: WantedAsync counts only Queued/Downloading/Completed as active, so a
+  Missing/Failed job never hides a wanted episode; unmonitored items are never listed as wanted.
+- Library reconciliation backstop: a scan marks episode/movie HasFile from files actually present.
+
+Defects found (each fixed or explicitly scoped below):
+1. **No client identity on jobs.** DownloadJob stored no client id, so SyncQueue matched every job
+   against every client's list. A job on client A could be marked Missing because client B did not
+   report it (order-dependent: whichever client was processed last won). Two clients with the same
+   torrent name collided on the name fallback, and a torrent-link grab (hash unknown until the
+   client reports it) was name-matched across all clients on its first syncs.
+2. **Client outage aborted the whole sync and looked like missing data.** One ListAsync throw
+   (down, auth failure, network outage) propagated out of SyncQueue before SaveChanges, discarding
+   every client's updates, with no per-client health recorded anywhere. Unreachable was
+   indistinguishable from missing.
+3. **Missing rule was too narrow and too eager at once.** Only Queued/Downloading jobs older than
+   15 minutes could become Missing, and only when no client reported them; a Completed job whose
+   torrent was externally removed stayed Completed forever, and jobs with an empty category were
+   never updated at all.
+4. **Download failure was terminal and conflated with import failure.** Client `error` /
+   `missingFiles` mapped to Failed, and Failed jobs were excluded from all later syncs, so a
+   transient client error could never recover; and there was no way to retry a failed import, nor
+   any endpoint for a single-job import at all (only bulk import of every Completed job).
+5. **Per-file exceptions aborted whole import runs.** SafeImporter rethrows on copy/lock/drive
+   errors, and ImportCompletedAsync had no per-file catch, so one locked file killed the run, wrote
+   no ImportRecord for that file, and left the job Completed with the error lost.
+6. **Prefix check in ListFiles was boundary-incorrect.** It used a raw `StartsWith(torrentRoot)`
+   without a trailing separator, so a file under `D:\Downloads2` passed a `D:\Downloads` root check
+   at enumeration time (SafeImporter's own CanonicalUnder was already boundary-correct, so the
+   import itself would still refuse it — defense in depth held, but the enumeration was wrong).
+7. **Season packs and multi-episode files were not linked.** Import marked at most one episode
+   (job.EpisodeId) or the movie HasFile, and put every file in one folder. Pack episodes other than
+   the job's episode never became available from import (only a later library scan repaired them),
+   and an import could be marked complete without every relevant episode linked.
+8. **Silent no-ops.** A Completed job with no media files, a deleted media item, or a null content
+   path was skipped with no record and no error — invisible forever. A job whose content path
+   vanished also stayed Completed.
+9. **No import preview, no per-job apply, no retry, no Activity.** There was no endpoint to inspect
+   a completed download before importing, no stale-preview protection, no retry for failed imports,
+   no History timeline, and no Problems surface. The Queue page showed status/progress/category/
+   hash only — no client, size, speed, ETA, import readiness, or per-job actions. The queue API
+   also returned raw grab Links, which can embed indexer API keys.
+10. **Speed/ETA were never captured.** qBittorrent's `dlspeed`/`eta` fields were ignored, so no UI
+    could show real progress information.
+11. **Competing imports of one download were possible across paths.** The `import` JobRunner lock
+    serialized bulk imports, but a preview-apply path (new in this PR) would have bypassed it if not
+    routed through the same lock; restart mid-import relied solely on dest-exists Skipped.
+
+### State-transition specification (DownloadJob, as implemented in PR #6)
+
+Statuses: Queued → Downloading → Completed → Imported, with Failed and Missing as side states and
+Unknown for unrecognized client states. Transitions are only ever driven by the owning client's
+reports, by import outcomes, or by explicit operator actions — never by another client's silence.
+
+- Queued/Downloading: updated from the owning client's list (hash match preferred; name match only
+  within the owning client, or, for legacy jobs with no client, only when the name is unique across
+  all clients). Progress, client state, content path, speed, ETA, and LastSeenAt refresh each poll.
+- Completed: set when the owning client reports a seeding/finished state (uploading, stalledUP,
+  queuedUP, forcedUP, pausedUP, stoppedUP, checkingUP, or a downloading-family state at progress
+  ≥ 1). CompletedAt is recorded on first entry. A Completed job whose torrent disappears from the
+  owning client after the grace period becomes Missing (same rule as active jobs).
+- Missing: only when the owning client is reachable and does not report the job, and the job has
+  not been seen for more than 15 minutes. Missing blocks re-grab until cleared by an operator
+  (clear-missing → Failed, OneArr record only, never touches a torrent or file). If the owning
+  client is unreachable, the status is left untouched and the outage is recorded as client health,
+  never as a Missing job.
+- Failed: two kinds, kept distinct by ImportFailed. Download-side failure (client `error` /
+  `missingFiles`) is re-polled on later syncs, so recovery is possible. Import-side failure
+  (ImportFailed = true) is terminal until an operator retries it (retry → Completed, then import
+  runs again); it never auto-retries into a duplicate grab and never deletes anything.
+- Imported: only after a real (non-dry) import pass in which every media file was imported or
+  skipped-as-identical, at least one file was processed, and every matched episode/movie record was
+  marked available. All-deferred stays Completed for the next pass. Any failed file → Failed +
+  ImportFailed, with per-file ImportRecords explaining each outcome.
+- Imported and Failed jobs are never re-polled for client state (Imported is terminal; Failed
+  import-side jobs wait for an operator). Unknown client states map to Unknown and are re-polled.
+- Restart safety: sync and import are idempotent. Repeated polls update the same rows (no duplicate
+  jobs — jobs are created only by grab, keyed by (MediaItemId, EpisodeId, active status)). Repeated
+  imports hit dest-exists → Skipped on identical content, Failed on different content, never
+  overwrite. ImportRecords are de-duplicated for dry runs and appended for real runs with the
+  outcome of that run. A restart mid-import leaves partial records; the next pass resumes from
+  dest-exists Skipped and re-copies anything whose temp was swept (temps older than 10 minutes
+  matching OneArr's pattern only).
+
+### What PR #6 changes (implementation notes)
+
+- Schema (one migration, no data loss, existing rows get NULL client/speed/ETA and
+  ImportFailed = false): DownloadJob gains DownloadClientId, ClientName (denormalized so a deleted
+  client still displays), LastSeenAt, CompletedAt, DownloadSpeedBps, EtaSeconds, ImportFailed; new
+  DownloadClientHealth table (one row per client: last seen, last error) and ImportPreview table
+  (job, created, fingerprint, plans JSON) for preview-bound applies.
+- Sync: per-client try/catch with health upserts; scoped matching as specified above; grace-period
+  Missing only from the owning (or, for legacy jobs, all) reachable clients; unreachable clients
+  never mark jobs missing; Failed download-side jobs keep polling; speed/ETA stored.
+- Grab: records DownloadClientId + ClientName on the new job (still first enabled client; no new
+  client-picker UI in this phase).
+- Import: per-job import path shared by bulk import, retry, and preview-apply, all under the
+  `import` JobRunner lock; per-file exception capture into Failed ImportRecords; boundary-correct
+  ListFiles; media-aware linking via LibraryMatcher.ParseEpisodes (S01E02, ranges, 1x02) so every
+  episode a file actually covers becomes available and unmatched files are reported, never silently
+  counted; zero-file / orphaned / null-path jobs become Failed + ImportFailed with an explanation
+  instead of silent skips; dry-run records de-duplicated as before.
+- Preview: POST /queue/{id}/import-preview plans every file (matched media, source, destination,
+  size, media type, planned action hardlink/copy/skip/defer/reject + reason, conflicts, same-volume)
+  without moving, linking, copying, renaming, or deleting anything; POST /queue/{id}/import-apply
+  requires { previewId, confirmed: true }, recomputes plans, and refuses (409 + fresh preview) when
+  any fingerprint (source path + size + last-write) or destination changed. Apply preserves sources
+  and records per-file ImportRecords. No automatic import or grab is enabled by a preview.
+- Activity: the Queue page becomes Activity with Queue / History / Problems tabs. Queue shows
+  client, size, speed, ETA, import readiness, and per-job Preview / Retry / Clear-missing actions;
+  History is a timeline derived from jobs, import records, previews, and scheduler runs (no secrets
+  logged — queue responses no longer return raw grab Links); Problems surfaces unreachable clients,
+  invalid categories/destinations, missing downloads, offline drives, locked/still-downloading
+  files, unmatched episodes, and failed verifications, with safe actions (Refresh state, Preview
+  import, Retry failed import). No destructive torrent controls were added.
+- Performance: sync still does two bounded category lists per enabled client plus one SaveChanges;
+  queue/history/problems endpoints are capped (200 rows) and indexed (DownloadJobs by Status and
+  by (MediaItemId, EpisodeId, Status)); no new framework, no extra polling beyond the existing
+  1-minute sync / 5-minute import cadence.
+- Tests: DownloadLifecycleTests (fake qBittorrent upstreams, 18 tests: two-client name collision,
+  hash-keyed no-name-fallback, client-offline health, state mapping + recovery, idempotent polling,
+  movie/single-episode/pack/multi-episode imports, partial-failure resume, identical reimport,
+  sibling-prefix rejection, missing-content visibility, preview plans + stale refusal, Wanted/Library
+  agreement, unmonitored preservation, safety defaults), DownloadWindowsTests (Platform=Windows:
+  drive-letter prefix + case, UNC server/share comparison, real junction refusal, Windows-path
+  movie import), activity.test.tsx (3 tests: real client/speed/ETA rows, preview + confirmed apply,
+  history/problems tabs), plus the preserved PR #4/PR #5 suites. Frontend in the Linux sandbox:
+  27/27 vitest + tsc/vite build passed (230 KB JS). Backend tests were NOT run in the sandbox
+  (no .NET SDK); CI is their verification.
+- CI acceptance: a new synthetic lifecycle script (tools/windows/lifecycle-acceptance.ps1) that
+  drives setup → settings → profile → stub client + connection test → add series (stub TMDb via
+  ONEARR_TMDB_BASE_URL) → wanted → manual grab → stub downloading → sync → restart → stub
+  completed → sync → import preview (nothing written) → confirmed apply → file association →
+  Library available → Wanted cleared → restart → still consistent, against generated fixtures and
+  stub qBittorrent/TMDb servers; it never touches real media. The ci.yml step that would run it
+  after the existing acceptance run (and upload its JSON as windows-lifecycle-acceptance) is
+  prepared in the local tree but could NOT be pushed by the GitHub App: GitHub refuses workflow
+  file changes from an app without workflow scope (403 on the tree containing .github/workflows/
+  ci.yml). Until that step is added by hand (one edit to ci.yml in the GitHub web UI, or an app
+  with workflow scope), run the script manually against a release-shaped build; the script itself
+  is in the repo and is the acceptance procedure.
+- Verification status at push time: frontend verified locally (27/27 + build); backend and the two
+  Windows acceptance scripts are verified by CI on this PR, not in the sandbox. The migration was
+  hand-written (no dotnet/ef tooling in the sandbox) following the existing migration format, with
+  the model snapshot updated to match; the CI acceptance run applies it to a fresh database, which
+  is the check that it is correct.
+
+### Corrective push after initial PR #6 review (CI run #70 failed to compile)
+
+- CI run #70 failed on Linux and Windows with `CS1739`: `DownloadService.cs` called
+  `ImportRequest` with named argument `dryRun`, but the record parameter is `DryRun`
+  (C# named arguments are case-sensitive). Fixed to `DryRun: false`. The frontend build
+  passed; backend tests, Windows filesystem tests, packaging, and Windows acceptance never ran.
+- Review findings fixed in the same push, all verified in code first:
+  - `POST /api/import` with dry-run off no longer imports directly: it applies approved
+    previews only (`ApplyApprovedAsync`), skipping jobs without a stored preview and jobs
+    whose preview went stale. `RetryImportAsync` likewise requires a stored preview and
+    applies the latest one (stale → 409 with a fresh preview, as in apply).
+    (Superseded by the later bulk-approval gate: see "Bulk approval gate" below — a stored
+    preview alone no longer authorizes a bulk import at all.)
+  - Empty previews cannot be created (zero-file plan throws) or applied (stored empty plan
+    throws); previewing requires a completed download (Completed, or Failed + ImportFailed
+    for retry); the stale comparison and the fingerprint now include episode associations.
+  - Dry runs are strictly read-only: no job status change, no import record, no file write,
+    including the early-failure paths (missing media, null content path, bad root, no files).
+  - Imports now create `MediaFile` / `MediaFileEpisode` rows (keyed by the reconciler's
+    `PathKey`, links unioned), so Details → Files shows what was imported.
+  - Owned jobs never fall back to other clients: a disabled or deleted owner leaves the job
+    untouched, and the Problems view surfaces it as `client-disabled`.
+  - Bulk import no longer filters out null-`ContentPath` jobs: they fail visibly
+    (Failed + ImportFailed) in real runs and report without mutating in dry runs.
+  - A series pack file that matches no episode is imported but recorded as `Unmatched`,
+    shown in the preview reason and in Problems, and the job stays Completed with an
+    explanation instead of being marked fully Imported.
+- New regression tests: null content path (real + dry-run), dry-run purity, disabled-owner
+  no-fallback, preview status/empty guards, apply-empty refusal, retry-requires-preview,
+  MediaFile links (movie + series pack), unmatched pack files staying unresolved, and stale
+  refusal when the episode mapping changes. The PartialFailure test now previews before retry.
+- Still open after this push: the `ci.yml` lifecycle step still needs its manual web-UI edit
+  (GitHub App 403 on workflow files); lifecycle acceptance remains unverified until it runs.
+  Backend + Windows tests for this push are CI-verified only (no .NET SDK in the sandbox).
+
+### Follow-up: CI run #74 failures and their fixes (head cf5c623 → next push)
+
+- Run #74 compiled but failed 23 backend tests. Root cause 1: the hand-written migration
+  `20261026160000_AddDownloadClientTracking` had no `.Designer.cs`, so EF never discovered
+  it as a migration — the model then differed from the last discovered migration and
+  `MigrateAsync` raised the pending-model-changes error. The `onearr.lock` teardown errors
+  in the same run are most plausibly downstream of that (the app cannot migrate/start, so
+  ApiFactory teardown trips on the lock); the next run confirms or refutes that. Fix: added
+  `20261026160000_AddDownloadClientTracking.Designer.cs` with the `[DbContext]` /
+  `[Migration]` attributes and a `BuildTargetModel` body verified byte-identical to the
+  model snapshot's model. The migration's `Up()` itself was already complete (7 columns,
+  3 indexes, both tables); only discovery was broken.
+- Root cause 2 (semantic, per the review): the season-pack test expected `Imported` for a
+  pack containing `extras.mkv`, which the review's unmatched-file rule contradicts. The
+  review's reading was kept (job stays Completed with an `Unmatched` record while covered
+  episodes are marked and E04 stays unmarked) and the test was updated to that expectation.
+  If the intended reading was instead "Imported, but loudly recorded", that is a two-line
+  flip in the bulk/apply final-status logic plus the two pack tests — flag it in review.
+
+### Bulk approval gate (second PR #6 review: a stored preview is not approval)
+
+- The review found `ApplyApprovedAsync` treated any stored preview as approval: calling
+  `POST /api/import` with dry-run off could apply previews that were merely inspected.
+  Fixed by replacing it with `ApplySelectedAsync(confirmed, approvals)`: a real bulk import
+  applies ONLY explicitly confirmed `(jobId, previewId)` pairs from the request body, each
+  through the same stale-checked per-job apply. Unconfirmed calls and empty approval lists
+  are refused with 400 before anything is applied; a pair for a missing/stale preview is
+  counted failed, never silently applied. The per-job `import-apply` endpoint already had
+  its `confirmed: true` gate and is unchanged.
+- Frontend: the ungated "Import now" button is removed from Activity (it could not express
+  confirmed pairs); the dry-run button stays, and a note points at the per-job
+  Preview → confirm → Apply flow, which remains the real-import path.
+- Callers updated to the new flow: `tools/smoke/smoke.sh` and
+  `tools/windows/staging-check.ps1` now generate a preview for the test job and pass its
+  confirmed pair to the bulk endpoint; the lifecycle-acceptance script already used the
+  per-job preview → apply path and is unchanged.
+- New test `BulkImport_PreviewAloneNeverAuthorizesAPhysicalImport` proves the gate: after
+  generating a preview, unconfirmed calls, empty lists, and bogus pairs leave the job
+  Completed with no file and no import records, and only the confirmed pair for the
+  job's actual preview applies it.
+
+### Root cause found with EF tooling (CI run #76: Designer alone did not fix it)
+
+- Run #76 still failed with 22 pending-model-changes errors, so the missing Designer was
+  not the whole story. With a .NET 10 SDK installed in the sandbox, `dotnet ef migrations
+  add TempProbe` reported exactly ONE difference between the model and the snapshot:
+  `DownloadClientHealth.DownloadClientId` needed `Sqlite:Autoincrement` — i.e. the snapshot
+  was missing `.ValueGeneratedOnAdd()` on that key. (An integer primary key gets
+  ValueGeneratedOnAdd by EF convention even when its name is not `Id`; the hand-written
+  snapshot omitted it.) Fix applied to the snapshot and to the migration Designer (kept
+  byte-identical), plus the matching `.Annotation("Sqlite:Autoincrement", true)` on the
+  `CreateTable` column in the migration's `Up()` for schema fidelity. A second probe
+  migration then came back with an EMPTY `Up()` — EF itself confirms zero remaining
+  differences, which is the exact check `MigrateAsync` performs in CI.
+- Two compile errors in the bulk-gate push were caught by the local build (not by CI yet)
+  and fixed here: `BulkApproval`/`BulkApplyResult` had been declared nested inside
+  `DownloadService`, so `ApiEndpoints` could not see them (CS0246) — both records moved to
+  namespace scope; and the new bulk test had a duplicated `[Fact]` attribute (CS0579) —
+  removed. The local API build now succeeds.
+- Local backend test execution is blocked by a sandbox-only testhost problem: vstest
+  spawns the testhost process but never connects to it (90s and 300s timeouts, also via
+  direct `dotnet vstest`), even though loopback TCP and Unix sockets both work in this
+  sandbox. This does not affect the product or CI (whose runners execute the suite in
+  ~44s on Linux); CI remains the backend verification, now backed by the empty EF probe
+  above rather than by hand inspection.
+
+### Scheduler preview bypass (third PR #6 review: BackgroundScheduler)
+
+- The scheduler ran `ImportCompletedAsync(dry, t)` every fifth tick with `dry` read from
+  the persisted `DryRunImport` setting, so flipping that setting to false let the
+  background service physically import downloads with no preview or approval — automatic
+  grabbing being off did not prevent this path. Fixed by extracting the tick body into a
+  testable `RunPassAsync(tick, ct)` and hardcoding the import step to dry-run `true`: the
+  scheduled importer is read-only by construction, and physical imports happen only
+  through the confirmed preview/apply workflow (per-job import-apply or bulk import with
+  confirmed pairs). After this change no production caller passes `false` to
+  `ImportCompletedAsync` (API endpoint passes `true` for planning; the `false` path
+  survives only in tests as the bulk real-import engine).
+- New regression test `SchedulerPass_NeverImportsPhysically_EvenWhenDryRunImportIsOff`:
+  with `DryRunImport=false` (the test world's default), a tick-5 scheduler pass leaves
+  the Completed job untouched, writes no file, and creates no import records. On the old
+  code this test fails, because the pass would have physically imported.
+
+### Run #80 verdict (head fe9fb47): EF fix confirmed, one Windows filesystem failure
+
+- Linux: Success. Windows backend cross-platform: 267/267 passed, frontend 27/27 passed,
+  and the log shows zero pending-model-changes and zero onearr.lock errors — the EF fix
+  holds on both platforms. Packaging and Windows acceptance were skipped (never ran).
+- The run's only failure is `DownloadWindowsTests.SiblingDirectory_WithSharedPrefix_IsRejected`:
+  expected `D:\Downloads\Show\file.mkv`, got `d:\downloads\Show\file.mkv`. Root cause: the
+  test (new in PR #6, previously masked because earlier runs never reached the Windows
+  filesystem step) expects `CanonicalUnder` to return the path with the configured root's
+  casing when the candidate arrives lowercase; the implementation returned the candidate
+  as given. `CanonicalUnder` itself is unchanged since PR #5 — the test's expectation was
+  never satisfied. Fix (not a test weakening): `CanonicalUnder` now rebuilds the result
+  from the configured root, so the root portion always carries the root's casing and the
+  same file maps to the same string regardless of how the client cased the drive/root.
+  The part below the root keeps the candidate's casing. No other `CanonicalUnder`
+  assertion is affected (the cross-platform suite only asserts the sibling rejection).
+
+### Remaining limitations before replacing Sonarr/Radarr (honest list)
+
+- No client picker on grab (first enabled client), no multi-client category mapping UI, no
+  automatic search/grab (still OFF by design), no season-pack episode splitting beyond filename
+  parsing (a pack file with no S/E markers in its name cannot be linked to episodes and is reported
+  unmatched, not guessed).
+- Import preview plans are per-file, not per-torrent-content-tree: nested archives (rar/zip) are
+  not unpacked or inspected.
+- History is derived from existing records, so events from before this PR (e.g. when a download
+  completed) are only as precise as the records kept then; CompletedAt is NULL for jobs completed
+  before this PR.
+- Screenshots: still none from a running app in the sandbox (no live backend there); the PC-run
+  screenshots from the PR #5 checklist remain the way to get them.
+
 ## Windows acceptance checklist for Jesse's PC (NOT run in the sandbox — no Windows, no real library there)
 
 Run these against a release-shaped build of the PR #5 head, with the real library, before merging.

@@ -28,7 +28,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Key");
 
-                    b.ToTable("Settings");
+                    b.ToTable("Settings", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.DownloadClientConfig", b =>
@@ -66,7 +66,27 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DownloadClients");
+                    b.ToTable("DownloadClients", (string)null);
+                });
+
+            modelBuilder.Entity("OneArr.Domain.DownloadClientHealth", b =>
+                {
+                    b.Property<int>("DownloadClientId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DownloadClientId");
+
+                    b.ToTable("DownloadClientHealth", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.DownloadJob", b =>
@@ -79,8 +99,15 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ClientName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ClientState")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ContentPath")
@@ -89,13 +116,28 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("DownloadClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DownloadSpeedBps")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("EpisodeId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Error")
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("EtaSeconds")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Hash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ImportFailed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Link")
@@ -127,9 +169,15 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DownloadClientId");
+
                     b.HasIndex("Hash");
 
-                    b.ToTable("DownloadJobs");
+                    b.HasIndex("Status");
+
+                    b.HasIndex("MediaItemId", "EpisodeId", "Status");
+
+                    b.ToTable("DownloadJobs", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.Episode", b =>
@@ -180,7 +228,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("MediaItemId", "SeasonNumber", "EpisodeNumber")
                         .IsUnique();
 
-                    b.ToTable("Episodes");
+                    b.ToTable("Episodes", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.FileRecord", b =>
@@ -204,7 +252,34 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("Path")
                         .IsUnique();
 
-                    b.ToTable("FileRecords");
+                    b.ToTable("FileRecords", (string)null);
+                });
+
+            modelBuilder.Entity("OneArr.Domain.ImportPreview", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DownloadJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlansJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DownloadJobId");
+
+                    b.ToTable("ImportPreviews", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.ImportRecord", b =>
@@ -240,7 +315,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ImportRecords");
+                    b.ToTable("ImportRecords", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.IndexerConfig", b =>
@@ -266,7 +341,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Indexers");
+                    b.ToTable("Indexers", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.JobHistory", b =>
@@ -293,7 +368,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("JobHistories");
+                    b.ToTable("JobHistories", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.LibraryRoot", b =>
@@ -343,7 +418,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("MediaType", "PathKey")
                         .IsUnique();
 
-                    b.ToTable("LibraryRoots");
+                    b.ToTable("LibraryRoots", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.LibraryScanPlan", b =>
@@ -364,7 +439,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("LibraryScanPlans");
+                    b.ToTable("LibraryScanPlans", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.MediaFile", b =>
@@ -417,7 +492,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("PathKey")
                         .IsUnique();
 
-                    b.ToTable("MediaFiles");
+                    b.ToTable("MediaFiles", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.MediaFileEpisode", b =>
@@ -432,7 +507,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("EpisodeId");
 
-                    b.ToTable("MediaFileEpisodes");
+                    b.ToTable("MediaFileEpisodes", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.MediaItem", b =>
@@ -501,7 +576,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("MediaType", "Provider", "ProviderId")
                         .IsUnique();
 
-                    b.ToTable("MediaItems");
+                    b.ToTable("MediaItems", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.PathMapping", b =>
@@ -528,7 +603,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("MediaType", "SourcePrefix")
                         .IsUnique();
 
-                    b.ToTable("PathMappings");
+                    b.ToTable("PathMappings", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.QualityProfile", b =>
@@ -552,7 +627,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("QualityProfiles");
+                    b.ToTable("QualityProfiles", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.SearchAttempt", b =>
@@ -598,7 +673,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("NextAttemptAt");
 
-                    b.ToTable("SearchAttempts");
+                    b.ToTable("SearchAttempts", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.Season", b =>
@@ -621,7 +696,7 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.HasIndex("MediaItemId", "SeasonNumber")
                         .IsUnique();
 
-                    b.ToTable("Seasons");
+                    b.ToTable("Seasons", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.Episode", b =>
