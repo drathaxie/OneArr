@@ -273,8 +273,12 @@ public class DownloadLifecycleTests
         // A later bulk pass must NOT silently retry a failed import.
         await world.Downloads.ImportCompletedAsync(dryRun: false, default);
         Assert.Equal(DownloadStatus.Failed, (await GetJobAsync(world, jobId)).Status);
-        // "Restart": a fresh service with a working importer retries, skips the already-imported
-        // file, imports the second, and the job completes with no duplicates.
+        // Retry requires a preview: without one it is refused, so a failed import can never be
+        // retried around the preview-and-confirmation model.
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.RetryImportAsync(jobId, default));
+        await world.Downloads.PreviewImportAsync(jobId, default);
+        // "Restart": a fresh service with a working importer applies the preview, skips the
+        // already-imported file, imports the second, and the job completes with no duplicates.
         var retry = await world.Downloads.RetryImportAsync(jobId, default);
         Assert.Equal(0, retry.Failed);
         Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
@@ -423,6 +427,190 @@ public class DownloadLifecycleTests
         var media = new MediaService(world.Db, new StubMetadata(), world.Time);
         var wanted = await media.WantedAsync(default);
         Assert.DoesNotContain(wanted.Episodes, e => e.EpisodeId == episodes[1]);
+    }
+
+    [Fact]
+    public async Task NullContentPath_BecomesVisibleFailure_AndDryRunChangesNothing()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", null);
+        var summary = await world.Downloads.ImportCompletedAsync(dryRun: false, default);
+        Assert.Equal(1, summary.Failed);
+        var job = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Failed, job.Status);
+        Assert.True(job.ImportFailed);
+        Assert.Contains("content path", job.Error);
+
+        // Same shape as a dry run: reported, but the job and the records are untouched.
+        using var dry = await WorldAsync();
+        var dryMovie = await dry.AddMovieAsync("Dune", 2021);
+        var dryJob = await AddJobAsync(dry, dryMovie, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", null);
+        var drySummary = await dry.Downloads.ImportCompletedAsync(dryRun: true, default);
+        Assert.Equal(1, drySummary.Failed);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(dry, dryJob)).Status);
+        await using var db = dry.Db.CreateDbContext();
+        Assert.Empty(await db.ImportRecords.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task DryRun_PlansWithoutWritingRecordsOrChangingStatus()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune (2021) 1080p.mkv", "movie-bytes");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(file));
+        var summary = await world.Downloads.ImportCompletedAsync(dryRun: true, default);
+        Assert.Equal(1, summary.DryRun);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.Empty(Directory.GetFiles(world.Dirs.Media, "*", SearchOption.AllDirectories));
+        await using var db = world.Db.CreateDbContext();
+        Assert.Empty(await db.ImportRecords.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task DisabledOwner_NeverFallsBackToOtherClients()
+    {
+        using var world = await WorldAsync();
+        var qbit2 = new FakeQbit();
+        _ = await AddClientAsync(world, "second", "qbit2.test", qbit2);
+        qbit2.Torrents.Add(new FakeQbit.Torrent("bb02", "Show", "onearr-tv", "downloading", 0.9, null));
+        var (series, _) = await world.AddSeriesAsync("Show", 1);
+        var jobId = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Downloading, 1, "aa01", null, world.Time.GetUtcNow().AddMinutes(-16));
+        await using (var db = world.Db.CreateDbContext())
+        {
+            var owner = await db.DownloadClients.FirstAsync(c => c.Id == 1);
+            owner.Enabled = false;
+            await db.SaveChangesAsync();
+        }
+        world.Time.Advance(TimeSpan.FromMinutes(16));
+        await world.Downloads.SyncQueueAsync(default);
+        var job = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Downloading, job.Status);
+        Assert.Equal("aa01", job.Hash);
+        Assert.Equal(0.5, job.Progress);
+    }
+
+    [Fact]
+    public async Task Preview_RequiresCompletedJob_AndRejectsEmptyDownloads()
+    {
+        using var world = await WorldAsync();
+        var (series, _) = await world.AddSeriesAsync("Show", 1);
+        var queued = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Downloading, 1, "aa01", null);
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.PreviewImportAsync(queued, default));
+        var emptyDir = Path.Combine(world.Dirs.Torrents, "Empty");
+        Directory.CreateDirectory(emptyDir);
+        var empty = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Completed, 1, "bb02", emptyDir);
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.PreviewImportAsync(empty, default));
+    }
+
+    [Fact]
+    public async Task Apply_EmptyPreview_IsRefused()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", Path.Combine(world.Dirs.Torrents, "Dune"));
+        int previewId;
+        await using (var db = world.Db.CreateDbContext())
+        {
+            var row = new ImportPreview { DownloadJobId = jobId, Fingerprint = "empty", PlansJson = "[]", CreatedAt = world.Time.GetUtcNow() };
+            db.ImportPreviews.Add(row);
+            await db.SaveChangesAsync();
+            previewId = row.Id;
+        }
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.ApplyPreviewAsync(jobId, previewId, default));
+    }
+
+    [Fact]
+    public async Task Retry_RequiresPreview_ThenAppliesLatestPreview()
+    {
+        using var world = await WorldAsync();
+        var (series, _) = await world.AddSeriesAsync("Show", 2);
+        var f1 = world.Dirs.WriteFile("torrents/Show/Show - S01E01.mkv", "one");
+        var f2 = world.Dirs.WriteFile("torrents/Show/Show - S01E02.mkv", "two");
+        AgeFile(f1); AgeFile(f2);
+        var jobId = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Completed, 1, "aa01", Path.Combine(world.Dirs.Torrents, "Show"));
+        var failing = new DownloadService(world.Db, new QBittorrentClient(new FakeFactory(world.Http)), new ThrowingImporter(new SafeImporter(TimeSpan.Zero), "Show - S01E02.mkv"), world.Settings, world.Time);
+        await failing.ImportCompletedAsync(dryRun: false, default);
+        var failed = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Failed, failed.Status);
+        Assert.True(failed.ImportFailed);
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.RetryImportAsync(jobId, default));
+        await world.Downloads.PreviewImportAsync(jobId, default);
+        var retry = await world.Downloads.RetryImportAsync(jobId, default);
+        Assert.Equal(0, retry.Failed);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        await using var db = world.Db.CreateDbContext();
+        var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
+        Assert.True(eps[0].HasFile);
+        Assert.True(eps[1].HasFile);
+    }
+
+    [Fact]
+    public async Task Import_CreatesMediaFileLinks_AndUnmatchedPackFilesStayUnresolved()
+    {
+        using var world = await WorldAsync();
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var f1 = world.Dirs.WriteFile("torrents/Show/Show - S01E01.mkv", "ep-one");
+        var f2 = world.Dirs.WriteFile("torrents/Show/Show - Random.mkv", "random-bytes");
+        AgeFile(f1); AgeFile(f2);
+        var jobId = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Completed, 1, "aa01", Path.Combine(world.Dirs.Torrents, "Show"));
+        await world.Downloads.ImportCompletedAsync(dryRun: false, default);
+        var job = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Completed, job.Status);
+        Assert.Contains("unmatched", job.Error);
+        await using var db = world.Db.CreateDbContext();
+        var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
+        Assert.True(eps[0].HasFile);
+        Assert.False(eps[1].HasFile);
+        var files = await db.MediaFiles.AsNoTracking().Where(f => f.MediaItemId == series).ToListAsync();
+        Assert.Equal(2, files.Count);
+        var links = await db.MediaFileEpisodes.AsNoTracking().ToListAsync();
+        var ep1File = files.First(f => f.Path.EndsWith("Show - S01E01.mkv"));
+        Assert.Contains(links, l => l.MediaFileId == ep1File.Id && l.EpisodeId == episodes[0]);
+        var randomFile = files.First(f => f.Path.EndsWith("Show - Random.mkv"));
+        Assert.DoesNotContain(links, l => l.MediaFileId == randomFile.Id);
+        Assert.Contains(await db.ImportRecords.AsNoTracking().ToListAsync(), r => r.DownloadJobId == jobId && r.Action == ImportAction.Unmatched && r.SourcePath.EndsWith("Show - Random.mkv"));
+    }
+
+    [Fact]
+    public async Task ImportMovie_CreatesMediaFileLink()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune (2021) 1080p.mkv", "movie-bytes");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(file));
+        await world.Downloads.ImportCompletedAsync(dryRun: false, default);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        await using var db = world.Db.CreateDbContext();
+        var row = await db.MediaFiles.AsNoTracking().SingleAsync(f => f.MediaItemId == movieId);
+        Assert.EndsWith("Dune (2021) 1080p.mkv", row.Path);
+        Assert.True(File.Exists(row.Path));
+        Assert.Empty(await db.MediaFileEpisodes.AsNoTracking().Where(l => l.MediaFileId == row.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task StalePreview_RefusedWhenEpisodeMappingChanges()
+    {
+        using var world = await WorldAsync();
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var file = world.Dirs.WriteFile("torrents/Show/Show - S01E01.mkv", "ep-one");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show", DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(file));
+        var svc = PreviewService(world);
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        Assert.Contains(episodes[0], preview.Plans[0].MatchedEpisodeIds);
+        await using (var db = world.Db.CreateDbContext())
+        {
+            var job = await db.DownloadJobs.FirstAsync(j => j.Id == jobId);
+            job.EpisodeId = episodes[1];
+            await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<StalePreviewException>(() => svc.ApplyPreviewAsync(jobId, preview.PreviewId, default));
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(File.Exists(preview.Plans[0].DestinationPath!));
     }
 
     [Fact]

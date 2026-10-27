@@ -384,18 +384,25 @@ public static class ApiEndpoints
             return Results.Ok(applied);
         });
 
-        // Retry a failed import. Only Failed + ImportFailed jobs qualify; the retry resets the job
-        // to Completed and imports it again. It never deletes torrents or files and never grabs.
+        // Retry a failed import. Only Failed + ImportFailed jobs qualify, and only when they have
+        // a stored preview: the retry applies that preview. A stale preview is a 409 carrying a
+        // fresh preview, exactly like a stale apply. It never deletes torrents or files.
         api.MapPost("/queue/{id:int}/retry-import", async (int id, DownloadService downloads, JobRunner runner, CancellationToken ct) =>
         {
             ImportRunSummary? summary = null;
             string? error = null;
+            ImportPreviewDto? fresh = null;
             var ran = await runner.TryRunAsync("import", async t =>
             {
                 try
                 {
                     summary = await downloads.RetryImportAsync(id, t);
                     return summary.Message;
+                }
+                catch (StalePreviewException ex)
+                {
+                    fresh = ex.Fresh;
+                    return "Preview stale";
                 }
                 catch (ArgumentException ex)
                 {
@@ -405,6 +412,7 @@ public static class ApiEndpoints
             }, ct);
             if (!ran) return Results.Conflict(new { error = "Import already running" });
             if (error is not null) return Results.BadRequest(new { error });
+            if (fresh is not null) return Results.Conflict(new { error = "The import plan changed since the preview; review the fresh preview before applying.", preview = fresh });
             return Results.Ok(new { message = summary?.Message ?? "", imported = summary?.Imported ?? 0, failed = summary?.Failed ?? 0 });
         });
 
@@ -427,8 +435,9 @@ public static class ApiEndpoints
             foreach (var p in previews) entries.Add((p.CreatedAt, "preview", $"Import preview generated (job {p.DownloadJobId})", p.DownloadJobId));
             foreach (var r in records)
             {
-                var kind = r.Action == ImportAction.Deferred ? "deferred" : r.Success ? "imported" : "import-failed";
-                var title = r.Action == ImportAction.Deferred ? $"Import deferred: {r.SourcePath}"
+                var kind = r.Action == ImportAction.Unmatched ? "import-unmatched" : r.Action == ImportAction.Deferred ? "deferred" : r.Success ? "imported" : "import-failed";
+                var title = r.Action == ImportAction.Unmatched ? $"Imported but unmatched: {r.SourcePath}"
+                    : r.Action == ImportAction.Deferred ? $"Import deferred: {r.SourcePath}"
                     : r.Success ? $"Imported {r.SourcePath}" : $"Import failed: {r.SourcePath}";
                 entries.Add((r.CreatedAt, kind, title, r.DownloadJobId));
             }
@@ -492,6 +501,16 @@ public static class ApiEndpoints
                         problems.Add(new { kind = "invalid-category", title = $"Unknown download category: {j.ReleaseTitle}", detail = $"Category '{j.Category}' matches no enabled client's movie or TV category.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
                 }
             }
+            // An owned job whose client is disabled or removed stays with that client (sync never
+            // re-associates it); surface that here so it is visible instead of silently stalled.
+            foreach (var j in jobs)
+            {
+                if (j.DownloadClientId is int owner && !clients.Any(cl => cl.Id == owner))
+                    problems.Add(new { kind = "client-disabled", title = $"Download client disabled or removed: {j.ReleaseTitle}", detail = "This download stays with its original client and is never matched against other clients. Re-enable the client to resume sync.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
+            }
+            var unmatched = await c.ImportRecords.AsNoTracking().Where(r => r.Action == ImportAction.Unmatched).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
+            foreach (var r in unmatched)
+                problems.Add(new { kind = "import-unmatched", title = "Imported file matched no episode", detail = $"{r.SourcePath} → {r.DestinationPath}", jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview" } });
             var deferred = await c.ImportRecords.AsNoTracking().Where(r => r.Action == ImportAction.Deferred).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
             foreach (var r in deferred)
                 problems.Add(new { kind = "file-deferred", title = "Import deferred: file still changing", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry" } });
@@ -523,15 +542,26 @@ public static class ApiEndpoints
             return ran ? Results.Ok(new { status = "done" }) : Results.Conflict(new { error = "Queue sync already running" });
         });
 
+        // Bulk import. A dry run only plans (read-only) and reports problems. A real bulk import
+        // applies approved previews only: a Completed job without a stored preview is skipped,
+        // never imported directly, so no production route bypasses preview-and-confirmation.
         api.MapPost("/import", async (bool? dryRun, DownloadService downloads, SettingsStore settings, JobRunner runner, CancellationToken ct) =>
         {
             var dry = dryRun ?? await settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct);
             string? message = null;
             var ran = await runner.TryRunAsync("import", async t =>
             {
-                var summary = await downloads.ImportCompletedAsync(dry, t);
-                message = summary.Message;
-                return summary.Message;
+                if (dry)
+                {
+                    var summary = await downloads.ImportCompletedAsync(true, t);
+                    message = summary.Message;
+                }
+                else
+                {
+                    var result = await downloads.ApplyApprovedAsync(t);
+                    message = result.Message;
+                }
+                return message;
             }, ct);
             return ran ? Results.Ok(new { dryRun = dry, message }) : Results.Conflict(new { error = "Import already running" });
         });

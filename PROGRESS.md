@@ -177,6 +177,39 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   the model snapshot updated to match; the CI acceptance run applies it to a fresh database, which
   is the check that it is correct.
 
+### Corrective push after initial PR #6 review (CI run #70 failed to compile)
+
+- CI run #70 failed on Linux and Windows with `CS1739`: `DownloadService.cs` called
+  `ImportRequest` with named argument `dryRun`, but the record parameter is `DryRun`
+  (C# named arguments are case-sensitive). Fixed to `DryRun: false`. The frontend build
+  passed; backend tests, Windows filesystem tests, packaging, and Windows acceptance never ran.
+- Review findings fixed in the same push, all verified in code first:
+  - `POST /api/import` with dry-run off no longer imports directly: it applies approved
+    previews only (`ApplyApprovedAsync`), skipping jobs without a stored preview and jobs
+    whose preview went stale. `RetryImportAsync` likewise requires a stored preview and
+    applies the latest one (stale → 409 with a fresh preview, as in apply).
+  - Empty previews cannot be created (zero-file plan throws) or applied (stored empty plan
+    throws); previewing requires a completed download (Completed, or Failed + ImportFailed
+    for retry); the stale comparison and the fingerprint now include episode associations.
+  - Dry runs are strictly read-only: no job status change, no import record, no file write,
+    including the early-failure paths (missing media, null content path, bad root, no files).
+  - Imports now create `MediaFile` / `MediaFileEpisode` rows (keyed by the reconciler's
+    `PathKey`, links unioned), so Details → Files shows what was imported.
+  - Owned jobs never fall back to other clients: a disabled or deleted owner leaves the job
+    untouched, and the Problems view surfaces it as `client-disabled`.
+  - Bulk import no longer filters out null-`ContentPath` jobs: they fail visibly
+    (Failed + ImportFailed) in real runs and report without mutating in dry runs.
+  - A series pack file that matches no episode is imported but recorded as `Unmatched`,
+    shown in the preview reason and in Problems, and the job stays Completed with an
+    explanation instead of being marked fully Imported.
+- New regression tests: null content path (real + dry-run), dry-run purity, disabled-owner
+  no-fallback, preview status/empty guards, apply-empty refusal, retry-requires-preview,
+  MediaFile links (movie + series pack), unmatched pack files staying unresolved, and stale
+  refusal when the episode mapping changes. The PartialFailure test now previews before retry.
+- Still open after this push: the `ci.yml` lifecycle step still needs its manual web-UI edit
+  (GitHub App 403 on workflow files); lifecycle acceptance remains unverified until it runs.
+  Backend + Windows tests for this push are CI-verified only (no .NET SDK in the sandbox).
+
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 
 - No client picker on grab (first enabled client), no multi-client category mapping UI, no

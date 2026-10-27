@@ -804,7 +804,7 @@ export function Activity() {
       <div className="row">
         <button onClick={() => run("Sync", "/api/queue/sync")}>Sync from qBittorrent</button>
         <button onClick={() => run("Dry run", "/api/import?dryRun=true")}>Import dry run</button>
-        <button className="danger" onClick={() => run("Import", "/api/import?dryRun=false", undefined, "Run a real import now? Files are hardlinked or verified-copied; source torrents are never deleted.")}>Import now</button>
+        <button className="danger" onClick={() => run("Import", "/api/import?dryRun=false", undefined, "Apply approved import previews now? Jobs without a preview are skipped; nothing is imported without a preview. Source torrents are never deleted.")}>Import now</button>
       </div>
       <div className="row" role="tablist" aria-label="Activity sections">
         <button className={tab === "queue" ? "primary" : ""} onClick={() => setTab("queue")}>Queue</button>
@@ -870,7 +870,7 @@ export function Activity() {
                     <div className="row">
                       {p.actions.includes("refresh") && <button className="small" onClick={() => run("Sync", "/api/queue/sync")}>Refresh state</button>}
                       {p.actions.includes("preview") && p.jobId && <button className="small primary" onClick={() => openPreview(p.jobId!)}>Preview import</button>}
-                      {p.actions.includes("retry") && p.jobId && <button className="small" onClick={() => run("Retry import", `/api/queue/${p.jobId}/retry-import`, undefined, "Retry this failed import? It imports again without deleting anything.")}>Retry failed import</button>}
+                      {p.actions.includes("retry") && p.jobId && <button className="small" onClick={() => run("Retry import", `/api/queue/${p.jobId}/retry-import`, undefined, "Retry this failed import? It applies the latest import preview; generate a fresh preview first if the files changed. Nothing is deleted.")}>Retry failed import</button>}
                       {p.actions.includes("clear-missing") && p.jobId && <button className="small" onClick={() => run("Clear missing", `/api/queue/${p.jobId}/clear-missing`, undefined, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}
                     </div>
                   </td>

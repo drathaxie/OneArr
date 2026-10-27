@@ -42,6 +42,8 @@ public sealed class StalePreviewException : Exception
 /// Syncs qBittorrent state into job records and imports completed downloads through SafeImporter.
 /// Queue identity rule: a job belongs to exactly one client (DownloadClientId, recorded at grab).
 /// Only that client's list may update it or mark it missing, and only when that client is reachable.
+/// An owned job whose client is disabled or deleted is NEVER matched against other clients: it is
+/// left untouched (and surfaced as a client problem) rather than re-associated.
 /// Legacy jobs without a client are matched conservatively (hash preferred; name only when unique
 /// across all reachable clients) and are marked missing only when no reachable client reports them.
 /// An unreachable client is recorded as client health, never as a missing download.
@@ -104,15 +106,16 @@ public sealed class DownloadService
 
         foreach (var job in active)
         {
-            // Candidate clients for this job: its owner only, when the owner is known and enabled.
-            // A job whose owner was disabled or deleted falls back to legacy behaviour (any client).
-            List<int> candidateIds;
-            if (job.DownloadClientId is int owner && clientById.ContainsKey(owner))
-                candidateIds = [owner];
-            else
-                candidateIds = reachable.ToList();
+            // Candidate clients for this job: its owner only, when the owner is known. An owned
+            // job whose owner is disabled, deleted, or unreachable is left untouched — it never
+            // falls back to searching other clients, so it can never be re-associated.
+            if (job.DownloadClientId is int owner)
+            {
+                if (!clientById.ContainsKey(owner) || !reachable.Contains(owner)) continue;
+            }
+            var candidateIds = job.DownloadClientId is int owned ? new List<int> { owned } : reachable.ToList();
             var candidateReachable = candidateIds.Where(reachable.Contains).ToList();
-            if (candidateReachable.Count == 0) continue; // owner unreachable/disabled: leave untouched
+            if (candidateReachable.Count == 0) continue; // legacy job, no client reachable: leave untouched
 
             var candidates = candidateReachable.SelectMany(id => itemsByClient[id]).ToList();
             var match = FindMatch(job, candidates);
@@ -187,6 +190,12 @@ public sealed class DownloadService
 
     // ---- Import ----
 
+    /// <summary>Bulk import engine. A dry run is strictly read-only: it plans and reports problems
+    /// without changing any job, record, or file. Production bulk import (POST /api/import with
+    /// dryRun=false) does NOT call this with dryRun=false; it applies approved previews only via
+    /// ApplyApprovedAsync, so no production route imports a job without a stored preview.
+    /// Completed jobs with a null content path are deliberately included: they must fail visibly
+    /// (or report in a dry run), never be silently skipped by the query.</summary>
     public async Task<ImportRunSummary> ImportCompletedAsync(bool dryRun, CancellationToken ct)
     {
         var mediaRoot = await _settings.GetAsync(SettingKeys.MediaRoot, ct);
@@ -195,7 +204,7 @@ public sealed class DownloadService
             return new ImportRunSummary(0, 0, 0, 0, "Set the media root and torrent root paths in Settings before importing");
 
         await using var db = await _db.CreateDbContextAsync(ct);
-        var jobs = await db.DownloadJobs.Where(j => j.Status == DownloadStatus.Completed && j.ContentPath != null).ToListAsync(ct);
+        var jobs = await db.DownloadJobs.Where(j => j.Status == DownloadStatus.Completed).ToListAsync(ct);
         var total = new ImportRunSummary(0, 0, 0, 0, "");
         foreach (var job in jobs)
         {
@@ -207,14 +216,16 @@ public sealed class DownloadService
         return total with { Message = msg };
     }
 
-    /// <summary>Imports one Completed job (bulk import, retry, and preview-apply all funnel here).
-    /// Every file outcome is recorded, even when the importer itself throws, so a failure can never
-    /// silently abort the run or lose the error.</summary>
+    /// <summary>Imports one Completed job (bulk import engine). Every file outcome is recorded,
+    /// even when the importer itself throws, so a failure can never silently abort the run or
+    /// lose the error. A dry run writes nothing at all: no job change, no record, no file.</summary>
     private async Task<ImportRunSummary> ImportJobAsync(OneArrDbContext db, DownloadJob job, bool dryRun, string mediaRoot, string torrentRoot, CancellationToken ct)
     {
+        if (job.Status != DownloadStatus.Completed)
+            return new ImportRunSummary(0, 0, 1, 0, "Only completed downloads can be imported");
         var media = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == job.MediaItemId, ct);
-        if (media is null) return await FailJobAsync(db, job, "The media item for this download no longer exists", ct);
-        if (string.IsNullOrWhiteSpace(job.ContentPath)) return await FailJobAsync(db, job, "This download has no content path recorded", ct);
+        if (media is null) return await FailJobOrReportAsync(db, job, "The media item for this download no longer exists", dryRun, ct);
+        if (string.IsNullOrWhiteSpace(job.ContentPath)) return await FailJobOrReportAsync(db, job, "This download has no content path recorded", dryRun, ct);
 
         string destRoot;
         try
@@ -223,17 +234,19 @@ public sealed class DownloadService
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return await FailJobAsync(db, job, "Root folder is outside the configured media root", ct);
+            return await FailJobOrReportAsync(db, job, "Root folder is outside the configured media root", dryRun, ct);
         }
 
         var relFolder = RelativeFolder(media, job, db);
         var files = ListFiles(job.ContentPath!, torrentRoot);
-        if (files.Count == 0) return await FailJobAsync(db, job, "No media files found in the completed download", ct);
+        if (files.Count == 0) return await FailJobOrReportAsync(db, job, "No media files found in the completed download", dryRun, ct);
 
         int considered = 0, imported = 0, failed = 0, planned = 0;
         var jobFailed = false;
         var jobDeferred = false;
         var matchedEpisodeIds = new HashSet<int>();
+        var importedFiles = new List<(string Dest, List<int> Episodes)>();
+        var unmatched = new List<string>();
 
         foreach (var file in files)
         {
@@ -250,8 +263,8 @@ public sealed class DownloadService
                 outcome = new ImportOutcome(ImportAction.Failed, "", false, ex.GetType().Name + ": " + Truncate(ex.Message, 500));
             }
 
-            var exists = await db.ImportRecords.AnyAsync(r => r.SourcePath == file && r.DestinationPath == outcome.DestinationPath && r.Action == outcome.Action && r.Success == outcome.Success && r.DownloadJobId == job.Id, ct);
-            if (!exists || !dryRun)
+            // Dry runs record nothing: the summary counts are the whole report.
+            if (!dryRun)
             {
                 db.ImportRecords.Add(new ImportRecord
                 {
@@ -271,20 +284,106 @@ public sealed class DownloadService
             if (outcome.Action is ImportAction.Hardlink or ImportAction.Copy or ImportAction.Skipped)
             {
                 imported++;
-                foreach (var ep in MatchedEpisodes(db, media, job, file)) matchedEpisodeIds.Add(ep);
+                var matched = MatchedEpisodes(db, media, job, file);
+                foreach (var ep in matched) matchedEpisodeIds.Add(ep);
+                importedFiles.Add((outcome.DestinationPath, matched));
+                // A series pack file that matched no episode is imported but stays unresolved:
+                // it gets an Unmatched record and the job is never marked fully Imported.
+                if (!dryRun && media.MediaType == MediaType.Series && job.EpisodeId is null && matched.Count == 0)
+                {
+                    unmatched.Add(file);
+                    await AddUnmatchedRecordAsync(db, job.Id, file, outcome.DestinationPath, ct);
+                }
             }
         }
 
         if (!dryRun && !jobDeferred)
         {
             var tracked = await db.DownloadJobs.FirstAsync(j => j.Id == job.Id, ct);
-            tracked.Status = jobFailed ? DownloadStatus.Failed : DownloadStatus.Imported;
-            tracked.ImportFailed = jobFailed;
-            tracked.Error = jobFailed ? "One or more files failed to import; see import records" : null;
             tracked.UpdatedAt = _time.GetUtcNow();
-            if (!jobFailed) await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
+            if (jobFailed)
+            {
+                tracked.Status = DownloadStatus.Failed;
+                tracked.ImportFailed = true;
+                tracked.Error = "One or more files failed to import; see import records";
+            }
+            else
+            {
+                await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
+                await LinkImportedFilesAsync(db, media, importedFiles, ct);
+                if (unmatched.Count > 0)
+                {
+                    tracked.Status = DownloadStatus.Completed;
+                    tracked.ImportFailed = false;
+                    tracked.Error = $"{unmatched.Count} file(s) imported but unmatched to any episode; see import records";
+                }
+                else
+                {
+                    tracked.Status = DownloadStatus.Imported;
+                    tracked.ImportFailed = false;
+                    tracked.Error = null;
+                }
+            }
         }
         return new ImportRunSummary(considered, imported, failed, planned, "");
+    }
+
+    /// <summary>Real runs fail the job persistently; dry runs only report the problem.</summary>
+    private async Task<ImportRunSummary> FailJobOrReportAsync(OneArrDbContext db, DownloadJob job, string error, bool dryRun, CancellationToken ct) =>
+        dryRun ? new ImportRunSummary(0, 0, 1, 0, error) : await FailJobAsync(db, job, error, ct);
+
+    /// <summary>Records an unmatched import once per (job, source). The file is in the library;
+    /// the record is what keeps that fact visible instead of silently marking the job Imported.</summary>
+    private async Task AddUnmatchedRecordAsync(OneArrDbContext db, int jobId, string source, string dest, CancellationToken ct)
+    {
+        var exists = await db.ImportRecords.AnyAsync(r => r.DownloadJobId == jobId && r.SourcePath == source && r.Action == ImportAction.Unmatched, ct);
+        if (exists) return;
+        db.ImportRecords.Add(new ImportRecord
+        {
+            DownloadJobId = jobId,
+            SourcePath = source,
+            DestinationPath = dest,
+            Action = ImportAction.Unmatched,
+            Success = false,
+            Message = "Imported but unmatched to any episode; no episode was marked available",
+            CreatedAt = _time.GetUtcNow(),
+        });
+    }
+
+    /// <summary>Creates the MediaFile / MediaFileEpisode rows the Details → Files view reads, so
+    /// availability is backed by verified file associations instead of bare HasFile flags. Rows
+    /// are keyed by PathKey (the same key the library reconciler uses), so a rescan or a
+    /// re-import reuses the row instead of duplicating it, and episode links are unioned.</summary>
+    private async Task LinkImportedFilesAsync(OneArrDbContext db, MediaItem media, List<(string Dest, List<int> Episodes)> files, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        var windows = OperatingSystem.IsWindows();
+        foreach (var (dest, episodeIds) in files)
+        {
+            if (string.IsNullOrWhiteSpace(dest)) continue;
+            var key = LibraryPaths.Key(dest, windows);
+            var row = await db.MediaFiles.FirstOrDefaultAsync(f => f.PathKey == key, ct);
+            long size = 0;
+            try { if (File.Exists(dest)) size = new FileInfo(dest).Length; } catch { /* size stays unknown */ }
+            if (row is null)
+            {
+                row = new MediaFile { Path = dest, PathKey = key, SizeBytes = size, Status = MediaFileStatus.Present, MediaItemId = media.Id, MatchMethod = "import", FirstSeenUtc = now, LastVerifiedUtc = now };
+                db.MediaFiles.Add(row);
+                foreach (var ep in episodeIds) row.EpisodeLinks.Add(new MediaFileEpisode { EpisodeId = ep });
+            }
+            else
+            {
+                row.Path = dest;
+                row.SizeBytes = size;
+                row.Status = MediaFileStatus.Present;
+                row.MediaItemId = media.Id;
+                row.MatchMethod = "import";
+                row.LastVerifiedUtc = now;
+                var have = (await db.MediaFileEpisodes.Where(l => l.MediaFileId == row.Id).Select(l => l.EpisodeId).ToListAsync(ct)).ToHashSet();
+                foreach (var ep in episodeIds.Where(e => !have.Contains(e)))
+                    db.MediaFileEpisodes.Add(new MediaFileEpisode { MediaFileId = row.Id, EpisodeId = ep });
+            }
+        }
     }
 
     private async Task<ImportRunSummary> FailJobAsync(OneArrDbContext db, DownloadJob job, string error, CancellationToken ct)
@@ -298,9 +397,11 @@ public sealed class DownloadService
         return new ImportRunSummary(0, 0, 1, 0, error);
     }
 
-    /// <summary>Retries a failed import: Failed + ImportFailed goes back to Completed and the job is
-    /// imported again (real import, never dry-run for a retry — the operator asked for the import).
-    /// Any other status is refused.</summary>
+    /// <summary>Retries a failed import by applying its latest stored preview. A retry without a
+    /// preview is refused: the operator previews first, then retries, so a retry can never import
+    /// around the preview-and-confirmation model. A stale preview surfaces as
+    /// StalePreviewException (the endpoint turns that into a 409 with a fresh preview).
+    /// Any status other than Failed + ImportFailed is refused.</summary>
     public async Task<ImportRunSummary> RetryImportAsync(int jobId, CancellationToken ct)
     {
         var mediaRoot = await _settings.GetAsync(SettingKeys.MediaRoot, ct);
@@ -312,13 +413,53 @@ public sealed class DownloadService
             ?? throw new ArgumentException("Download job not found");
         if (job.Status != DownloadStatus.Failed || !job.ImportFailed)
             throw new ArgumentException("Only a failed import can be retried");
-        job.Status = DownloadStatus.Completed;
-        job.Error = null;
-        job.UpdatedAt = _time.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        var summary = await ImportJobAsync(db, job, dryRun: false, mediaRoot, torrentRoot, ct);
-        await db.SaveChangesAsync(ct);
-        return summary with { Message = $"Imported {summary.Imported} file(s), {summary.Failed} failed" };
+        var preview = await db.ImportPreviews.Where(p => p.DownloadJobId == jobId).OrderByDescending(p => p.Id).FirstOrDefaultAsync(ct)
+            ?? throw new ArgumentException("Generate an import preview for this download first; retry applies the latest preview");
+        var before = (await db.ImportRecords.Where(r => r.DownloadJobId == jobId).Select(r => r.Id).ToListAsync(ct)).ToHashSet();
+        await ApplyPreviewAsync(jobId, preview.Id, ct);
+        await using var afterDb = await _db.CreateDbContextAsync(ct);
+        var fresh = await afterDb.ImportRecords.Where(r => r.DownloadJobId == jobId && !before.Contains(r.Id)).ToListAsync(ct);
+        var imported = fresh.Count(r => r.Success && r.Action is ImportAction.Hardlink or ImportAction.Copy or ImportAction.Skipped);
+        var failed = fresh.Count(r => !r.Success && r.Action == ImportAction.Failed);
+        var unmatched = fresh.Count(r => r.Action == ImportAction.Unmatched);
+        var deferred = fresh.Any(r => r.Action == ImportAction.Deferred);
+        var msg = $"Retried import: {imported} file(s) imported, {failed} failed";
+        if (unmatched > 0) msg += $", {unmatched} imported but unmatched to any episode";
+        if (deferred) msg += "; some files deferred";
+        return new ImportRunSummary(0, imported, failed, 0, msg);
+    }
+
+    public sealed record BulkApplyResult(int Applied, int SkippedNoPreview, int SkippedStale, int Failed, string Message);
+
+    /// <summary>Production bulk import: applies only Completed jobs that already have a stored
+    /// preview (their latest), never imports a job without one. Jobs without previews and jobs
+    /// whose preview went stale are counted as skipped, not imported.</summary>
+    public async Task<BulkApplyResult> ApplyApprovedAsync(CancellationToken ct)
+    {
+        var mediaRoot = await _settings.GetAsync(SettingKeys.MediaRoot, ct);
+        var torrentRoot = await _settings.GetAsync(SettingKeys.TorrentRoot, ct);
+        if (string.IsNullOrWhiteSpace(mediaRoot) || string.IsNullOrWhiteSpace(torrentRoot))
+            return new BulkApplyResult(0, 0, 0, 0, "Set the media root and torrent root paths in Settings before importing");
+        await using var db = await _db.CreateDbContextAsync(ct);
+        var jobs = await db.DownloadJobs.Where(j => j.Status == DownloadStatus.Completed).ToListAsync(ct);
+        int applied = 0, noPreview = 0, stale = 0, failed = 0;
+        foreach (var job in jobs)
+        {
+            var preview = await db.ImportPreviews.Where(p => p.DownloadJobId == job.Id).OrderByDescending(p => p.Id).FirstOrDefaultAsync(ct);
+            if (preview is null) { noPreview++; continue; }
+            try
+            {
+                await ApplyPreviewAsync(job.Id, preview.Id, ct);
+                await using var check = await _db.CreateDbContextAsync(ct);
+                var after = await check.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == job.Id, ct);
+                if (after.Status == DownloadStatus.Failed && after.ImportFailed) failed++;
+                else applied++;
+            }
+            catch (StalePreviewException) { stale++; }
+            catch (ArgumentException) { failed++; }
+        }
+        var msg = $"Applied {applied} job(s) with approved previews; {noPreview} skipped (no import preview); {stale} skipped (preview stale — re-preview first); {failed} failed";
+        return new BulkApplyResult(applied, noPreview, stale, failed, msg);
     }
 
     private async Task MarkHaveFileAsync(OneArrDbContext db, DownloadJob job, MediaItem media, HashSet<int> matchedEpisodeIds, CancellationToken ct)
@@ -378,6 +519,7 @@ public sealed class DownloadService
         var preview = await db.ImportPreviews.FirstOrDefaultAsync(p => p.Id == previewId && p.DownloadJobId == jobId, ct)
             ?? throw new ArgumentException("Import preview not found for this download");
         var stored = JsonSerializer.Deserialize<List<ImportPlanDto>>(preview.PlansJson) ?? [];
+        if (stored.Count == 0) throw new ArgumentException("Cannot apply an empty import preview");
         var (job, fresh) = await PlanJobAsync(db, jobId, ct);
         var freshBySource = fresh.ToDictionary(p => p.SourcePath, StringComparer.OrdinalIgnoreCase);
 
@@ -387,7 +529,7 @@ public sealed class DownloadService
         var mismatch = false;
         foreach (var plan in stored)
         {
-            if (!freshBySource.TryGetValue(plan.SourcePath, out var now) || now.DestinationPath != plan.DestinationPath || now.SizeBytes != plan.SizeBytes || now.LastWriteUtcTicks != plan.LastWriteUtcTicks || now.PlannedAction != plan.PlannedAction)
+            if (!freshBySource.TryGetValue(plan.SourcePath, out var now) || now.DestinationPath != plan.DestinationPath || now.SizeBytes != plan.SizeBytes || now.LastWriteUtcTicks != plan.LastWriteUtcTicks || now.PlannedAction != plan.PlannedAction || !now.MatchedEpisodeIds.SequenceEqual(plan.MatchedEpisodeIds))
             {
                 mismatch = true;
                 break;
@@ -408,10 +550,11 @@ public sealed class DownloadService
         {
             throw new ArgumentException("Root folder is outside the configured media root");
         }
-        int imported = 0, failed = 0;
+        int imported = 0, failed = 0, unmatched = 0;
         var jobFailed = false;
         var jobDeferred = false;
         var matchedEpisodeIds = new HashSet<int>();
+        var importedFiles = new List<(string Dest, List<int> Episodes)>();
         foreach (var plan in stored)
         {
             if (plan.PlannedAction is "reject" or "defer")
@@ -428,7 +571,7 @@ public sealed class DownloadService
             ImportOutcome outcome;
             try
             {
-                outcome = await _importer.ImportAsync(new ImportRequest(plan.SourcePath, destRoot, relFolder, torrentRoot, dryRun: false, job.Id), ct);
+                outcome = await _importer.ImportAsync(new ImportRequest(plan.SourcePath, destRoot, relFolder, torrentRoot, DryRun: false, job.Id), ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -444,17 +587,42 @@ public sealed class DownloadService
             if (outcome.Action is ImportAction.Hardlink or ImportAction.Copy or ImportAction.Skipped)
             {
                 imported++;
-                foreach (var ep in MatchedEpisodes(db, media, job, plan.SourcePath)) matchedEpisodeIds.Add(ep);
+                foreach (var ep in plan.MatchedEpisodeIds) matchedEpisodeIds.Add(ep);
+                importedFiles.Add((outcome.DestinationPath, plan.MatchedEpisodeIds));
+                if (media.MediaType == MediaType.Series && job.EpisodeId is null && plan.MatchedEpisodeIds.Count == 0)
+                {
+                    unmatched++;
+                    await AddUnmatchedRecordAsync(db, job.Id, plan.SourcePath, outcome.DestinationPath, ct);
+                }
             }
         }
         if (!jobDeferred)
         {
             var tracked = await db.DownloadJobs.FirstAsync(j => j.Id == job.Id, ct);
-            tracked.Status = jobFailed ? DownloadStatus.Failed : DownloadStatus.Imported;
-            tracked.ImportFailed = jobFailed;
-            tracked.Error = jobFailed ? "One or more files failed to import; see import records" : null;
             tracked.UpdatedAt = _time.GetUtcNow();
-            if (!jobFailed) await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
+            if (jobFailed)
+            {
+                tracked.Status = DownloadStatus.Failed;
+                tracked.ImportFailed = true;
+                tracked.Error = "One or more files failed to import; see import records";
+            }
+            else
+            {
+                await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
+                await LinkImportedFilesAsync(db, media, importedFiles, ct);
+                if (unmatched > 0)
+                {
+                    tracked.Status = DownloadStatus.Completed;
+                    tracked.ImportFailed = false;
+                    tracked.Error = $"{unmatched} file(s) imported but unmatched to any episode; see import records";
+                }
+                else
+                {
+                    tracked.Status = DownloadStatus.Imported;
+                    tracked.ImportFailed = false;
+                    tracked.Error = null;
+                }
+            }
         }
         await db.SaveChangesAsync(ct);
         return new ImportPreviewDto(preview.Id, job.Id, preview.CreatedAt, stored, preview.Fingerprint);
@@ -464,6 +632,11 @@ public sealed class DownloadService
     {
         var job = await db.DownloadJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
             ?? throw new ArgumentException("Download job not found");
+        // Only a download that completed can be previewed: Completed, or Failed with ImportFailed
+        // (a completed download whose import failed, previewed for retry). Queued, downloading,
+        // missing, download-failed, and already-imported jobs are refused.
+        if (job.Status != DownloadStatus.Completed && !(job.Status == DownloadStatus.Failed && job.ImportFailed))
+            throw new ArgumentException("Only a completed download can be previewed");
         var mediaRoot = await _settings.GetAsync(SettingKeys.MediaRoot, ct);
         var torrentRoot = await _settings.GetAsync(SettingKeys.TorrentRoot, ct);
         if (string.IsNullOrWhiteSpace(mediaRoot) || string.IsNullOrWhiteSpace(torrentRoot))
@@ -488,6 +661,8 @@ public sealed class DownloadService
         {
             plans.Add(await PlanFileAsync(file, destRoot, relFolder, torrentRoot, media, job, episodes, ct));
         }
+        if (plans.Count == 0)
+            throw new ArgumentException("No media files found in the completed download; nothing to preview");
         return (job, plans);
     }
 
@@ -511,6 +686,10 @@ public sealed class DownloadService
                 }
             }
         }
+        // A series pack file with no episode match must say so in the preview: it will import
+        // without linking an episode, and the job will stay unresolved rather than fully Imported.
+        var unmatchedNote = media.MediaType == MediaType.Series && job.EpisodeId is null && labels.Count == 0
+            ? " (no episode matched; will import without linking an episode)" : "";
         string? dest = null;
         try
         {
@@ -526,11 +705,11 @@ public sealed class DownloadService
             if (File.Exists(dest))
             {
                 if (await SafeImporter.SameContentAsync(source, dest, ct))
-                    return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), "skip", "Already imported with identical content", false, SafeImporter.IsSameVolume(source, dest), labels, labelTexts);
+                    return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), "skip", "Already imported with identical content" + unmatchedNote, false, SafeImporter.IsSameVolume(source, dest), labels, labelTexts);
                 return Reject(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, labels, labelTexts, "Destination exists with different content; not overwriting", conflict: true);
             }
             var sameVolume = SafeImporter.IsSameVolume(source, dest);
-            return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), sameVolume ? "hardlink" : "copy", sameVolume ? "Hardlink on the same volume" : "Copy to a different volume (verified, SHA-256)", false, sameVolume, labels, labelTexts);
+            return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), sameVolume ? "hardlink" : "copy", (sameVolume ? "Hardlink on the same volume" : "Copy to a different volume (verified, SHA-256)") + unmatchedNote, false, sameVolume, labels, labelTexts);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or ArgumentException or NotSupportedException or IOException)
         {
@@ -544,7 +723,7 @@ public sealed class DownloadService
     private static string Fingerprint(List<ImportPlanDto> plans)
     {
         var lines = plans.OrderBy(p => p.SourcePath, StringComparer.OrdinalIgnoreCase)
-            .Select(p => $"{p.SourcePath}|{p.SizeBytes}|{p.LastWriteUtcTicks}|{p.DestinationPath}|{p.PlannedAction}");
+            .Select(p => $"{p.SourcePath}|{p.SizeBytes}|{p.LastWriteUtcTicks}|{p.DestinationPath}|{p.PlannedAction}|{string.Join(",", p.MatchedEpisodeIds)}");
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", lines)));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
