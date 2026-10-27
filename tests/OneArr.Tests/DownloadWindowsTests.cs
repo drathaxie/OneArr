@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.EntityFrameworkCore;
+using OneArr.Application;
 using OneArr.Domain;
 using OneArr.Infrastructure.Files;
 using OneArr.Infrastructure.Services;
@@ -64,7 +65,7 @@ public class DownloadWindowsTests
         Run("cmd.exe", $"/c mklink /J \"{linked}\" \"{outside}\"");
         var importer = new SafeImporter(TimeSpan.Zero);
         var outcome = await importer.ImportAsync(new ImportRequest(
-            Path.Combine(linked, "Show - S01E01.mkv"), Path.Combine(tree.Media, "tv"), "Show\\Season 01", tree.Torrents, dryRun: false, null), default);
+            Path.Combine(linked, "Show - S01E01.mkv"), Path.Combine(tree.Media, "tv"), "Show\\Season 01", tree.Torrents, DryRun: false, null), default);
         Assert.Equal(ImportAction.Failed, outcome.Action);
         Assert.False(outcome.Success);
         Assert.Contains("link", outcome.Message, StringComparison.OrdinalIgnoreCase);
@@ -93,8 +94,8 @@ public class DownloadWindowsTests
         }
         var summary = await world.Downloads.ImportCompletedAsync(dryRun: false, default);
         Assert.Equal(1, summary.Imported);
-        await using var db = world.Db.CreateDbContext();
-        Assert.True((await db.MediaItems.AsNoTracking().FirstAsync(m => m.Id == movieId)).HasFile);
+        await using var db2 = world.Db.CreateDbContext();
+        Assert.True((await db2.MediaItems.AsNoTracking().FirstAsync(m => m.Id == movieId)).HasFile);
         Assert.True(File.Exists(file), "Source must survive import");
     }
 }

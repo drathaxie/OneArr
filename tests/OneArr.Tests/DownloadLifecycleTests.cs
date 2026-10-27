@@ -282,8 +282,8 @@ public class DownloadLifecycleTests
         var retry = await world.Downloads.RetryImportAsync(jobId, default);
         Assert.Equal(0, retry.Failed);
         Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
-        await using var db = world.Db.CreateDbContext();
-        var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
+        await using var db2 = world.Db.CreateDbContext();
+        var eps = await db2.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
         Assert.True(eps[0].HasFile);
         Assert.True(eps[1].HasFile);
     }
@@ -420,8 +420,8 @@ public class DownloadLifecycleTests
             AgeFile(world.Dirs.WriteFile($"torrents/Show/{name}", "bytes"));
         await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Completed, 1, "aa01", Path.Combine(world.Dirs.Torrents, "Show"));
         await world.Downloads.ImportCompletedAsync(dryRun: false, default);
-        await using var db = world.Db.CreateDbContext();
-        var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
+        await using var db2 = world.Db.CreateDbContext();
+        var eps = await db2.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
         Assert.True(eps[1].HasFile, "The file was imported, so the episode has a file");
         Assert.False(eps[1].Monitored, "But importing must never flip a monitoring exception");
         var media = new MediaService(world.Db, new StubMetadata(), world.Time);
