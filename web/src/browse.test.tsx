@@ -51,7 +51,10 @@ describe("poster grid", () => {
     // Arrival appears twice: once in its poster fallback and once in its card title.
     expect(screen.getAllByText("Arrival").length).toBe(2);
     expect(document.querySelectorAll("span.badge.ok").length).toBe(1);
-    expect(document.querySelectorAll("span.badge.bad").length).toBe(1);
+    // Arrival is unmonitored, so its headline is Unmonitored, not Missing: the missing file
+    // is secondary information ("No file"), not a red badge competing with the state.
+    expect(document.querySelectorAll("span.badge.bad").length).toBe(0);
+    expect(screen.getByText("No file")).toBeTruthy();
     expect(screen.getAllByText("Monitored").length).toBeGreaterThan(1);
     expect(screen.getAllByText("Unmonitored").length).toBeGreaterThan(1);
     // Dune has a poster image; Arrival has none and gets the title fallback.

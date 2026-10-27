@@ -44,13 +44,17 @@ afterEach(() => {
 });
 
 describe("settings navigation", () => {
-  it("shows an overview of every category and opens one from its card", async () => {
+  it("shows an overview of every category and navigates via the sidebar only", async () => {
     render(<Settings />);
     await screen.findByRole("heading", { name: "Settings" });
     for (const label of ["Media Management", "Profiles", "Indexers", "Download Clients", "Metadata", "Automation", "Migration", "General", "UI"]) {
       expect(screen.getByRole("heading", { name: label })).toBeTruthy();
     }
-    fireEvent.click(screen.getByRole("button", { name: "Open Profiles" }));
+    // The overview is orientation, not navigation: it lists what each category contains, and
+    // there is no per-card Open button duplicating the sidebar.
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    expect(screen.getByText("Quality profiles")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Profiles" }));
     await screen.findByRole("heading", { name: "Quality profiles" });
   });
 

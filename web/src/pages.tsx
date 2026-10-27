@@ -16,6 +16,27 @@ function seriesAvailability(item: MediaItem): string {
   return item.availability ?? "Unknown";
 }
 
+/** Primary operational state, kept separate from physical availability on purpose.
+ * An unmonitored title is never headlined Missing or Complete: monitoring is the
+ * operational state, availability is secondary information (an unmonitored title with no
+ * file is deliberately unwatched, not wanted). Monitored titles keep the availability
+ * badge as primary, with Monitored alongside. Presentation only: the server's
+ * availability, counts, and Wanted eligibility are untouched. */
+function primaryStatus(
+  item: Pick<MediaItem, "monitored" | "hasFile" | "availability" | "availableEpisodes" | "applicableEpisodes">,
+  kind: "movie" | "series",
+): { badge: string; badgeClass: string; secondary: string | null } {
+  const avail = kind === "series" ? (item.availability ?? "Unknown") : item.hasFile ? "Available" : "Missing";
+  if (item.monitored) return { badge: avail, badgeClass: availabilityClass(avail), secondary: null };
+  if (kind === "series") {
+    const secondary = item.applicableEpisodes != null && item.applicableEpisodes > 0
+      ? `${avail} · ${item.availableEpisodes ?? 0} / ${item.applicableEpisodes} episodes available`
+      : avail === "Unknown" ? "Episode data insufficient to classify" : avail;
+    return { badge: "Unmonitored", badgeClass: "badge", secondary };
+  }
+  return { badge: "Unmonitored", badgeClass: "badge", secondary: item.hasFile ? "File available" : "No file" };
+}
+
 export function Dashboard() {
   const { data, error } = useLoad<any>("/api/dashboard");
   return (
@@ -40,12 +61,12 @@ export function Dashboard() {
         <div className="card" style={{ marginTop: "1rem" }}>
           <h2>Recent background jobs</h2>
           {data.recentJobs.length === 0 ? <p className="muted">No jobs have run yet.</p> : (
-            <table><thead><tr><th>Job</th><th>Started</th><th>Result</th></tr></thead><tbody>
+            <div className="table-wrap"><table><thead><tr><th>Job</th><th>Started</th><th>Result</th></tr></thead><tbody>
               {data.recentJobs.map((j: any, i: number) => (
                 <tr key={i}><td>{j.name}</td><td>{new Date(j.startedAt).toLocaleString()}</td>
                   <td><span className={j.success ? "badge ok" : "badge bad"}>{j.success ? "ok" : "failed"}</span> {j.message}</td></tr>
               ))}
-            </tbody></table>
+            </tbody></table></div>
           )}
         </div>
       )}
@@ -131,8 +152,8 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
       {showAdd && <AddMediaDialog kind={kind} profiles={profiles ?? []} onAdded={() => { setShowAdd(false); reload(); }} onClose={() => setShowAdd(false)} />}
       <ErrorLine message={error ?? message} />
       <div className="card">
-        <div className="row">
-          <input aria-label={`Search ${label}`} placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 200 }} />
+        <div className="toolbar">
+          <input aria-label={`Search ${label}`} placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "title" | "year" | "status")}>
             <option value="title">Sort: title</option>
             <option value="year">Sort: year (newest)</option>
@@ -145,7 +166,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
             <option value="monitored">Monitored</option>
             <option value="unmonitored">Unmonitored</option>
           </select>
-          <div className="row" style={{ marginLeft: "auto" }}>
+          <div className="toolbar-actions">
             <button className={view === "grid" ? "small primary" : "small"} onClick={() => setViewMode("grid")}>Posters</button>
             <button className={view === "list" ? "small primary" : "small"} onClick={() => setViewMode("list")}>List</button>
           </div>
@@ -156,7 +177,9 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
       {items && items.length > 0 && filtered.length === 0 && <p className="muted">No titles match the current search and filter.</p>}
       {view === "grid" && filtered.length > 0 && (
         <div className="poster-grid">
-          {filtered.map((item) => (
+          {filtered.map((item) => {
+            const status = primaryStatus(item, kind);
+            return (
             <article key={item.id} className="poster-card">
               <button className="poster-button" onClick={() => setDetailId(item.id)} aria-label={`Open ${item.title}`}>
                 <Poster item={item} />
@@ -165,49 +188,55 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
                 <strong className="poster-title" title={item.title} onClick={() => setDetailId(item.id)} style={{ cursor: "pointer" }}>{item.title}</strong>
                 <div className="muted">{item.year ?? ""}</div>
                 <div className="row" style={{ marginTop: ".25rem" }}>
-                  {kind === "movie"
-                    ? <span className={item.hasFile ? "badge ok" : "badge bad"}>{item.hasFile ? "Available" : "Missing"}</span>
-                    : <span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}</span>}
-                  <span className="badge">{item.monitored ? "Monitored" : "Unmonitored"}</span>
+                  <span className={status.badgeClass}>{status.badge}</span>
+                  {item.monitored && <span className="badge">Monitored</span>}
                 </div>
-                {kind === "series" && item.applicableEpisodes != null && item.applicableEpisodes > 0 && (
-                  <div className="muted" style={{ fontSize: ".85rem" }}>{item.availableEpisodes ?? 0} / {item.applicableEpisodes} monitored aired episodes available</div>
+                {status.secondary && <div className="muted poster-meta">{status.secondary}</div>}
+                {item.monitored && kind === "series" && item.applicableEpisodes != null && item.applicableEpisodes > 0 && (
+                  <div className="muted poster-meta">{item.availableEpisodes ?? 0} / {item.applicableEpisodes} monitored aired episodes available</div>
                 )}
-                {kind === "series" && (item.applicableEpisodes == null || item.applicableEpisodes === 0) && (
-                  <div className="muted" style={{ fontSize: ".85rem" }}>Episode data insufficient to classify</div>
+                {item.monitored && kind === "series" && (item.applicableEpisodes == null || item.applicableEpisodes === 0) && (
+                  <div className="muted poster-meta">Episode data insufficient to classify</div>
                 )}
-                <div className="muted" style={{ fontSize: ".85rem" }}>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
-                <div className="row" style={{ marginTop: ".25rem" }}>
+                <div className="muted poster-meta">{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
+                <div className="row card-actions">
                   <button className="small" onClick={() => toggle(item)}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
                   <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
       {view === "list" && filtered.length > 0 && (
         <div className="card table-wrap">
           <table>
-            <thead><tr><th /><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>File</th><th /></tr></thead>
+            <thead><tr><th /><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {filtered.map((item) => (
+              {filtered.map((item) => {
+                const status = primaryStatus(item, kind);
+                return (
                 <tr key={item.id}>
                   <td><Poster item={item} size="thumb" /></td>
                   <td><button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(item.id)}>{item.title}</button></td>
                   <td>{item.year ?? ""}</td>
                   <td><button className="small" onClick={() => toggle(item)}>{item.monitored ? "Yes" : "No"}</button></td>
                   <td>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</td>
-                  <td>{kind === "movie"
-                    ? (item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>)
-                    : (<span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}{item.applicableEpisodes != null && item.applicableEpisodes > 0 ? ` ${item.availableEpisodes ?? 0}/${item.applicableEpisodes}` : ""}</span>)}</td>
+                  <td>{item.monitored
+                    ? (kind === "movie"
+                      ? (item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>)
+                      : (<span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}{item.applicableEpisodes != null && item.applicableEpisodes > 0 ? ` ${item.availableEpisodes ?? 0}/${item.applicableEpisodes}` : ""}</span>))
+                    : (<><span className="badge">Unmonitored</span>{status.secondary && <div className="muted">{status.secondary}</div>}</>)}
+                  </td>
                   <td className="row">
                     <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
                     <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
                     <button className="small danger" onClick={() => remove(item)}>Remove</button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -253,7 +282,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   // Availability comes from the server: monitored, aired episodes only. A series with one downloaded
   // episode is never Complete just because its series-level HasFile flag is true, and unaired or
   // unmonitored episodes never count as missing.
-  const fileStatus = data.availability ?? (isSeries ? "Unknown" : data.hasFile ? "Available" : "Missing");
+  const detailStatus = primaryStatus(data, isSeries ? "series" : "movie");
 
   return (
     <>
@@ -267,15 +296,16 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           <h2>{data.title} {data.year ? `(${data.year})` : ""}</h2>
           <p>{data.overview || <span className="muted">No overview available.</span>}</p>
           <div className="row">
-            <span className={availabilityClass(fileStatus)}>{fileStatus}</span>
-            <span className="badge">{data.monitored ? "Monitored" : "Unmonitored"}</span>
+            <span className={detailStatus.badgeClass}>{detailStatus.badge}</span>
+            {data.monitored && <span className="badge">Monitored</span>}
             <span className="badge">{profiles.find((p) => p.id === data.qualityProfileId)?.name ?? data.qualityProfileId}</span>
             {isSeries && <span className="badge">Wanted episodes: {wantedEpisodes}</span>}
           </div>
-          {isSeries && data.applicableEpisodes != null && data.applicableEpisodes > 0 && (
+          {detailStatus.secondary && <p className="muted">{detailStatus.secondary}</p>}
+          {data.monitored && isSeries && data.applicableEpisodes != null && data.applicableEpisodes > 0 && (
             <p className="muted">{data.availableEpisodes ?? 0} / {data.applicableEpisodes} monitored aired episodes available</p>
           )}
-          {isSeries && (data.applicableEpisodes == null || data.applicableEpisodes === 0) && (
+          {data.monitored && isSeries && (data.applicableEpisodes == null || data.applicableEpisodes === 0) && (
             <p className="muted">Episode data insufficient to classify availability.</p>
           )}
           <p className="muted">Root folder: <code>{data.rootFolder}</code>{data.legacyPath ? <> · imported from <code>{data.legacyPath}</code> ({data.legacySource})</> : ""}</p>
@@ -648,8 +678,8 @@ export function Wanted() {
           without a file are deliberately unmonitored, not wanted. If those numbers look wrong, check the series or season
           monitored state in its detail view, or run the monitoring sync on Migration.
         </p>
-        <div className="row">
-          <input aria-label="Search wanted" placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 200 }} />
+        <div className="toolbar">
+          <input aria-label="Search wanted" placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <select aria-label="Wanted type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
             <option value="all">Movies + episodes</option>
             <option value="movies">Movies only</option>
@@ -891,7 +921,7 @@ export function Activity() {
             {previewBusy && <p className="muted">Planning import…</p>}
             {preview && preview.plans.length === 0 && <p className="muted">No media files found for this download.</p>}
             {preview && preview.plans.length > 0 && (
-              <table><thead><tr><th>File</th><th>Destination</th><th>Size</th><th>Plan</th><th>Episodes</th><th>Reason</th></tr></thead><tbody>
+              <div className="table-wrap"><table><thead><tr><th>File</th><th>Destination</th><th>Size</th><th>Plan</th><th>Episodes</th><th>Reason</th></tr></thead><tbody>
                 {preview.plans.map((p) => (
                   <tr key={p.sourcePath}>
                     <td>{fileNameOf(p.sourcePath)}</td>
@@ -902,7 +932,7 @@ export function Activity() {
                     <td className="muted">{p.reason}</td>
                   </tr>
                 ))}
-              </tbody></table>
+              </tbody></table></div>
             )}
             {preview && preview.plans.length > 0 && (
               <div className="row">
