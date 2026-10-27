@@ -149,7 +149,13 @@ public sealed class SafeImporter : IImporter
         var full = Path.GetFullPath(candidate);
         if (!full.StartsWith(rootFull, PathComparison))
             throw new UnauthorizedAccessException("Path is outside the allowed root");
-        return full;
+        // Rebuild from the configured root so the root portion always carries the root's
+        // casing: on Windows a client may report d:\downloads while the root is configured
+        // as D:\Downloads, and the same file must always map to the same string. The part
+        // below the root keeps the candidate's casing, which the filesystem resolves
+        // case-insensitively on Windows and case-sensitively elsewhere (where the check
+        // above already required an exact-case match).
+        return rootFull + full.Substring(rootFull.Length);
     }
 
     /// <summary>

@@ -295,6 +295,23 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   the Completed job untouched, writes no file, and creates no import records. On the old
   code this test fails, because the pass would have physically imported.
 
+### Run #80 verdict (head fe9fb47): EF fix confirmed, one Windows filesystem failure
+
+- Linux: Success. Windows backend cross-platform: 267/267 passed, frontend 27/27 passed,
+  and the log shows zero pending-model-changes and zero onearr.lock errors — the EF fix
+  holds on both platforms. Packaging and Windows acceptance were skipped (never ran).
+- The run's only failure is `DownloadWindowsTests.SiblingDirectory_WithSharedPrefix_IsRejected`:
+  expected `D:\Downloads\Show\file.mkv`, got `d:\downloads\Show\file.mkv`. Root cause: the
+  test (new in PR #6, previously masked because earlier runs never reached the Windows
+  filesystem step) expects `CanonicalUnder` to return the path with the configured root's
+  casing when the candidate arrives lowercase; the implementation returned the candidate
+  as given. `CanonicalUnder` itself is unchanged since PR #5 — the test's expectation was
+  never satisfied. Fix (not a test weakening): `CanonicalUnder` now rebuilds the result
+  from the configured root, so the root portion always carries the root's casing and the
+  same file maps to the same string regardless of how the client cased the drive/root.
+  The part below the root keeps the candidate's casing. No other `CanonicalUnder`
+  assertion is affected (the cross-platform suite only asserts the sibling rejection).
+
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 
 - No client picker on grab (first enabled client), no multi-client category mapping UI, no
