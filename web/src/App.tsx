@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, getToken, setToken } from "./api";
-import { Dashboard, Movies, Series, Wanted, Queue, Settings, Migration } from "./pages";
+import { Dashboard, Movies, Series, Wanted, Activity, Settings, Migration } from "./pages";
 
-type Page = "dashboard" | "movies" | "series" | "wanted" | "queue" | "settings" | "migration";
+type Page = "dashboard" | "movies" | "series" | "wanted" | "activity" | "settings" | "migration";
 
 const NAV: { id: Page; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "movies", label: "Movies" },
   { id: "series", label: "Series" },
   { id: "wanted", label: "Wanted" },
-  { id: "queue", label: "Queue" },
+  { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
   { id: "migration", label: "Migration Preview" },
 ];
@@ -43,7 +43,7 @@ export function App() {
         {page === "movies" && <Movies />}
         {page === "series" && <Series />}
         {page === "wanted" && <Wanted />}
-        {page === "queue" && <Queue />}
+        {page === "activity" && <Activity />}
         {page === "settings" && <Settings />}
         {page === "migration" && <Migration />}
       </main>

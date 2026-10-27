@@ -100,7 +100,7 @@ public sealed record ReleaseDecision(
     int Score,
     IReadOnlyList<string> Reasons);
 
-public sealed record DownloadClientItem(string Hash, string Name, string State, double Progress, string? ContentPath, string Category, long Size);
+public sealed record DownloadClientItem(string Hash, string Name, string State, double Progress, string? ContentPath, string Category, long Size, long DownloadSpeedBps = 0, long EtaSeconds = -1);
 
 public sealed record ImportRequest(
     string SourcePath,

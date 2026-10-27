@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, formatBytes, posterUrl, type Job, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult, type SettingsData } from "./api";
+import { api, ApiError, formatBytes, posterUrl, type HistoryEntry, type ImportPreview, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type Problem, type QualityProfile, type QueueData, type ReleaseResult, type SettingsData } from "./api";
 import { ErrorLine, useLoad } from "./common";
 
 export { Settings } from "./settings";
@@ -710,53 +710,209 @@ export function Wanted() {
   );
 }
 
-export function Queue() {
-  const { data: jobs, error, reload } = useLoad<Job[]>("/api/queue");
-  const { data: imports } = useLoad<any[]>("/api/imports");
-  const [message, setMessage] = useState<string | null>(null);
+function formatSpeed(bps: number): string {
+  if (!bps || bps <= 0) return "—";
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} MB/s`;
+  if (bps >= 1_000) return `${(bps / 1_000).toFixed(0)} KB/s`;
+  return `${bps} B/s`;
+}
 
-  async function run(label: string, path: string, confirmText?: string) {
+function formatEta(seconds: number): string {
+  if (seconds < 0) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function fileNameOf(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+// Activity: Queue, History, and Problems tabs over the same download jobs. Speed and ETA are
+// only ever shown when the client reported them; a dash means unknown, never an invented value.
+// Previewing an import never writes anything; applying one requires the preview id plus an
+// explicit confirmation, and a plan that changed since the preview is refused with a fresh one.
+export function Activity() {
+  const { data: queue, error, reload } = useLoad<QueueData>("/api/queue");
+  const { data: history, reload: reloadHistory } = useLoad<HistoryEntry[]>("/activity/history");
+  const { data: problems, reload: reloadProblems } = useLoad<Problem[]>("/activity/problems");
+  const { data: imports } = useLoad<any[]>("/api/imports");
+  const [tab, setTab] = useState<"queue" | "history" | "problems">("queue");
+  const [message, setMessage] = useState<string | null>(null);
+  const [previewJobId, setPreviewJobId] = useState<number | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+
+  async function run(label: string, path: string, body?: unknown, confirmText?: string) {
     if (confirmText && !confirm(confirmText)) return;
     setMessage(null);
     try {
-      const res = await api<any>("POST", path);
+      const res = await api<any>("POST", path, body);
       setMessage(res?.message ?? `${label} finished`);
-      reload();
+      reload(); reloadHistory(); reloadProblems();
     } catch (e) {
       setMessage((e as Error).message);
     }
   }
 
+  async function openPreview(jobId: number) {
+    setPreviewJobId(jobId);
+    setPreview(null);
+    setPreviewBusy(true);
+    setMessage(null);
+    try {
+      setPreview(await api<ImportPreview>("POST", `/api/queue/${jobId}/import-preview`));
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function applyPreview() {
+    if (!preview || !previewJobId) return;
+    if (!confirm("Apply this import? Source files are never deleted or modified; destinations are never overwritten.")) return;
+    setMessage(null);
+    try {
+      await api("POST", `/api/queue/${previewJobId}/import-apply`, { previewId: preview.previewId, confirmed: true });
+      setMessage("Import applied");
+      setPreview(null);
+      setPreviewJobId(null);
+      reload(); reloadHistory(); reloadProblems();
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.status === 409) {
+        const fresh = (err.data as { preview?: ImportPreview } | undefined)?.preview;
+        if (fresh) {
+          setPreview(fresh);
+          setMessage("The import plan changed since the preview. Review the fresh plan below before applying.");
+          return;
+        }
+      }
+      setMessage(err.message);
+    }
+  }
+
+  const jobs = queue?.jobs ?? [];
+  const clients = queue?.clients ?? [];
+  const unreachable = clients.filter((c) => c.lastError);
+
   return (
     <>
-      <h2>Queue</h2>
+      <h2>Activity</h2>
       <div className="row">
         <button onClick={() => run("Sync", "/api/queue/sync")}>Sync from qBittorrent</button>
         <button onClick={() => run("Dry run", "/api/import?dryRun=true")}>Import dry run</button>
-        <button className="danger" onClick={() => run("Import", "/api/import?dryRun=false", "Run a real import now? Files are hardlinked or verified-copied; source torrents are never deleted.")}>Import now</button>
+      </div>
+      <p className="muted">Real imports run per job: open a job&apos;s Preview, confirm, then Apply. A preview that was merely generated never authorizes an import.</p>
+      <div className="row" role="tablist" aria-label="Activity sections">
+        <button className={tab === "queue" ? "primary" : ""} onClick={() => setTab("queue")}>Queue</button>
+        <button className={tab === "history" ? "primary" : ""} onClick={() => setTab("history")}>History</button>
+        <button className={tab === "problems" ? "primary" : ""} onClick={() => setTab("problems")}>Problems{problems && problems.length > 0 ? ` (${problems.length})` : ""}</button>
       </div>
       <ErrorLine message={error ?? message} />
-      <div className="card table-wrap">
-        {jobs && jobs.length === 0 && <p className="muted">No downloads yet. Grab a release from the Movies or Series pages.</p>}
-        {jobs && jobs.length > 0 && (
-          <table>
-            <thead><tr><th>Release</th><th>Status</th><th>Client state</th><th>Progress</th><th>Category</th><th>Hash</th><th /></tr></thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id}>
-                  <td>{j.releaseTitle}{j.error && <div className="error">{j.error}</div>}</td>
-                  <td>{j.status}</td>
-                  <td>{j.clientState || "—"}</td>
-                  <td>{Math.round(j.progress * 100)}%</td>
-                  <td>{j.category}</td>
-                  <td className="muted">{j.hash ? j.hash.slice(0, 10) : "—"}</td>
-                  <td>{j.status === "Missing" && <button className="small" onClick={() => run("Clear missing", `/api/queue/${j.id}/clear-missing`, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}</td>
+      {unreachable.length > 0 && tab !== "problems" && (
+        <p className="error">Download client unreachable: {unreachable.map((c) => c.name).join(", ")}. Jobs on those clients are left untouched, not marked missing. See Problems.</p>
+      )}
+      {tab === "queue" && (
+        <div className="card table-wrap">
+          {jobs.length === 0 && <p className="muted">No downloads yet. Grab a release from the Movies or Series pages.</p>}
+          {jobs.length > 0 && (
+            <table>
+              <thead><tr><th>Release</th><th>Client</th><th>Status</th><th>Progress</th><th>Speed</th><th>ETA</th><th>Import</th><th /></tr></thead>
+              <tbody>
+                {jobs.map((j) => (
+                  <tr key={j.id}>
+                    <td>{j.releaseTitle}{j.error && <div className="error">{j.error}</div>}<div className="muted">{j.clientState || "—"} · {j.category}</div></td>
+                    <td>{j.clientName || "—"}</td>
+                    <td>{j.status}{j.importFailed ? " (import failed)" : ""}</td>
+                    <td>{Math.round(j.progress * 100)}%</td>
+                    <td>{formatSpeed(j.downloadSpeedBps)}</td>
+                    <td>{formatEta(j.etaSeconds)}</td>
+                    <td>{j.status === "Imported" ? "Imported" : j.importReady ? "Ready to import" : j.status === "Completed" ? "Completed" : "—"}</td>
+                    <td>
+                      <div className="row">
+                        {j.importReady && <button className="small primary" onClick={() => openPreview(j.id)}>Preview import</button>}
+                        {j.status === "Failed" && j.importFailed && <button className="small" onClick={() => run("Retry import", `/api/queue/${j.id}/retry-import`, undefined, "Retry this failed import? It imports again without deleting anything.")}>Retry import</button>}
+                        {j.status === "Missing" && <button className="small" onClick={() => run("Clear missing", `/api/queue/${j.id}/clear-missing`, undefined, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+      {tab === "history" && (
+        <div className="card table-wrap">
+          {history && history.length === 0 && <p className="muted">No activity yet.</p>}
+          {history && history.length > 0 && (
+            <table><thead><tr><th>When</th><th>Event</th><th>Detail</th></tr></thead><tbody>
+              {history.map((h, i) => (
+                <tr key={i}><td className="muted">{new Date(h.at).toLocaleString()}</td><td>{h.kind}</td><td>{h.title}</td></tr>
+              ))}
+            </tbody></table>
+          )}
+        </div>
+      )}
+      {tab === "problems" && (
+        <div className="card table-wrap">
+          {problems && problems.length === 0 && <p className="muted">No problems. Downloads, clients, and imports are all in a known-good state.</p>}
+          {problems && problems.length > 0 && (
+            <table><thead><tr><th>Problem</th><th>Detail</th><th /></tr></thead><tbody>
+              {problems.map((p, i) => (
+                <tr key={i}>
+                  <td>{p.title}</td>
+                  <td className="muted">{p.detail}</td>
+                  <td>
+                    <div className="row">
+                      {p.actions.includes("refresh") && <button className="small" onClick={() => run("Sync", "/api/queue/sync")}>Refresh state</button>}
+                      {p.actions.includes("preview") && p.jobId && <button className="small primary" onClick={() => openPreview(p.jobId!)}>Preview import</button>}
+                      {p.actions.includes("retry") && p.jobId && <button className="small" onClick={() => run("Retry import", `/api/queue/${p.jobId}/retry-import`, undefined, "Retry this failed import? It applies the latest import preview; generate a fresh preview first if the files changed. Nothing is deleted.")}>Retry failed import</button>}
+                      {p.actions.includes("clear-missing") && p.jobId && <button className="small" onClick={() => run("Clear missing", `/api/queue/${p.jobId}/clear-missing`, undefined, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}
+                    </div>
+                  </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            </tbody></table>
+          )}
+        </div>
+      )}
+      {previewJobId !== null && (
+        <div className="dialog-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) { setPreviewJobId(null); setPreview(null); } }}>
+          <div className="dialog card" role="dialog" aria-modal="true" aria-label="Import preview">
+            <div className="row spread">
+              <h2>Import preview</h2>
+              <button onClick={() => { setPreviewJobId(null); setPreview(null); }}>Close</button>
+            </div>
+            <p className="muted">A preview never moves, links, copies, renames, or deletes anything. Applying it requires confirmation below, and refuses if any file changed since this preview.</p>
+            {previewBusy && <p className="muted">Planning import…</p>}
+            {preview && preview.plans.length === 0 && <p className="muted">No media files found for this download.</p>}
+            {preview && preview.plans.length > 0 && (
+              <table><thead><tr><th>File</th><th>Destination</th><th>Size</th><th>Plan</th><th>Episodes</th><th>Reason</th></tr></thead><tbody>
+                {preview.plans.map((p) => (
+                  <tr key={p.sourcePath}>
+                    <td>{fileNameOf(p.sourcePath)}</td>
+                    <td className="muted">{p.destinationPath ?? "—"}</td>
+                    <td>{p.sizeBytes} B</td>
+                    <td>{p.plannedAction}{p.destinationConflict ? " (conflict)" : ""}{p.sameVolume ? " · same volume" : " · other volume"}</td>
+                    <td>{p.matchedEpisodeLabels.length > 0 ? p.matchedEpisodeLabels.join(", ") : "—"}</td>
+                    <td className="muted">{p.reason}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+            )}
+            {preview && preview.plans.length > 0 && (
+              <div className="row">
+                <button className="primary" onClick={applyPreview}>Apply import (confirmed)</button>
+                <span className="muted">Sources are never deleted; destinations are never overwritten.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="card table-wrap">
         <h2>Import records</h2>
         {imports && imports.length === 0 && <p className="muted">No import activity.</p>}

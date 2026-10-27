@@ -21,7 +21,7 @@ export function setToken(token: string | null): void {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public data?: unknown) {
     super(message);
   }
 }
@@ -42,7 +42,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) {
     if (res.status === 401) setToken(null);
-    throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`);
+    throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`, data);
   }
   return data as T;
 }
@@ -223,12 +223,76 @@ export interface ReleaseResult {
 
 export interface Job {
   id: number;
+  mediaItemId: number | null;
+  episodeId: number | null;
+  mediaType: string;
   releaseTitle: string;
   status: string;
   progress: number;
   clientState: string;
   category: string;
+  downloadClientId: number | null;
+  clientName: string;
+  downloadSpeedBps: number;
+  etaSeconds: number;
+  contentPath: string | null;
   hash: string | null;
   error: string | null;
+  importFailed: boolean;
+  importReady: boolean;
+  lastSeenAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
   updatedAt: string;
+}
+
+export interface QueueClient {
+  id: number;
+  name: string;
+  enabled: boolean;
+  lastSeenAt: string | null;
+  lastError: string | null;
+}
+
+export interface QueueData {
+  jobs: Job[];
+  clients: QueueClient[];
+}
+
+export interface HistoryEntry {
+  at: string;
+  kind: string;
+  title: string;
+  jobId: number | null;
+}
+
+export interface Problem {
+  kind: string;
+  title: string;
+  detail: string;
+  jobId: number | null;
+  clientId: number | null;
+  actions: string[];
+}
+
+export interface ImportPlan {
+  sourcePath: string;
+  destinationPath: string | null;
+  sizeBytes: number;
+  lastWriteUtcTicks: number;
+  mediaType: string;
+  plannedAction: string;
+  reason: string;
+  destinationConflict: boolean;
+  sameVolume: boolean;
+  matchedEpisodeIds: number[];
+  matchedEpisodeLabels: string[];
+}
+
+export interface ImportPreview {
+  previewId: number;
+  jobId: number;
+  createdAt: string;
+  plans: ImportPlan[];
+  fingerprint: string;
 }
