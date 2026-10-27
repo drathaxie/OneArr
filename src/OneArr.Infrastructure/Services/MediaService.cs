@@ -111,6 +111,32 @@ public sealed class MediaService
         return await db.MediaItems.AsNoTracking().Where(m => m.MediaType == type).OrderBy(m => m.Title).ToListAsync(ct);
     }
 
+    /// <summary>
+    /// One grouped query for every series' episode availability. Applicable means monitored with a known
+    /// air date on or before today; unaired episodes and unmonitored episodes (including per-episode
+    /// Sonarr exceptions inside a monitored season) never count as missing. A series with no episodes, or
+    /// with no applicable episode, is absent here and classifies as Unknown. This is deliberately not one
+    /// query per poster card: a 200-series library is one aggregate query, not 200.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, SeriesAvailability>> SeriesAvailabilityAsync(CancellationToken ct)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        var today = DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
+        var rows = await (from e in db.Episodes.AsNoTracking()
+                          join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
+                          where m.MediaType == MediaType.Series
+                          group e by e.MediaItemId into g
+                          select new
+                          {
+                              MediaItemId = g.Key,
+                              Applicable = g.Count(e => e.Monitored && e.AirDate != null && e.AirDate <= today),
+                              Available = g.Count(e => e.Monitored && e.AirDate != null && e.AirDate <= today && e.HasFile),
+                          }).ToListAsync(ct);
+        return rows.ToDictionary(
+            r => r.MediaItemId,
+            r => new SeriesAvailability(MediaDefaults.ClassifySeries(r.Available, r.Applicable), r.Available, r.Applicable));
+    }
+
     public async Task<MediaItem?> GetAsync(int id, CancellationToken ct)
     {
         await using var db = await _db.CreateDbContextAsync(ct);
@@ -326,3 +352,6 @@ public sealed record MonitoringChange(string Title, string Type, bool SeriesMoni
 public sealed record MonitoringSyncResult(IReadOnlyList<MonitoringChange> Changes, IReadOnlyList<string> UnmatchedTitles, int SkippedNoTmdb, int ItemsChecked, IReadOnlyList<string> EpisodesUnknownTitles);
 
 public sealed record WantedList(IReadOnlyList<MediaItem> Movies, IReadOnlyList<WantedEpisode> Episodes, int UnmonitoredMoviesWithoutFile = 0, int UnmonitoredEpisodesWithoutFile = 0, IReadOnlyDictionary<int, bool>? MovieHasActiveDownload = null);
+
+/// <summary>Episode-based series availability for one series: status plus the counts behind it.</summary>
+public sealed record SeriesAvailability(string Status, int AvailableEpisodes, int ApplicableEpisodes);

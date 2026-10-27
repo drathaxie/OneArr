@@ -7,6 +7,178 @@ Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
 
+## Windows acceptance checklist for Jesse's PC (NOT run in the sandbox — no Windows, no real library there)
+
+Run these against a release-shaped build of the PR #5 head, with the real library, before merging.
+Safety rules for every step: do NOT press Apply on any monitoring sync, do NOT move/rename/delete
+media files, keep imports dry-run until verified, and keep automatic grabbing OFF (Settings →
+Automation must read off before and after).
+
+1. **Install/startup.** Launch the published build (API + tray) from a fresh folder. Record: time from
+   launch to `/health` answering, and whether the tray icon appears and the dashboard opens.
+2. **Sign-in.** First-run setup, then log out and back in; confirm the password still works after a
+   full stop/restart (the CI acceptance run checks this on a throwaway config; this step checks it on
+   the real config).
+3. **Settings persistence.** Set a movie default root, a series default root, and a per-type default
+   profile in Settings → Media Management / Profiles. Stop, restart, and confirm all four values
+   read back unchanged. Do not toggle grabbing on for this check; only confirm the toggle reads OFF
+   and that a failed settings save (e.g. a relative path) leaves it OFF.
+4. **Series page at real scale (~205 series).** Scroll the poster grid end to end; record any
+   stutter, blank posters, or wrong badges. Spot-check: at least one Complete, one Partial, one
+   Missing, and one Unknown series, and confirm each classification against its episodes (monitored
+   + aired + file present, by hand, for one title each).
+5. **WWE/AEW monitoring exceptions.** Open the Details page for a WWE/AEW series with intentionally
+   unmonitored old episodes. Confirm: the unmonitored episodes do NOT count as missing, the Wanted
+   count excludes them, and no season toggle has flipped them to monitored. Do NOT run a sync Apply
+   to "fix" anything seen here.
+6. **Wanted counts.** Compare the Wanted view's counts against a manual count for one series
+   (monitored aired episodes without files). Confirm unmonitored and unaired episodes are excluded.
+7. **Add dialogs.** Open Add Series and Add Movie: confirm each prefills its OWN default root and
+   profile (series dialog must not show the movie root), and that with a default cleared the dialog
+   starts empty with guidance and a disabled Add button. Add nothing for real in this step, or add a
+   throwaway test title and remove it from OneArr afterwards (removal from OneArr only — no files).
+8. **Settings layout.** View Settings at a normal width and at ~800px narrow: sidebar must stack
+   above content, every category must open, Advanced toggle must hide/show path mappings and
+   connection tests only.
+9. **Files and paths.** Open Details → Files for a title with linked files; confirm the listed files
+   match disk and that nothing was moved, renamed, or rescanned destructively. Confirm the media
+   root in Settings still contains every title's root folder, or note any title that would now fail
+   closed on import.
+10. **Update/rollback.** Record the current installed version and config backup location before
+    replacing the build; after running the new build, confirm the old build + config restore still
+    starts (rollback path). Record release folder size and idle RAM/CPU from Task Manager (the CI
+    acceptance run reports idle private memory and CPU on a throwaway config; this step is the real
+    one).
+11. **Screenshots (genuine, from this run only).** Capture: (1) Settings overview + sidebar,
+    (2) Media Management + default roots, (3) Series page with real posters, (4) Add Series dialog,
+    (5) one Complete/Partial/Missing/Unknown card each, (6) Series Details with season/episode
+    monitoring toggles. Attach them to PR #5. No mockups, no cropped synthetic libraries.
+
+What CI already covers (so the PC run does not need to redo it): Linux + Windows backend tests
+(including the Windows filesystem regression suite), frontend vitest + build, a synthetic
+20,000-movie Windows library benchmark (timings, not Jesse's library), and the headless Windows
+acceptance run (startup, health, sign-in, settings persistence across restart, single-instance
+refusal, graceful shutdown, idle CPU/memory gates) — all on throwaway configs, never a real library.
+
+## PR #5 review fixes (branch `settings-ui-overhaul`, same PR, still open and unmerged)
+
+Both points from the PR #5 review were addressed; neither changes the UI architecture, and neither
+merges, publishes, or enables automatic grabbing.
+
+1. **No more shared-root fallback for adds.** `MediaDefaults.ResolveRoot` no longer takes a legacy
+   root at all: a per-type default, or empty. `POST /api/media` with no explicit root and no per-type
+   default now returns 400 naming the type and where to set the default, instead of silently landing a
+   series in `D:\Media\Movies` (or a movie in the TV folder) whenever that path was the shared root.
+   The Add dialog mirrors this: it starts empty when its type has no saved default, shows guidance
+   pointing at Settings → Media Management, keeps Add disabled until a folder is typed, and no longer
+   reads the legacy localStorage root at all. The media root itself stays as a real setting, relabelled
+   "Media root (imports must stay inside it)": it is the import containment root (imports fail closed
+   outside it), and Settings now says plainly that it is not an Add default. A title's root should sit
+   inside the media root, or its later imports will fail closed.
+2. **Settings saves are atomic.** `PUT /api/settings` now validates the entire request first (absolute
+   paths, profile existence) and only then commits everything with one new
+   `SettingsStore.SetManyAsync` call (one context, one SaveChanges). A failed field can no longer leave
+   earlier fields changed while returning an error — including the automatic-grabbing toggle, which is
+   the field where a half-applied save would be dangerous. The endpoint's request/response shape is
+   unchanged, and existing settings tests still pass against it.
+- New tests for these fixes (backend for CI, frontend executed here): `AvailabilityTests` ResolveRoot
+  cases now assert empty with no per-type default; `SettingsDefaultsApiTests.FailedPutWritesNothingIncludingGrabbing`
+  asserts a failed PUT (bad root, then bad profile id) leaves grabbing, torrent root, and series root
+  untouched; `add-dialog-defaults.test.tsx` asserts a series dialog with no series default but a
+  movies-looking shared root starts empty, shows the guidance, keeps Add disabled, and posts only the
+  typed folder. Frontend suite is now 24 passed, build 224 KB JS.
+
+## Settings & Library UI overhaul (branch `settings-ui-overhaul`, from main d81cdf9 — PR #4 merged)
+
+Note: PR #4 was merged into main (d81cdf9, tag v0.4.0) before this work started, so this branch is
+based on main and its PR targets main, not `visual-library`. Nothing here merges, publishes, or enables
+automatic grabbing; grabbing stays off by default and is only changeable from Settings → Automation.
+
+### Settings navigation (new `web/src/settings.tsx`)
+- Settings overview with a card per category, a persistent sidebar with expandable categories and
+  subsection links, clear active-section highlighting, and a Show Advanced / Hide Advanced toggle
+  (stored in localStorage `onearr.advanced`, default on). Advanced items are path mappings and
+  connection tests; hiding them never removes the underlying functionality. Below 860px the sidebar
+  stacks above the content. Theme handling is unchanged (system theme; dark when the system is dark).
+- Categories, all backed by existing functionality only: Media Management (per-type default roots,
+  import paths, bulk root folders, library folders/scan/review, path mappings), Profiles (quality
+  profiles + per-type default profiles), Indexers, Download Clients, Metadata (TMDb), Automation
+  (toggle + safety gate), Migration (the existing Migration component, unchanged), General
+  (application note + security status; there is deliberately no password-change screen, which OneArr
+  does not support), UI (Posters/List preference + advanced toggle).
+- The old flat Settings page was split: TMDb into Metadata, torrent/media roots and dry-run into
+  Media Management, the grabbing toggle into Automation. Profile/indexer/client creation forms are
+  unchanged in behaviour; connection tests are now scoped per category (TMDb only in Metadata, etc.).
+
+### Per-type defaults (backend, no database migration)
+- New `AppSetting` keys only (no schema change): `media.defaultRoot.movie`,
+  `media.defaultRoot.series`, `profile.default.movie`, `profile.default.series`. GET/PUT `/api/settings`
+  exposes them; PUT validates roots as absolute (empty clears, null leaves unchanged) and rejects
+  unknown profile ids. Pure helper `MediaDefaults.ResolveRoot` resolves movie defaults only from the
+  movie default and series defaults only from the series default — so a movie root can never become
+  a series default. (Historical note: the first version of this section said the resolver fell back
+  to the legacy single media root when a per-type default was unset. That fallback was removed by the
+  PR #5 review fix at the top of this file: with no per-type default, adds now require an explicit
+  folder instead of silently inheriting the shared root.) POST `/api/media` uses it when no
+  explicit root folder is sent; re-adding an existing title still returns it unchanged (root, profile,
+  and monitoring are never overwritten by a later add).
+
+### Movies/Series pages and the Add dialog
+- The permanent TMDb add/search panel and the bulk root-folder panel are gone from both pages.
+  An Add Movie / Add Series button opens a dialog: TMDb search, result selection, root folder and
+  quality profile prefilled from the per-type server defaults, monitoring scope (movie: Monitor
+  checkbox; series: All seasons / First season only / None), and a confirmation summary before the
+  Add button sends anything. (Historical note: the first version of this section said the legacy
+  localStorage root was a last-resort fallback on first run. That fallback was removed by the PR #5
+  review fix at the top of this file: the dialog no longer reads the localStorage root at all, and
+  with no saved per-type default it starts empty with guidance instead of prefilling any folder.)
+- Poster grid, List view, search, sort, filters, and per-title monitoring controls are retained.
+  Series filters now include Complete/Partial/Missing/Unknown. Per-title root, profile, and monitoring
+  overrides remain on each title's Details page. Bulk root-folder changes live in Settings → Media
+  Management, per media type.
+
+### Accurate series availability (backend, one aggregate query)
+- `GET /api/media?type=series` and `GET /api/media/{id}/detail` now report episode-based availability:
+  Complete / Partial / Missing / Unknown plus `availableEpisodes` / `applicableEpisodes` counts
+  (e.g. "126 / 180 monitored aired episodes available"). Applicable means monitored with a known air
+  date on or before today; unaired episodes and unmonitored episodes (including Sonarr per-episode
+  exceptions inside a monitored season) never count as missing. Applicable == 0 (no episodes, no
+  monitored episodes, or no monitored episode with a known air date) is Unknown, never Complete or
+  Missing. The series-level `HasFile` flag is no longer used for the series badge: a series with one
+  downloaded episode cannot read as Complete. Movies keep Available/Missing from `HasFile`.
+  `MediaService.SeriesAvailabilityAsync` is one grouped query for the whole library, not one request
+  per poster card. Scan-review and manual-search behaviour are untouched, and monitoring sync still
+  touches only Monitored flags (see the PR #4 sections below).
+
+### Poster grid polish (CSS only, no new dependencies)
+- Two-line titles via line clamping with a fixed two-line height so cards stay aligned; full title
+  on hover via the `title` attribute; consistent 2/3 poster aspect ratio including the fallback;
+  cards are equal-height flex columns; badges are legible and distinct (Complete green, Partial
+  amber, Missing red, Unknown neutral); lazy loading and the poster fallback are unchanged.
+  Bundle: 223 KB JS (66 KB gzip), up from 205 KB (62 KB) — the new Settings/dialog code, no new framework.
+
+### Tests actually executed
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 23 passed (was 14; new: settings navigation
+  and per-type defaults, Add Series dialog incl. first-season scope, series availability badges, plus
+  updated settings tests for the split forms), and `npm run build` (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is
+  claimed. New backend tests added for CI: `AvailabilityTests` (Complete/Partial/Missing, no-episode
+  Unknown, unaired + unmonitored exclusion, unknown-air-date Unknown, ResolveRoot cross-type
+  separation, classification boundaries, re-add never overwrites) and `SettingsDefaultsApiTests`
+  over the real API host (defaults start empty, per-type independence, empty-string clearing,
+  relative-root rejection, profile existence validation). CI on the new PR is the backend verification.
+
+### Remaining verification (not done here)
+- CI backend tests for this branch, and a Windows run with a real or realistic large library
+  (including ~205 series) to check poster-grid performance, the new Settings layout at narrow
+  widths, and the Add dialog against a real TMDb key.
+- Screenshots for the PR (Settings overview, sidebar, simplified Series page, Add Series dialog,
+  Complete/Partial/Missing cards) were not captured in this sandbox: the frontend build runs, but
+  there is no live backend here to sign into and render a populated library. They should be taken
+  from the Windows run and attached to the PR before it is reviewed as final.
+- General → Security honestly notes there is no password-change screen yet; that is a missing
+  feature, not a setting that was hidden.
+
 ## Review fixes round 2 to PR #4 (branch `visual-library`, same PR, not merged)
 
 1. **Preview comparison is now identity-strict.** `PreviewMatches()` previously compared only the counts of

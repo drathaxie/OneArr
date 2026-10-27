@@ -63,6 +63,23 @@ export interface MediaItem {
   hasFile: boolean;
   legacyPath?: string | null;
   legacySource?: string | null;
+  /** Series: Complete/Partial/Missing/Unknown over monitored, aired episodes. Movies: Available/Missing. */
+  availability?: string | null;
+  /** Series only: monitored, aired episodes with a file / monitored, aired episodes in total. */
+  availableEpisodes?: number | null;
+  applicableEpisodes?: number | null;
+}
+
+export interface SettingsData {
+  tmdbConfigured: boolean;
+  dryRunImport: boolean;
+  torrentRoot: string | null;
+  mediaRoot: string | null;
+  automaticGrabbing: boolean;
+  defaultMovieRoot: string | null;
+  defaultSeriesRoot: string | null;
+  defaultMovieProfileId: number | null;
+  defaultSeriesProfileId: number | null;
 }
 
 export function posterUrl(posterPath: string | null | undefined): string | null {
@@ -103,6 +120,9 @@ export interface MediaDetail {
   hasFile: boolean;
   legacyPath: string | null;
   legacySource: string | null;
+  availability?: string | null;
+  availableEpisodes?: number | null;
+  applicableEpisodes?: number | null;
   seasons: DetailSeason[];
   episodes: DetailEpisode[];
   files: MediaFile[];
