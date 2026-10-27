@@ -552,6 +552,39 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
+    [Fact]
+    public async Task BulkImport_PreviewAloneNeverAuthorizesAPhysicalImport()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune (2021) 1080p.mkv", "movie-bytes");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune", DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(file));
+        var preview = await world.Downloads.PreviewImportAsync(jobId, default);
+        Assert.Single(preview.Plans);
+        var dest = Path.Combine(world.Dirs.Media, "movies", "Dune (2021)", "Dune (2021) 1080p.mkv");
+        // A preview that was merely generated authorizes nothing: unconfirmed calls, empty
+        // approval lists, and pairs for the wrong job must all refuse without touching the
+        // job, any file, or the import records.
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.ApplySelectedAsync(false, [new BulkApproval(jobId, preview.PreviewId)], default));
+        await Assert.ThrowsAsync<ArgumentException>(() => world.Downloads.ApplySelectedAsync(true, [], default));
+        var bogus = await world.Downloads.ApplySelectedAsync(true, [new BulkApproval(jobId, preview.PreviewId + 999)], default);
+        Assert.Equal(0, bogus.Applied);
+        Assert.Equal(1, bogus.Failed);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(File.Exists(dest));
+        await using (var db = world.Db.CreateDbContext())
+        {
+            Assert.Empty(await db.ImportRecords.AsNoTracking().Where(r => r.DownloadJobId == jobId).ToListAsync());
+        }
+        // The confirmed pair for this job's actual preview applies exactly that preview.
+        var result = await world.Downloads.ApplySelectedAsync(true, [new BulkApproval(jobId, preview.PreviewId)], default);
+        Assert.Equal(1, result.Applied);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        Assert.True(File.Exists(dest));
+    }
+
+    [Fact]
     public async Task Import_CreatesMediaFileLinks_AndUnmatchedPackFilesStayUnresolved()
     {
         using var world = await WorldAsync();

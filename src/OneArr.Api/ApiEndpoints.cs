@@ -37,6 +37,7 @@ public static class ApiEndpoints
     public sealed record BulkRootBody(string MediaType, string? FromRootFolder, string ToRootFolder, List<int>? Ids);
     public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null);
     public sealed record ApplyPreviewBody(int PreviewId, bool Confirmed);
+    public sealed record BulkImportBody(bool Confirmed, List<BulkApproval>? Approvals);
 
     public static void Map(WebApplication app)
     {
@@ -543,27 +544,35 @@ public static class ApiEndpoints
         });
 
         // Bulk import. A dry run only plans (read-only) and reports problems. A real bulk import
-        // applies approved previews only: a Completed job without a stored preview is skipped,
-        // never imported directly, so no production route bypasses preview-and-confirmation.
-        api.MapPost("/import", async (bool? dryRun, DownloadService downloads, SettingsStore settings, JobRunner runner, CancellationToken ct) =>
+        // applies ONLY explicitly confirmed (jobId, previewId) pairs from the request body: a
+        // preview that was merely generated never authorizes anything, and a request without
+        // confirmation and at least one pair is refused with 400 before anything is applied.
+        api.MapPost("/import", async (bool? dryRun, BulkImportBody? body, DownloadService downloads, SettingsStore settings, JobRunner runner, CancellationToken ct) =>
         {
             var dry = dryRun ?? await settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct);
             string? message = null;
+            string? error = null;
             var ran = await runner.TryRunAsync("import", async t =>
             {
-                if (dry)
+                try
                 {
-                    var summary = await downloads.ImportCompletedAsync(true, t);
-                    message = summary.Message;
+                    if (dry)
+                    {
+                        var summary = await downloads.ImportCompletedAsync(true, t);
+                        message = summary.Message;
+                    }
+                    else
+                    {
+                        var result = await downloads.ApplySelectedAsync(body?.Confirmed ?? false, body?.Approvals ?? [], t);
+                        message = result.Message;
+                    }
                 }
-                else
-                {
-                    var result = await downloads.ApplyApprovedAsync(t);
-                    message = result.Message;
-                }
-                return message;
+                catch (ArgumentException ex) { error = ex.Message; }
+                return message ?? "Import refused";
             }, ct);
-            return ran ? Results.Ok(new { dryRun = dry, message }) : Results.Conflict(new { error = "Import already running" });
+            if (!ran) return Results.Conflict(new { error = "Import already running" });
+            if (error is not null) return Results.BadRequest(new { error });
+            return Results.Ok(new { dryRun = dry, message });
         });
 
         api.MapGet("/imports", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>

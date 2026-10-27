@@ -804,8 +804,8 @@ export function Activity() {
       <div className="row">
         <button onClick={() => run("Sync", "/api/queue/sync")}>Sync from qBittorrent</button>
         <button onClick={() => run("Dry run", "/api/import?dryRun=true")}>Import dry run</button>
-        <button className="danger" onClick={() => run("Import", "/api/import?dryRun=false", undefined, "Apply approved import previews now? Jobs without a preview are skipped; nothing is imported without a preview. Source torrents are never deleted.")}>Import now</button>
       </div>
+      <p className="muted">Real imports run per job: open a job&apos;s Preview, confirm, then Apply. A preview that was merely generated never authorizes an import.</p>
       <div className="row" role="tablist" aria-label="Activity sections">
         <button className={tab === "queue" ? "primary" : ""} onClick={() => setTab("queue")}>Queue</button>
         <button className={tab === "history" ? "primary" : ""} onClick={() => setTab("history")}>History</button>

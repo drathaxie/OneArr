@@ -188,6 +188,8 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
     previews only (`ApplyApprovedAsync`), skipping jobs without a stored preview and jobs
     whose preview went stale. `RetryImportAsync` likewise requires a stored preview and
     applies the latest one (stale → 409 with a fresh preview, as in apply).
+    (Superseded by the later bulk-approval gate: see "Bulk approval gate" below — a stored
+    preview alone no longer authorizes a bulk import at all.)
   - Empty previews cannot be created (zero-file plan throws) or applied (stored empty plan
     throws); previewing requires a completed download (Completed, or Failed + ImportFailed
     for retry); the stale comparison and the fingerprint now include episode associations.
@@ -228,6 +230,28 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   episodes are marked and E04 stays unmarked) and the test was updated to that expectation.
   If the intended reading was instead "Imported, but loudly recorded", that is a two-line
   flip in the bulk/apply final-status logic plus the two pack tests — flag it in review.
+
+### Bulk approval gate (second PR #6 review: a stored preview is not approval)
+
+- The review found `ApplyApprovedAsync` treated any stored preview as approval: calling
+  `POST /api/import` with dry-run off could apply previews that were merely inspected.
+  Fixed by replacing it with `ApplySelectedAsync(confirmed, approvals)`: a real bulk import
+  applies ONLY explicitly confirmed `(jobId, previewId)` pairs from the request body, each
+  through the same stale-checked per-job apply. Unconfirmed calls and empty approval lists
+  are refused with 400 before anything is applied; a pair for a missing/stale preview is
+  counted failed, never silently applied. The per-job `import-apply` endpoint already had
+  its `confirmed: true` gate and is unchanged.
+- Frontend: the ungated "Import now" button is removed from Activity (it could not express
+  confirmed pairs); the dry-run button stays, and a note points at the per-job
+  Preview → confirm → Apply flow, which remains the real-import path.
+- Callers updated to the new flow: `tools/smoke/smoke.sh` and
+  `tools/windows/staging-check.ps1` now generate a preview for the test job and pass its
+  confirmed pair to the bulk endpoint; the lifecycle-acceptance script already used the
+  per-job preview → apply path and is unchanged.
+- New test `BulkImport_PreviewAloneNeverAuthorizesAPhysicalImport` proves the gate: after
+  generating a preview, unconfirmed calls, empty lists, and bogus pairs leave the job
+  Completed with no file and no import records, and only the confirmed pair for the
+  job's actual preview applies it.
 
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 

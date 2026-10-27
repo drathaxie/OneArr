@@ -192,8 +192,9 @@ public sealed class DownloadService
 
     /// <summary>Bulk import engine. A dry run is strictly read-only: it plans and reports problems
     /// without changing any job, record, or file. Production bulk import (POST /api/import with
-    /// dryRun=false) does NOT call this with dryRun=false; it applies approved previews only via
-    /// ApplyApprovedAsync, so no production route imports a job without a stored preview.
+    /// dryRun=false) does NOT call this with dryRun=false; it applies only explicitly confirmed
+    /// (job, preview) pairs via ApplySelectedAsync, so no production route imports a job on the
+    /// strength of a preview that was merely generated.
     /// Completed jobs with a null content path are deliberately included: they must fail visibly
     /// (or report in a dry run), never be silently skipped by the query.</summary>
     public async Task<ImportRunSummary> ImportCompletedAsync(bool dryRun, CancellationToken ct)
@@ -429,37 +430,42 @@ public sealed class DownloadService
         return new ImportRunSummary(0, imported, failed, 0, msg);
     }
 
-    public sealed record BulkApplyResult(int Applied, int SkippedNoPreview, int SkippedStale, int Failed, string Message);
+    /// <summary>One confirmed bulk approval: a specific job's specific preview. A preview that was
+    /// merely generated authorizes nothing; only a pair the operator confirmed does.</summary>
+    public sealed record BulkApproval(int JobId, int PreviewId);
 
-    /// <summary>Production bulk import: applies only Completed jobs that already have a stored
-    /// preview (their latest), never imports a job without one. Jobs without previews and jobs
-    /// whose preview went stale are counted as skipped, not imported.</summary>
-    public async Task<BulkApplyResult> ApplyApprovedAsync(CancellationToken ct)
+    public sealed record BulkApplyResult(int Applied, int SkippedStale, int Failed, string Message);
+
+    /// <summary>Bulk import for production: applies ONLY the explicitly confirmed (job, preview)
+    /// pairs. A stored preview that was merely inspected is never applied by this path — without
+    /// confirmation and at least one pair, nothing is applied at all. Each pair goes through the
+    /// same stale-checked apply as the per-job endpoint, so a changed plan is refused, not run.</summary>
+    public async Task<BulkApplyResult> ApplySelectedAsync(bool confirmed, List<BulkApproval> approvals, CancellationToken ct)
     {
+        if (!confirmed)
+            throw new ArgumentException("Bulk import requires explicit confirmation with specific approved previews");
+        if (approvals is null || approvals.Count == 0)
+            throw new ArgumentException("Bulk import requires at least one approved preview (jobId + previewId pair); previewing alone never authorizes an import");
         var mediaRoot = await _settings.GetAsync(SettingKeys.MediaRoot, ct);
         var torrentRoot = await _settings.GetAsync(SettingKeys.TorrentRoot, ct);
         if (string.IsNullOrWhiteSpace(mediaRoot) || string.IsNullOrWhiteSpace(torrentRoot))
-            return new BulkApplyResult(0, 0, 0, 0, "Set the media root and torrent root paths in Settings before importing");
-        await using var db = await _db.CreateDbContextAsync(ct);
-        var jobs = await db.DownloadJobs.Where(j => j.Status == DownloadStatus.Completed).ToListAsync(ct);
-        int applied = 0, noPreview = 0, stale = 0, failed = 0;
-        foreach (var job in jobs)
+            throw new ArgumentException("Set the media root and torrent root paths in Settings before importing");
+        int applied = 0, stale = 0, failed = 0;
+        foreach (var approval in approvals)
         {
-            var preview = await db.ImportPreviews.Where(p => p.DownloadJobId == job.Id).OrderByDescending(p => p.Id).FirstOrDefaultAsync(ct);
-            if (preview is null) { noPreview++; continue; }
             try
             {
-                await ApplyPreviewAsync(job.Id, preview.Id, ct);
+                await ApplyPreviewAsync(approval.JobId, approval.PreviewId, ct);
                 await using var check = await _db.CreateDbContextAsync(ct);
-                var after = await check.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == job.Id, ct);
-                if (after.Status == DownloadStatus.Failed && after.ImportFailed) failed++;
+                var after = await check.DownloadJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == approval.JobId, ct);
+                if (after is not null && after.Status == DownloadStatus.Failed && after.ImportFailed) failed++;
                 else applied++;
             }
             catch (StalePreviewException) { stale++; }
             catch (ArgumentException) { failed++; }
         }
-        var msg = $"Applied {applied} job(s) with approved previews; {noPreview} skipped (no import preview); {stale} skipped (preview stale — re-preview first); {failed} failed";
-        return new BulkApplyResult(applied, noPreview, stale, failed, msg);
+        var msg = $"Applied {applied} approved preview(s); {stale} skipped (preview stale — re-preview first); {failed} failed";
+        return new BulkApplyResult(applied, stale, failed, msg);
     }
 
     private async Task MarkHaveFileAsync(OneArrDbContext db, DownloadJob job, MediaItem media, HashSet<int> matchedEpisodeIds, CancellationToken ct)
