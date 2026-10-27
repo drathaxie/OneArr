@@ -129,7 +129,7 @@ function Overview({ advanced }: { advanced: boolean }) {
       <h2>Settings</h2>
       <p className="muted">OneArr's configuration, organised like Sonarr and Radarr. Choose a category in the sidebar to change it; the poster library itself is unchanged.</p>
       {!advanced && <p className="muted">Advanced items (path mappings, connection tests) are hidden. Use Show Advanced in the sidebar to reveal them.</p>}
-      <div className="grid">
+      <div className="grid settings-overview-grid">
         {CATEGORIES.map((cat) => (
           <div key={cat.id} className="card" style={{ marginBottom: 0 }}>
             <h2>{cat.label}</h2>
