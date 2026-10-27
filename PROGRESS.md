@@ -210,6 +210,25 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
   (GitHub App 403 on workflow files); lifecycle acceptance remains unverified until it runs.
   Backend + Windows tests for this push are CI-verified only (no .NET SDK in the sandbox).
 
+### Follow-up: CI run #74 failures and their fixes (head cf5c623 → next push)
+
+- Run #74 compiled but failed 23 backend tests. Root cause 1: the hand-written migration
+  `20261026160000_AddDownloadClientTracking` had no `.Designer.cs`, so EF never discovered
+  it as a migration — the model then differed from the last discovered migration and
+  `MigrateAsync` raised the pending-model-changes error. The `onearr.lock` teardown errors
+  in the same run are most plausibly downstream of that (the app cannot migrate/start, so
+  ApiFactory teardown trips on the lock); the next run confirms or refutes that. Fix: added
+  `20261026160000_AddDownloadClientTracking.Designer.cs` with the `[DbContext]` /
+  `[Migration]` attributes and a `BuildTargetModel` body verified byte-identical to the
+  model snapshot's model. The migration's `Up()` itself was already complete (7 columns,
+  3 indexes, both tables); only discovery was broken.
+- Root cause 2 (semantic, per the review): the season-pack test expected `Imported` for a
+  pack containing `extras.mkv`, which the review's unmatched-file rule contradicts. The
+  review's reading was kept (job stays Completed with an `Unmatched` record while covered
+  episodes are marked and E04 stays unmarked) and the test was updated to that expectation.
+  If the intended reading was instead "Imported, but loudly recorded", that is a two-line
+  flip in the bulk/apply final-status logic plus the two pack tests — flag it in review.
+
 ### Remaining limitations before replacing Sonarr/Radarr (honest list)
 
 - No client picker on grab (first enabled client), no multi-client category mapping UI, no

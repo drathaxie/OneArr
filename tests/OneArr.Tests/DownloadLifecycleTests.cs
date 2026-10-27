@@ -226,13 +226,17 @@ public class DownloadLifecycleTests
             AgeFile(world.Dirs.WriteFile($"torrents/Show/{name}", "bytes-" + name));
         var jobId = await AddJobAsync(world, series, null, MediaType.Series, "Show", DownloadStatus.Completed, 1, "aa01", Path.Combine(world.Dirs.Torrents, "Show"));
         await world.Downloads.ImportCompletedAsync(dryRun: false, default);
-        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        // Per the PR #6 review, a pack with an unmatched file stays visibly unresolved: the job
+        // does not read fully Imported while extras.mkv matches no episode, even though the
+        // covered episodes are all marked and E04 stays unmarked.
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
         await using var db = world.Db.CreateDbContext();
         var eps = await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == series).OrderBy(e => e.EpisodeNumber).ToListAsync();
         Assert.True(eps[0].HasFile);
         Assert.True(eps[1].HasFile);
         Assert.True(eps[2].HasFile);
         Assert.False(eps[3].HasFile); // extras.mkv covers no episode and must not mark E04
+        Assert.Contains(await db.ImportRecords.AsNoTracking().ToListAsync(), r => r.DownloadJobId == jobId && r.Action == ImportAction.Unmatched && r.SourcePath.EndsWith("extras.mkv"));
     }
 
     [Fact]
