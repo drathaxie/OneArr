@@ -389,3 +389,31 @@ tr.selected td { background: var(--panel2); }
   .cc-dossier-scroll { overflow-y: auto; flex: 1; }
   .cc-dossier-identity { position: sticky; }
 }
+
+
+/* Catalog browser: dense directory on the left; focused definition detail on the right. */
+.tracker-catalog-dialog { width: min(1130px, 94vw); max-width: 1130px; max-height: 91vh; overflow-y: auto; }
+.tracker-catalog-dialog > .row > input { flex: 1; min-width: 0; }
+.tracker-catalog-grid { display: grid; grid-template-columns: minmax(230px, 0.9fr) minmax(320px, 1.1fr); gap: 16px; min-height: 430px; max-height: 57vh; }
+.tracker-catalog-results { border: 1px solid var(--border, #323941); border-radius: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+.tracker-catalog-result { text-align: left; border: 0; border-bottom: 1px solid var(--border, #323941); border-radius: 0; background: transparent; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tracker-catalog-result:hover, .tracker-catalog-result.selected { background: rgba(125, 153, 178, 0.13); }
+.tracker-catalog-result strong { font-weight: 600; }
+.tracker-catalog-result .muted { font-size: 11px; flex-shrink: 0; }
+.tracker-catalog-detail { border: 1px solid var(--border, #323941); border-radius: 8px; padding: 14px 17px; overflow-y: auto; line-height: 1.5; }
+.tracker-catalog-detail h3 { margin-top: 10px; }
+.tracker-catalog-detail ul { padding-left: 20px; max-height: 190px; overflow-y: auto; }
+.tracker-catalog-detail a { text-decoration: underline; }
+@media (max-width: 750px) {
+  .tracker-catalog-grid { grid-template-columns: 1fr; max-height: none; }
+  .tracker-catalog-results { max-height: 220px; }
+  .tracker-catalog-detail { max-height: 44vh; }
+  .tracker-catalog-dialog { max-height: 95vh; }
+}
+
+.tracker-catalog-controls { flex-wrap: wrap; }
+.tracker-catalog-controls > input { flex: 2 1 210px; }
+.tracker-catalog-controls > select { flex: 0 1 145px; min-width: 0; }
+@media (max-width: 750px) {
+  .tracker-catalog-controls > select { flex: 1 1 130px; }
+}

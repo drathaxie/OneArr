@@ -1,0 +1,5219 @@
+{
+  "source": "Prowlarr/Indexers",
+  "sourceMetadataHash": "1b799a245e229d90",
+  "definitionPaths": [
+    "definitions/v11/0dayfiles-api.yml",
+    "definitions/v11/0daykiev.yml",
+    "definitions/v11/0magnet.yml",
+    "definitions/v11/1337x.yml",
+    "definitions/v11/13city-api.yml",
+    "definitions/v11/13city.yml",
+    "definitions/v11/1ptbar-api.yml",
+    "definitions/v11/1ptbar.yml",
+    "definitions/v11/3dtorrents.yml",
+    "definitions/v11/3dvault-api.yml",
+    "definitions/v11/4thd.yml",
+    "definitions/v11/52bt.yml",
+    "definitions/v11/52pt.yml",
+    "definitions/v11/Bittorrentfiles.yml",
+    "definitions/v11/abnormal-api.yml",
+    "definitions/v11/abtorrents.yml",
+    "definitions/v11/acgrip.yml",
+    "definitions/v11/acrossthetasman.yml",
+    "definitions/v11/aftershock.yml",
+    "definitions/v11/agsvpt.yml",
+    "definitions/v11/aidoruonline.yml",
+    "definitions/v11/aither-api.yml",
+    "definitions/v11/alabala-api.yml",
+    "definitions/v11/alingpt-api.yml",
+    "definitions/v11/alingpt.yml",
+    "definitions/v11/amigosshare.yml",
+    "definitions/v11/anibt.yml",
+    "definitions/v11/animebybelka.yml",
+    "definitions/v11/animelayer.yml",
+    "definitions/v11/animetorrentsro.yml",
+    "definitions/v11/animetosho-xyz.yml",
+    "definitions/v11/animeworld-api.yml",
+    "definitions/v11/anisource.yml",
+    "definitions/v11/anthelion-api.yml",
+    "definitions/v11/arabafenice.yml",
+    "definitions/v11/arabicsource-api.yml",
+    "definitions/v11/arabp2p.yml",
+    "definitions/v11/arabscene.yml",
+    "definitions/v11/arabtorrents.yml",
+    "definitions/v11/asiancinema.yml",
+    "definitions/v11/asiandvdclub.yml",
+    "definitions/v11/astratorrent.yml",
+    "definitions/v11/audiences.yml",
+    "definitions/v11/audionews.yml",
+    "definitions/v11/aussierules.yml",
+    "definitions/v11/azusa.yml",
+    "definitions/v11/backups.yml",
+    "definitions/v11/bangumi-moe.yml",
+    "definitions/v11/baozipt-api.yml",
+    "definitions/v11/baozipt.yml",
+    "definitions/v11/beload.yml",
+    "definitions/v11/best-torrents.yml",
+    "definitions/v11/bestcore.yml",
+    "definitions/v11/bibliotik.yml",
+    "definitions/v11/bigcore.yml",
+    "definitions/v11/bigfangroup.yml",
+    "definitions/v11/binarybay.yml",
+    "definitions/v11/bitagent.yml",
+    "definitions/v11/bitbazis.yml",
+    "definitions/v11/bitded.yml",
+    "definitions/v11/bitgamer.yml",
+    "definitions/v11/bithumen.yml",
+    "definitions/v11/bitmagnet.yml",
+    "definitions/v11/bitporn.yml",
+    "definitions/v11/bitturk.yml",
+    "definitions/v11/bjshare.yml",
+    "definitions/v11/blueroms.yml",
+    "definitions/v11/bluetorrents.yml",
+    "definitions/v11/bluraytracker.yml",
+    "definitions/v11/blutopia-api.yml",
+    "definitions/v11/booktracker.yml",
+    "definitions/v11/bootytape.yml",
+    "definitions/v11/borgzelle.yml",
+    "definitions/v11/boxingtorrents.yml",
+    "definitions/v11/brasiltracker.yml",
+    "definitions/v11/btarg.yml",
+    "definitions/v11/btdirectory.yml",
+    "definitions/v11/btetree.yml",
+    "definitions/v11/btnext.yml",
+    "definitions/v11/btschool.yml",
+    "definitions/v11/bwtorrents.yml",
+    "definitions/v11/byrbt.yml",
+    "definitions/v11/byrutor.yml",
+    "definitions/v11/c411.yml",
+    "definitions/v11/cangbaoge.yml",
+    "definitions/v11/capybarabr.yml",
+    "definitions/v11/carpathians.yml",
+    "definitions/v11/carpt.yml",
+    "definitions/v11/cathoderaytube.yml",
+    "definitions/v11/catorrent.yml",
+    "definitions/v11/ceskeforum.yml",
+    "definitions/v11/cgpeers.yml",
+    "definitions/v11/chdbits.yml",
+    "definitions/v11/cinemageddon.yml",
+    "definitions/v11/cinemamovies.yml",
+    "definitions/v11/cinematik.yml",
+    "definitions/v11/clearjav-api.yml",
+    "definitions/v11/coastalcrew.yml",
+    "definitions/v11/comicat.yml",
+    "definitions/v11/concertos.yml",
+    "definitions/v11/crabpt-api.yml",
+    "definitions/v11/crabpt.yml",
+    "definitions/v11/crackingpatching.yml",
+    "definitions/v11/crazyspirits-api.yml",
+    "definitions/v11/crnaberza.yml",
+    "definitions/v11/crnaberza2fa.yml",
+    "definitions/v11/crt2fa.yml",
+    "definitions/v11/cspt.yml",
+    "definitions/v11/cyanbug.yml",
+    "definitions/v11/cyclingarchiveclub.yml",
+    "definitions/v11/czteam-api.yml",
+    "definitions/v11/damagnet.yml",
+    "definitions/v11/danishbits-api.yml",
+    "definitions/v11/darkpeers.yml",
+    "definitions/v11/dasunerwartete-api.yml",
+    "definitions/v11/dasunerwartete.yml",
+    "definitions/v11/datascene-api.yml",
+    "definitions/v11/daxiangjiao-api.yml",
+    "definitions/v11/daxiangjiao.yml",
+    "definitions/v11/deildu.yml",
+    "definitions/v11/depthstudio-api.yml",
+    "definitions/v11/depthstudio.yml",
+    "definitions/v11/desitorrents-api.yml",
+    "definitions/v11/devil-torrents.yml",
+    "definitions/v11/diablotorrent.yml",
+    "definitions/v11/digitalcore-api.yml",
+    "definitions/v11/dimeadozen.yml",
+    "definitions/v11/dirtybytes-api.yml",
+    "definitions/v11/discfan-api.yml",
+    "definitions/v11/discfan.yml",
+    "definitions/v11/dmhy.yml",
+    "definitions/v11/docspedia.yml",
+    "definitions/v11/draupnirr.yml",
+    "definitions/v11/dreadvault-api.yml",
+    "definitions/v11/dreamingtree.yml",
+    "definitions/v11/drugari.yml",
+    "definitions/v11/ds-reloaded.yml",
+    "definitions/v11/dubhe.yml",
+    "definitions/v11/dxp.yml",
+    "definitions/v11/ebookbay.yml",
+    "definitions/v11/ehentai.yml",
+    "definitions/v11/electro-torrent.yml",
+    "definitions/v11/empornium.yml",
+    "definitions/v11/empornium2fa.yml",
+    "definitions/v11/emuwarez.yml",
+    "definitions/v11/estone.yml",
+    "definitions/v11/ex-torrenty.yml",
+    "definitions/v11/exitorrent-org.yml",
+    "definitions/v11/exkinoray.yml",
+    "definitions/v11/explosiv-world.yml",
+    "definitions/v11/extratorrent-st.yml",
+    "definitions/v11/extremebits.yml",
+    "definitions/v11/eztv.yml",
+    "definitions/v11/eztvl.yml",
+    "definitions/v11/f1carreras-api.yml",
+    "definitions/v11/fanoin.yml",
+    "definitions/v11/fappaizuri.yml",
+    "definitions/v11/fappaizuri2fa.yml",
+    "definitions/v11/femdomcult.yml",
+    "definitions/v11/fenyarnyek-tracker.yml",
+    "definitions/v11/file-tracker.yml",
+    "definitions/v11/fileiplay.yml",
+    "definitions/v11/filemood.yml",
+    "definitions/v11/finelite.yml",
+    "definitions/v11/flood.yml",
+    "definitions/v11/freefarm-api.yml",
+    "definitions/v11/freefarm.yml",
+    "definitions/v11/freejavtorrent.yml",
+    "definitions/v11/funfile.yml",
+    "definitions/v11/funzone-api.yml",
+    "definitions/v11/futuretorrent.yml",
+    "definitions/v11/fuzer.yml",
+    "definitions/v11/g3minitr4ck3r-api.yml",
+    "definitions/v11/gay-torrents.yml",
+    "definitions/v11/gaytorrentru.yml",
+    "definitions/v11/generationfree-api.yml",
+    "definitions/v11/ggpt.yml",
+    "definitions/v11/gigatorrents.yml",
+    "definitions/v11/girotorrent.yml",
+    "definitions/v11/haidan.yml",
+    "definitions/v11/haitang.yml",
+    "definitions/v11/happyfappy.yml",
+    "definitions/v11/happyfappy2fa.yml",
+    "definitions/v11/hawke-uno.yml",
+    "definitions/v11/hd-club.yml",
+    "definitions/v11/hd-unit3d-api.yml",
+    "definitions/v11/hdarea.yml",
+    "definitions/v11/hdbao-api.yml",
+    "definitions/v11/hdbao.yml",
+    "definitions/v11/hdc.yml",
+    "definitions/v11/hdclone.yml",
+    "definitions/v11/hddolby.yml",
+    "definitions/v11/hdfans.yml",
+    "definitions/v11/hdforever-api.yml",
+    "definitions/v11/hdgalaktik.yml",
+    "definitions/v11/hdhome.yml",
+    "definitions/v11/hdkylin.yml",
+    "definitions/v11/hdolimpo-api.yml",
+    "definitions/v11/hdonly-api.yml",
+    "definitions/v11/hdroute.yml",
+    "definitions/v11/hdsky.yml",
+    "definitions/v11/hdspace.yml",
+    "definitions/v11/hdspacecookie.yml",
+    "definitions/v11/hdtime.yml",
+    "definitions/v11/hdtorrents.yml",
+    "definitions/v11/hdtorrentsit.yml",
+    "definitions/v11/hdturk.yml",
+    "definitions/v11/hdu.yml",
+    "definitions/v11/hdvideo-api.yml",
+    "definitions/v11/hdvideo.yml",
+    "definitions/v11/hdzero.yml",
+    "definitions/v11/hebits.yml",
+    "definitions/v11/hellashut-api.yml",
+    "definitions/v11/hellashut.yml",
+    "definitions/v11/hellenic-hd-api.yml",
+    "definitions/v11/helltorrents.yml",
+    "definitions/v11/herobit.yml",
+    "definitions/v11/hhanclub.yml",
+    "definitions/v11/hhd-api.yml",
+    "definitions/v11/houseofdevil.yml",
+    "definitions/v11/hqmusic.yml",
+    "definitions/v11/hudbt.yml",
+    "definitions/v11/huntorrent.yml",
+    "definitions/v11/hxpt.yml",
+    "definitions/v11/ilcorsaroblu.yml",
+    "definitions/v11/immortuos.yml",
+    "definitions/v11/indietorrents.yml",
+    "definitions/v11/infinityhd-api.yml",
+    "definitions/v11/infire.yml",
+    "definitions/v11/insanetracker.yml",
+    "definitions/v11/internetarchive.yml",
+    "definitions/v11/itatorrents.yml",
+    "definitions/v11/jme-reunit3d-api.yml",
+    "definitions/v11/jpopsuki.yml",
+    "definitions/v11/jptv4us-api.yml",
+    "definitions/v11/kamept.yml",
+    "definitions/v11/karagarga.yml",
+    "definitions/v11/keepfriends.yml",
+    "definitions/v11/kelu.yml",
+    "definitions/v11/kickasstorrents-to.yml",
+    "definitions/v11/kickasstorrents-ws.yml",
+    "definitions/v11/kinorun.yml",
+    "definitions/v11/kinozal-magnet.yml",
+    "definitions/v11/kinozal.yml",
+    "definitions/v11/korsar.yml",
+    "definitions/v11/krazyzone.yml",
+    "definitions/v11/kufei-api.yml",
+    "definitions/v11/kufei.yml",
+    "definitions/v11/kufirc.yml",
+    "definitions/v11/kufirc2fa.yml",
+    "definitions/v11/lajidui-api.yml",
+    "definitions/v11/lajidui.yml",
+    "definitions/v11/lastdigitalunderground.yml",
+    "definitions/v11/lastfiles.yml",
+    "definitions/v11/lat-team-api.yml",
+    "definitions/v11/learnflakes.yml",
+    "definitions/v11/leech24.yml",
+    "definitions/v11/lemonhd-net-api.yml",
+    "definitions/v11/lemonhd-net.yml",
+    "definitions/v11/lesaloon.yml",
+    "definitions/v11/letseed.yml",
+    "definitions/v11/libranet.yml",
+    "definitions/v11/limetorrents.yml",
+    "definitions/v11/linkomanija.yml",
+    "definitions/v11/linuxtracker.yml",
+    "definitions/v11/locadora.yml",
+    "definitions/v11/longpt-api.yml",
+    "definitions/v11/longpt.yml",
+    "definitions/v11/losslessclub.yml",
+    "definitions/v11/lp-bits.yml",
+    "definitions/v11/lst.yml",
+    "definitions/v11/luckpt.yml",
+    "definitions/v11/luminarr-api.yml",
+    "definitions/v11/mactorrentsdownload.yml",
+    "definitions/v11/madsrevolution.yml",
+    "definitions/v11/magico.yml",
+    "definitions/v11/magnetcat.yml",
+    "definitions/v11/magnetdownload.yml",
+    "definitions/v11/majomparade.yml",
+    "definitions/v11/malayabits-api.yml",
+    "definitions/v11/march.yml",
+    "definitions/v11/marinetracker.yml",
+    "definitions/v11/matrix.yml",
+    "definitions/v11/mazepa.yml",
+    "definitions/v11/mdan.yml",
+    "definitions/v11/megapeer.yml",
+    "definitions/v11/memphis.yml",
+    "definitions/v11/mesevilag.yml",
+    "definitions/v11/metalguru.yml",
+    "definitions/v11/metaltracker.yml",
+    "definitions/v11/midnightscene.yml",
+    "definitions/v11/mikan.yml",
+    "definitions/v11/milkie.yml",
+    "definitions/v11/milnueve-api.yml",
+    "definitions/v11/miobt.yml",
+    "definitions/v11/mixtapetorrent.yml",
+    "definitions/v11/mma-torrents.yml",
+    "definitions/v11/mnv.yml",
+    "definitions/v11/mojblink.yml",
+    "definitions/v11/momentpt.yml",
+    "definitions/v11/monikadesign-api.yml",
+    "definitions/v11/mousebits.yml",
+    "definitions/v11/musebootlegs.yml",
+    "definitions/v11/musopia-api.yml",
+    "definitions/v11/musopia.yml",
+    "definitions/v11/muxuege.yml",
+    "definitions/v11/mvgroupforum.yml",
+    "definitions/v11/mvgroupmain.yml",
+    "definitions/v11/mypornclub.yml",
+    "definitions/v11/myspleen.yml",
+    "definitions/v11/nanyangpt.yml",
+    "definitions/v11/ncore.yml",
+    "definitions/v11/nekobt.yml",
+    "definitions/v11/nethd.yml",
+    "definitions/v11/new-team.yml",
+    "definitions/v11/newheaven.yml",
+    "definitions/v11/newretro.yml",
+    "definitions/v11/newstudio.yml",
+    "definitions/v11/newstudiol.yml",
+    "definitions/v11/nicept-api.yml",
+    "definitions/v11/nicept.yml",
+    "definitions/v11/nipponsei.yml",
+    "definitions/v11/nirvana.yml",
+    "definitions/v11/njtupt.yml",
+    "definitions/v11/nobs.yml",
+    "definitions/v11/noname-club.yml",
+    "definitions/v11/noname-clubl.yml",
+    "definitions/v11/nordicbytes.yml",
+    "definitions/v11/nordicquality.yml",
+    "definitions/v11/nostradamus.yml",
+    "definitions/v11/novahd.yml",
+    "definitions/v11/nyaasi.yml",
+    "definitions/v11/okpt.yml",
+    "definitions/v11/oldgreektracker.yml",
+    "definitions/v11/oldtoonsworld.yml",
+    "definitions/v11/onejav.yml",
+    "definitions/v11/onlyencodes-api.yml",
+    "definitions/v11/opencd.yml",
+    "definitions/v11/opensharing.yml",
+    "definitions/v11/order66.yml",
+    "definitions/v11/oshenpt-api.yml",
+    "definitions/v11/oshenpt.yml",
+    "definitions/v11/ourbits.yml",
+    "definitions/v11/p2pbg.yml",
+    "definitions/v11/panda.yml",
+    "definitions/v11/pandacd.yml",
+    "definitions/v11/parabellumhd-api.yml",
+    "definitions/v11/party-tracker.yml",
+    "definitions/v11/pctorrent.yml",
+    "definitions/v11/peeratiko.yml",
+    "definitions/v11/peergarden.yml",
+    "definitions/v11/peersfm.yml",
+    "definitions/v11/periodical.yml",
+    "definitions/v11/phoenixproject.yml",
+    "definitions/v11/phoenixpt-api.yml",
+    "definitions/v11/phoenixpt.yml",
+    "definitions/v11/pier720.yml",
+    "definitions/v11/pignetwork.yml",
+    "definitions/v11/pixelcove.yml",
+    "definitions/v11/pixelcove2fa.yml",
+    "definitions/v11/playletpt.yml",
+    "definitions/v11/plugintorrent.yml",
+    "definitions/v11/podzemlje.yml",
+    "definitions/v11/polishtorrent.yml",
+    "definitions/v11/polishtracker-api.yml",
+    "definitions/v11/pornolab.yml",
+    "definitions/v11/pornorip.yml",
+    "definitions/v11/pornotorrent.yml",
+    "definitions/v11/pornrips.yml",
+    "definitions/v11/pornxlab.yml",
+    "definitions/v11/portugas-api.yml",
+    "definitions/v11/postman-api.yml",
+    "definitions/v11/postman.yml",
+    "definitions/v11/proaudiotorrents.yml",
+    "definitions/v11/proporno.yml",
+    "definitions/v11/ptcafe-api.yml",
+    "definitions/v11/ptcafe.yml",
+    "definitions/v11/ptcc.yml",
+    "definitions/v11/pterclub.yml",
+    "definitions/v11/ptfans.yml",
+    "definitions/v11/ptfiles.yml",
+    "definitions/v11/ptgtk-api.yml",
+    "definitions/v11/ptgtk.yml",
+    "definitions/v11/pthome.yml",
+    "definitions/v11/ptitzmx.yml",
+    "definitions/v11/ptlgs.yml",
+    "definitions/v11/ptsbao.yml",
+    "definitions/v11/ptskit-api.yml",
+    "definitions/v11/ptskit.yml",
+    "definitions/v11/pttey.yml",
+    "definitions/v11/pttime.yml",
+    "definitions/v11/ptzone-api.yml",
+    "definitions/v11/ptzone.yml",
+    "definitions/v11/punkshorror.yml",
+    "definitions/v11/puntotorrent.yml",
+    "definitions/v11/pussytorrents.yml",
+    "definitions/v11/putao.yml",
+    "definitions/v11/pwtorrents.yml",
+    "definitions/v11/pwtorrents2fa.yml",
+    "definitions/v11/qingwa.yml",
+    "definitions/v11/r3vwtf.yml",
+    "definitions/v11/racing4everyone-api.yml",
+    "definitions/v11/racing4us.yml",
+    "definitions/v11/racingforme.yml",
+    "definitions/v11/railgunpt.yml",
+    "definitions/v11/rainbowtracker.yml",
+    "definitions/v11/rastastugan-api.yml",
+    "definitions/v11/redstartorrent.yml",
+    "definitions/v11/reelflix-api.yml",
+    "definitions/v11/retromoviesclub-api.yml",
+    "definitions/v11/retrotoon.yml",
+    "definitions/v11/rgfootball.yml",
+    "definitions/v11/rintor.yml",
+    "definitions/v11/rintornet.yml",
+    "definitions/v11/riperam.yml",
+    "definitions/v11/rockethd.yml",
+    "definitions/v11/romanianmetaltorrents.yml",
+    "definitions/v11/rousi-pro.yml",
+    "definitions/v11/rudub.yml",
+    "definitions/v11/rustorka.yml",
+    "definitions/v11/rutor.yml",
+    "definitions/v11/samaritano.yml",
+    "definitions/v11/sapibr.yml",
+    "definitions/v11/sbpt.yml",
+    "definitions/v11/scenerush.yml",
+    "definitions/v11/scenetime-api.yml",
+    "definitions/v11/seedcore-api.yml",
+    "definitions/v11/seedfile.yml",
+    "definitions/v11/seedpool-api.yml",
+    "definitions/v11/selezen.yml",
+    "definitions/v11/sewerpt.yml",
+    "definitions/v11/sextorrent-api.yml",
+    "definitions/v11/sexypics.yml",
+    "definitions/v11/shadowbit.yml",
+    "definitions/v11/shakaw.yml",
+    "definitions/v11/shanaproject.yml",
+    "definitions/v11/shareisland-api.yml",
+    "definitions/v11/showrss.yml",
+    "definitions/v11/siambit.yml",
+    "definitions/v11/siqi.yml",
+    "definitions/v11/skidrowrepack.yml",
+    "definitions/v11/skipthecommercials-api.yml",
+    "definitions/v11/sktorrent-org.yml",
+    "definitions/v11/sktorrent.yml",
+    "definitions/v11/snowpt.yml",
+    "definitions/v11/sosulki.yml",
+    "definitions/v11/soulvoice-api.yml",
+    "definitions/v11/soulvoice.yml",
+    "definitions/v11/speedmasterhd.yml",
+    "definitions/v11/spiritofrevolution.yml",
+    "definitions/v11/sportscora.yml",
+    "definitions/v11/sportscult.yml",
+    "definitions/v11/springsunday.yml",
+    "definitions/v11/stellarwinds.yml",
+    "definitions/v11/sukebeinyaasi.yml",
+    "definitions/v11/superbits.yml",
+    "definitions/v11/swarmazon-api.yml",
+    "definitions/v11/tangpt.yml",
+    "definitions/v11/tapochek.yml",
+    "definitions/v11/tasmanit.yml",
+    "definitions/v11/teamctgame.yml",
+    "definitions/v11/teamflix.yml",
+    "definitions/v11/teamhd.yml",
+    "definitions/v11/teamos.yml",
+    "definitions/v11/thebrothers.yml",
+    "definitions/v11/thecrazyones.yml",
+    "definitions/v11/theempire.yml",
+    "definitions/v11/thefallingangels.yml",
+    "definitions/v11/thegeeks.yml",
+    "definitions/v11/thekitchen.yml",
+    "definitions/v11/theleachzone-api.yml",
+    "definitions/v11/themixingbowl.yml",
+    "definitions/v11/thenewfun.yml",
+    "definitions/v11/thenewheaven.yml",
+    "definitions/v11/theoccult.yml",
+    "definitions/v11/theoldschool-api.yml",
+    "definitions/v11/thepiratebay.yml",
+    "definitions/v11/theplace.yml",
+    "definitions/v11/theshow.yml",
+    "definitions/v11/thevault.yml",
+    "definitions/v11/thewordmusic.yml",
+    "definitions/v11/thorhub-api.yml",
+    "definitions/v11/tjupt.yml",
+    "definitions/v11/tlfbits.yml",
+    "definitions/v11/tmghub.yml",
+    "definitions/v11/tokyotosho.yml",
+    "definitions/v11/tormac.yml",
+    "definitions/v11/tornado.yml",
+    "definitions/v11/torrent-heaven.yml",
+    "definitions/v11/torrent-pirat.yml",
+    "definitions/v11/torrent-turk.yml",
+    "definitions/v11/torrent9.yml",
+    "definitions/v11/torrentbd.yml",
+    "definitions/v11/torrentby.yml",
+    "definitions/v11/torrentbyte.yml",
+    "definitions/v11/torrentccf.yml",
+    "definitions/v11/torrentclaw.yml",
+    "definitions/v11/torrentcore.yml",
+    "definitions/v11/torrentdd.yml",
+    "definitions/v11/torrentdownload.yml",
+    "definitions/v11/torrentdownloads.yml",
+    "definitions/v11/torrenteros-api.yml",
+    "definitions/v11/torrenthaven-api.yml",
+    "definitions/v11/torrenthr-api.yml",
+    "definitions/v11/torrenting.yml",
+    "definitions/v11/torrentkitty.yml",
+    "definitions/v11/torrentleech.yml",
+    "definitions/v11/torrentlt.yml",
+    "definitions/v11/torrentmasters.yml",
+    "definitions/v11/torrentproject2.yml",
+    "definitions/v11/torrentsome.yml",
+    "definitions/v11/torrenttip.yml",
+    "definitions/v11/torrenttrader.yml",
+    "definitions/v11/totheglory.yml",
+    "definitions/v11/totheglory2fa.yml",
+    "definitions/v11/tr4ker.yml",
+    "definitions/v11/trackermk.yml",
+    "definitions/v11/trackerzero.yml",
+    "definitions/v11/traht.yml",
+    "definitions/v11/trancetraffic.yml",
+    "definitions/v11/trezzor.yml",
+    "definitions/v11/trezzorcookie.yml",
+    "definitions/v11/tribalmixes.yml",
+    "definitions/v11/turkseed-api.yml",
+    "definitions/v11/turktorrent.yml",
+    "definitions/v11/u2.yml",
+    "definitions/v11/u3c3.yml",
+    "definitions/v11/uatorrent.yml",
+    "definitions/v11/ubits.yml",
+    "definitions/v11/uindex.yml",
+    "definitions/v11/ultrabits-api.yml",
+    "definitions/v11/ultrahd-api.yml",
+    "definitions/v11/ultrahd.yml",
+    "definitions/v11/unbreakable.yml",
+    "definitions/v11/unionfansub.yml",
+    "definitions/v11/unlimitz.yml",
+    "definitions/v11/uploadcx.yml",
+    "definitions/v11/upscalevault.yml",
+    "definitions/v11/utopia.yml",
+    "definitions/v11/uztracker.yml",
+    "definitions/v11/v3x.yml",
+    "definitions/v11/vault-network.yml",
+    "definitions/v11/vc-lib-api.yml",
+    "definitions/v11/vc-lib.yml",
+    "definitions/v11/vietmediaf.yml",
+    "definitions/v11/vsthouse.yml",
+    "definitions/v11/vstorrent.yml",
+    "definitions/v11/vsttorrents.yml",
+    "definitions/v11/whiteangel.yml",
+    "definitions/v11/wihd.yml",
+    "definitions/v11/wintersakura.yml",
+    "definitions/v11/world-of-tomorrow-api.yml",
+    "definitions/v11/world-torrent.yml",
+    "definitions/v11/xdy-api.yml",
+    "definitions/v11/xdy.yml",
+    "definitions/v11/xingtan.yml",
+    "definitions/v11/xingwan.yml",
+    "definitions/v11/xingyung.yml",
+    "definitions/v11/xloli-api.yml",
+    "definitions/v11/xloli.yml",
+    "definitions/v11/xtorrenty.yml",
+    "definitions/v11/xtremebytes.yml",
+    "definitions/v11/xwtclassics.yml",
+    "definitions/v11/xwtclassics2fa.yml",
+    "definitions/v11/xwtorrents.yml",
+    "definitions/v11/xwtorrents2fa.yml",
+    "definitions/v11/xxxclub.yml",
+    "definitions/v11/xxxtor.yml",
+    "definitions/v11/yggreborn-api.yml",
+    "definitions/v11/yts.yml",
+    "definitions/v11/yuscene-api.yml",
+    "definitions/v11/zamundalife.yml",
+    "definitions/v11/zappateers.yml",
+    "definitions/v11/zenith.yml",
+    "definitions/v11/zmpt-api.yml",
+    "definitions/v11/zmpt.yml",
+    "definitions/v11/zrpt.yml",
+    "definitions/v11/ztracker.yml",
+    "definitions/v12/blueroms.yml"
+  ],
+  "entries": [
+    {
+      "path": "definitions/v11/0dayfiles-api.yml",
+      "name": "0DayFiles (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/0daykiev.yml",
+      "name": "0day.kiev",
+      "privacy": "private",
+      "language": "uk-UA",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/0magnet.yml",
+      "name": "0Magnet",
+      "privacy": "public",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/1337x.yml",
+      "name": "1337x",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/13city-api.yml",
+      "name": "13City (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/13city.yml",
+      "name": "13City",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/1ptbar-api.yml",
+      "name": "1ptbar (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/1ptbar.yml",
+      "name": "1ptbar",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/3dtorrents.yml",
+      "name": "3D Torrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/3dvault-api.yml",
+      "name": "3D Vault (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/4thd.yml",
+      "name": "4thD",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/52bt.yml",
+      "name": "52BT",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/52pt.yml",
+      "name": "52PT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/Bittorrentfiles.yml",
+      "name": "Bittorrentfiles",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/abnormal-api.yml",
+      "name": "Abnormal (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/abtorrents.yml",
+      "name": "ABtorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/acgrip.yml",
+      "name": "ACG.RIP",
+      "privacy": "public",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/acrossthetasman.yml",
+      "name": "Across The Tasman",
+      "privacy": "private",
+      "language": "en-AU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/aftershock.yml",
+      "name": "Aftershock",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/agsvpt.yml",
+      "name": "AGSVPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/aidoruonline.yml",
+      "name": "Aidoru!Online",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/aither-api.yml",
+      "name": "Aither (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/alabala-api.yml",
+      "name": "AlaBala (API)",
+      "privacy": "private",
+      "language": "bg-BG",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/alingpt-api.yml",
+      "name": "alingPT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/alingpt.yml",
+      "name": "alingPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/amigosshare.yml",
+      "name": "Amigos Share Club",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/anibt.yml",
+      "name": "Anibt",
+      "privacy": "public",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/animebybelka.yml",
+      "name": "Anime by Belka",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/animelayer.yml",
+      "name": "AnimeLayer",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/animetorrentsro.yml",
+      "name": "AnimeTorrents.ro",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/animetosho-xyz.yml",
+      "name": "Anime Tosho",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/animeworld-api.yml",
+      "name": "AnimeWorld (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/anisource.yml",
+      "name": "AniSource",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/anthelion-api.yml",
+      "name": "Anthelion (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/arabafenice.yml",
+      "name": "ArabaFenice",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/arabicsource-api.yml",
+      "name": "ArabicSource (API)",
+      "privacy": "private",
+      "language": "ar-SA",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/arabp2p.yml",
+      "name": "ArabP2P",
+      "privacy": "private",
+      "language": "ar-AE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/arabscene.yml",
+      "name": "ArabScene",
+      "privacy": "private",
+      "language": "ar-AE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/arabtorrents.yml",
+      "name": "ArabTorrents",
+      "privacy": "private",
+      "language": "ar-AE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/asiancinema.yml",
+      "name": "AsianCinema",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/asiandvdclub.yml",
+      "name": "AsianDVDClub",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/astratorrent.yml",
+      "name": "AstraTorrent",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/audiences.yml",
+      "name": "Audiences",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/audionews.yml",
+      "name": "AudioNews",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/aussierules.yml",
+      "name": "Aussierul.es",
+      "privacy": "private",
+      "language": "en-AU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/azusa.yml",
+      "name": "Azusa (梓喵)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/backups.yml",
+      "name": "Back-ups",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bangumi-moe.yml",
+      "name": "Bangumi Moe",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/baozipt-api.yml",
+      "name": "baoziPT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/baozipt.yml",
+      "name": "baoziPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/beload.yml",
+      "name": "Beload",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/best-torrents.yml",
+      "name": "Best-Torrents",
+      "privacy": "semi-private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bestcore.yml",
+      "name": "Best-Core",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bibliotik.yml",
+      "name": "Bibliotik",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/bigcore.yml",
+      "name": "BigCore",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bigfangroup.yml",
+      "name": "BigFANGroup",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/binarybay.yml",
+      "name": "BinaryBay",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitagent.yml",
+      "name": "BitAgent",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitbazis.yml",
+      "name": "Bit-Bázis",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitded.yml",
+      "name": "Bitded",
+      "privacy": "private",
+      "language": "th-TH",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitgamer.yml",
+      "name": "bitGAMER",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/bithumen.yml",
+      "name": "BitHUmen",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitmagnet.yml",
+      "name": "BitMagnet (Local DHT)",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bitporn.yml",
+      "name": "BitPorn (API)",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/bitturk.yml",
+      "name": "BiTTuRK",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bjshare.yml",
+      "name": "BJ-Share",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/blueroms.yml",
+      "name": "BlueRoms",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/bluetorrents.yml",
+      "name": "BlueTorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bluraytracker.yml",
+      "name": "BlurayTracker",
+      "privacy": "private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/blutopia-api.yml",
+      "name": "Blutopia (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/booktracker.yml",
+      "name": "BookTracker",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/bootytape.yml",
+      "name": "BootyTape",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/borgzelle.yml",
+      "name": "Borgzelle",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/boxingtorrents.yml",
+      "name": "Boxing Torrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/brasiltracker.yml",
+      "name": "BrasilTracker",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/btarg.yml",
+      "name": "BTArg",
+      "privacy": "private",
+      "language": "es-AR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/btdirectory.yml",
+      "name": "BTdirectory",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/btetree.yml",
+      "name": "BT.etree",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/btnext.yml",
+      "name": "BTNext",
+      "privacy": "private",
+      "language": "pt-PT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/btschool.yml",
+      "name": "BTSCHOOL",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/bwtorrents.yml",
+      "name": "BwTorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/byrbt.yml",
+      "name": "BYRBT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/byrutor.yml",
+      "name": "Byrutor",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/c411.yml",
+      "name": "C411",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cangbaoge.yml",
+      "name": "cangbaoge (CBG)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/capybarabr.yml",
+      "name": "CapybaraBR (API)",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/carpathians.yml",
+      "name": "Carpathians",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/carpt.yml",
+      "name": "CarPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cathoderaytube.yml",
+      "name": "Cathode-Ray.Tube",
+      "privacy": "private",
+      "language": "en-GB",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/catorrent.yml",
+      "name": "Catorrent",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/ceskeforum.yml",
+      "name": "CeskeForum",
+      "privacy": "private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cgpeers.yml",
+      "name": "CGPeers",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/chdbits.yml",
+      "name": "CHDBits",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cinemageddon.yml",
+      "name": "Cinemageddon",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/cinemamovies.yml",
+      "name": "CinemaMovieS_ZT",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cinematik.yml",
+      "name": "Cinematik (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/clearjav-api.yml",
+      "name": "ClearJAV (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/coastalcrew.yml",
+      "name": "Coastal-Music-Crew",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/comicat.yml",
+      "name": "comicat",
+      "privacy": "semi-private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/concertos.yml",
+      "name": "Concertos (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crabpt-api.yml",
+      "name": "CrabPT (蟹黄堡) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crabpt.yml",
+      "name": "CrabPT (蟹黄堡)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crackingpatching.yml",
+      "name": "CrackingPatching",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/crazyspirits-api.yml",
+      "name": "CrazySpirits (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crnaberza.yml",
+      "name": "CrnaBerza",
+      "privacy": "private",
+      "language": "sr-SP",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crnaberza2fa.yml",
+      "name": "CrnaBerza2FA",
+      "privacy": "private",
+      "language": "sr-SP",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/crt2fa.yml",
+      "name": "CRT2FA",
+      "privacy": "private",
+      "language": "en-GB",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cspt.yml",
+      "name": "Caishen (财神)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cyanbug.yml",
+      "name": "cyanbug (大青虫)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cyclingarchiveclub.yml",
+      "name": "CyclingArchiveClub",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/czteam-api.yml",
+      "name": "CZTeam (API)",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/damagnet.yml",
+      "name": "DaMagNet",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/danishbits-api.yml",
+      "name": "DanishBits (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/darkpeers.yml",
+      "name": "Darkpeers (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dasunerwartete-api.yml",
+      "name": "Das Unerwartete (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dasunerwartete.yml",
+      "name": "Das Unerwartete",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/datascene-api.yml",
+      "name": "DataScene (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/daxiangjiao-api.yml",
+      "name": "DaXiangJiao (大香蕉) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/daxiangjiao.yml",
+      "name": "DaXiangJiao (大香蕉)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/deildu.yml",
+      "name": "Deildu",
+      "privacy": "semi-private",
+      "language": "is-IS",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/depthstudio-api.yml",
+      "name": "Depth Studio (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/depthstudio.yml",
+      "name": "Depth Studio",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/desitorrents-api.yml",
+      "name": "DesiTorrents (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/devil-torrents.yml",
+      "name": "Devil-Torrents",
+      "privacy": "semi-private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/diablotorrent.yml",
+      "name": "Diablo Torrent",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/digitalcore-api.yml",
+      "name": "DigitalCore (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dimeadozen.yml",
+      "name": "DimeADozen",
+      "privacy": "private",
+      "language": "en-GB",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/dirtybytes-api.yml",
+      "name": "DirtyBytes (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/discfan-api.yml",
+      "name": "DiscFan (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/discfan.yml",
+      "name": "DiscFan",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dmhy.yml",
+      "name": "dmhy",
+      "privacy": "public",
+      "language": "zh-TW",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/docspedia.yml",
+      "name": "DocsPedia",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/draupnirr.yml",
+      "name": "Draupnirr",
+      "privacy": "semi-private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dreadvault-api.yml",
+      "name": "DreadVault (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dreamingtree.yml",
+      "name": "DreamingTree",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/drugari.yml",
+      "name": "Drugari",
+      "privacy": "private",
+      "language": "hr-HR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ds-reloaded.yml",
+      "name": "DS-Reloaded",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dubhe.yml",
+      "name": "dubhe (天枢)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/dxp.yml",
+      "name": "DXP",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ebookbay.yml",
+      "name": "EBookBay",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/ehentai.yml",
+      "name": "E-Hentai",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/electro-torrent.yml",
+      "name": "Electro-Torrent",
+      "privacy": "semi-private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/empornium.yml",
+      "name": "Empornium",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/empornium2fa.yml",
+      "name": "Empornium2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/emuwarez.yml",
+      "name": "eMuwarez (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/estone.yml",
+      "name": "eStone",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ex-torrenty.yml",
+      "name": "Ex-torrenty",
+      "privacy": "semi-private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/exitorrent-org.yml",
+      "name": "exitorrent.org",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/exkinoray.yml",
+      "name": "ExKinoRay",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/explosiv-world.yml",
+      "name": "Explosiv-World",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/extratorrent-st.yml",
+      "name": "ExtraTorrent.st",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/extremebits.yml",
+      "name": "ExtremeBits",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/eztv.yml",
+      "name": "EZTV",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/eztvl.yml",
+      "name": "EZTVL",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/f1carreras-api.yml",
+      "name": "F1Carreras (API)",
+      "privacy": "private",
+      "language": "es-MX",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/fanoin.yml",
+      "name": "FANO.IN",
+      "privacy": "private",
+      "language": "lv-LV",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/fappaizuri.yml",
+      "name": "Fappaizuri",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/fappaizuri2fa.yml",
+      "name": "Fappaizuri2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/femdomcult.yml",
+      "name": "Femdomcult",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/fenyarnyek-tracker.yml",
+      "name": "Fenyarnyek-Tracker",
+      "privacy": "semi-private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/file-tracker.yml",
+      "name": "File-Tracker",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/fileiplay.yml",
+      "name": "FileIplay",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/filemood.yml",
+      "name": "FileMood",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/finelite.yml",
+      "name": "FinElite",
+      "privacy": "private",
+      "language": "fi-FI",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/flood.yml",
+      "name": "Flood",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/freefarm-api.yml",
+      "name": "Free Farm (自由农场) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/freefarm.yml",
+      "name": "Free Farm (自由农场)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/freejavtorrent.yml",
+      "name": "Free JAV Torrent",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/funfile.yml",
+      "name": "FunFile",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/funzone-api.yml",
+      "name": "funZone (API)",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/futuretorrent.yml",
+      "name": "FutureTorrent",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/fuzer.yml",
+      "name": "Fuzer",
+      "privacy": "private",
+      "language": "he-IL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/g3minitr4ck3r-api.yml",
+      "name": "G3MINI TR4CK3R (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/gay-torrents.yml",
+      "name": "Gay-Torrents.net",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/gaytorrentru.yml",
+      "name": "GAYtorrent.ru",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/generationfree-api.yml",
+      "name": "Generation-Free (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ggpt.yml",
+      "name": "GGPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/gigatorrents.yml",
+      "name": "GigaTorrents",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/girotorrent.yml",
+      "name": "Girotorrent",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/haidan.yml",
+      "name": "HaiDan",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/haitang.yml",
+      "name": "Hǎitáng (海棠PT)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/happyfappy.yml",
+      "name": "HappyFappy",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/happyfappy2fa.yml",
+      "name": "HappyFappy2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/hawke-uno.yml",
+      "name": "hawke-uno",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hd-club.yml",
+      "name": "HD-CLUB",
+      "privacy": "private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hd-unit3d-api.yml",
+      "name": "HD-UNiT3D (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdarea.yml",
+      "name": "HDArea",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdbao-api.yml",
+      "name": "HDBao (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdbao.yml",
+      "name": "HDBao",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdc.yml",
+      "name": "HDCiTY",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdclone.yml",
+      "name": "HDClone",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hddolby.yml",
+      "name": "HD Dolby",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdfans.yml",
+      "name": "HDFans",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdforever-api.yml",
+      "name": "HD-Forever (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdgalaktik.yml",
+      "name": "HDGalaKtik",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdhome.yml",
+      "name": "HDHome",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdkylin.yml",
+      "name": "HDKylin (麒麟)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdolimpo-api.yml",
+      "name": "HD-Olimpo (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdonly-api.yml",
+      "name": "HD-Only (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdroute.yml",
+      "name": "HDRoute",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdsky.yml",
+      "name": "HDSky",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdspace.yml",
+      "name": "HD-Space",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdspacecookie.yml",
+      "name": "HD-SpaceCookie",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdtime.yml",
+      "name": "HDtime",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdtorrents.yml",
+      "name": "HD-Torrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdtorrentsit.yml",
+      "name": "HDTorrents.it (API)",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdturk.yml",
+      "name": "HDTurk",
+      "privacy": "private",
+      "language": "tr-TR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdu.yml",
+      "name": "HDU",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdvideo-api.yml",
+      "name": "HDVideo (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdvideo.yml",
+      "name": "HDVideo",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hdzero.yml",
+      "name": "HDZero (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hebits.yml",
+      "name": "Hebits",
+      "privacy": "private",
+      "language": "he-IL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hellashut-api.yml",
+      "name": "HellasHut (API)",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hellashut.yml",
+      "name": "HellasHut",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hellenic-hd-api.yml",
+      "name": "HELLENIC-HD (API)",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/helltorrents.yml",
+      "name": "HellTorrents",
+      "privacy": "semi-private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/herobit.yml",
+      "name": "HeroBit",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hhanclub.yml",
+      "name": "HHanClub",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hhd-api.yml",
+      "name": "HHD (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/houseofdevil.yml",
+      "name": "House of Devil",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hqmusic.yml",
+      "name": "HQMusic",
+      "privacy": "private",
+      "language": "vi-VN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/hudbt.yml",
+      "name": "HUDBT (蝴蝶)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/huntorrent.yml",
+      "name": "HunTorrent",
+      "privacy": "semi-private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/hxpt.yml",
+      "name": "HxPT (好学)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/ilcorsaroblu.yml",
+      "name": "Il Corsaro Blu",
+      "privacy": "semi-private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/immortuos.yml",
+      "name": "Immortuos",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/indietorrents.yml",
+      "name": "Indietorrents",
+      "privacy": "private",
+      "language": "en-GB",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/infinityhd-api.yml",
+      "name": "InfinityHD (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/infire.yml",
+      "name": "Infire",
+      "privacy": "private",
+      "language": "sl-SI",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/insanetracker.yml",
+      "name": "Insane Tracker",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/internetarchive.yml",
+      "name": "Internet Archive",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/itatorrents.yml",
+      "name": "ItaTorrents",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/jme-reunit3d-api.yml",
+      "name": "JME-REUNIT3D (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/jpopsuki.yml",
+      "name": "JPopsuki",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/jptv4us-api.yml",
+      "name": "JPTV4us (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kamept.yml",
+      "name": "KamePT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/karagarga.yml",
+      "name": "Karagarga",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/keepfriends.yml",
+      "name": "Keep Friends",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kelu.yml",
+      "name": "Kelu",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/kickasstorrents-to.yml",
+      "name": "kickasstorrents.to",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kickasstorrents-ws.yml",
+      "name": "kickasstorrents.ws",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kinorun.yml",
+      "name": "Kinorun",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/kinozal-magnet.yml",
+      "name": "Kinozal (M)",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kinozal.yml",
+      "name": "Kinozal",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/korsar.yml",
+      "name": "Korsar",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/krazyzone.yml",
+      "name": "KrazyZone",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kufei-api.yml",
+      "name": "Kufei (库非) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kufei.yml",
+      "name": "Kufei (库非)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/kufirc.yml",
+      "name": "Kufirc",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/kufirc2fa.yml",
+      "name": "Kufirc2FA",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/lajidui-api.yml",
+      "name": "lajidui (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lajidui.yml",
+      "name": "lajidui",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lastdigitalunderground.yml",
+      "name": "Last Digital Underground",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lastfiles.yml",
+      "name": "LastFiles",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lat-team-api.yml",
+      "name": "Lat-Team (API)",
+      "privacy": "private",
+      "language": "es-MX",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/learnflakes.yml",
+      "name": "LearnFlakes",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/leech24.yml",
+      "name": "leech24",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lemonhd-net-api.yml",
+      "name": "LemonHD.net (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lemonhd-net.yml",
+      "name": "LemonHD.net",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/lesaloon.yml",
+      "name": "LeSaloon",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/letseed.yml",
+      "name": "LetSeed",
+      "privacy": "private",
+      "language": "tr-TR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/libranet.yml",
+      "name": "LibraNet",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/limetorrents.yml",
+      "name": "LimeTorrents",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/linkomanija.yml",
+      "name": "LinkoManija",
+      "privacy": "private",
+      "language": "lt-LT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/linuxtracker.yml",
+      "name": "LinuxTracker",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/locadora.yml",
+      "name": "Locadora (API)",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/longpt-api.yml",
+      "name": "LongPT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/longpt.yml",
+      "name": "LongPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/losslessclub.yml",
+      "name": "LosslessClub",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/lp-bits.yml",
+      "name": "LP-Bits 2.0",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/lst.yml",
+      "name": "LST",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/luckpt.yml",
+      "name": "LuckPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/luminarr-api.yml",
+      "name": "Luminarr (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mactorrentsdownload.yml",
+      "name": "Mac Torrents Download",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/madsrevolution.yml",
+      "name": "MaDs Revolution",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/magico.yml",
+      "name": "Magico",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/magnetcat.yml",
+      "name": "Magnet Cat",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/magnetdownload.yml",
+      "name": "MagnetDownload",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/majomparade.yml",
+      "name": "Majomparádé",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/malayabits-api.yml",
+      "name": "Malayabits (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/march.yml",
+      "name": "March",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/marinetracker.yml",
+      "name": "Marine Tracker",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/matrix.yml",
+      "name": "Matrix",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mazepa.yml",
+      "name": "Mazepa",
+      "privacy": "semi-private",
+      "language": "uk-UA",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mdan.yml",
+      "name": "MDAN",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/megapeer.yml",
+      "name": "MegaPeer",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/memphis.yml",
+      "name": "Memphis",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mesevilag.yml",
+      "name": "MeseVilág",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/metalguru.yml",
+      "name": "MetalGuru",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/metaltracker.yml",
+      "name": "Metal Tracker",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/midnightscene.yml",
+      "name": "MidnightScene",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mikan.yml",
+      "name": "Mikan",
+      "privacy": "public",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/milkie.yml",
+      "name": "Milkie",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/milnueve-api.yml",
+      "name": "Milnueve (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/miobt.yml",
+      "name": "MioBT",
+      "privacy": "semi-private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mixtapetorrent.yml",
+      "name": "MixtapeTorrent",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/mma-torrents.yml",
+      "name": "MMA-torrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mnv.yml",
+      "name": "MNV",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mojblink.yml",
+      "name": "MOJBLiNK",
+      "privacy": "private",
+      "language": "sl-SI",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/momentpt.yml",
+      "name": "MomentPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/monikadesign-api.yml",
+      "name": "MonikaDesign (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mousebits.yml",
+      "name": "MouseBits",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/musebootlegs.yml",
+      "name": "MuseBootlegs",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/musopia-api.yml",
+      "name": "Musopia (音乐乌托邦) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/musopia.yml",
+      "name": "Musopia (音乐乌托邦)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/muxuege.yml",
+      "name": "Muxuege",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/mvgroupforum.yml",
+      "name": "MVGroup Forum",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/mvgroupmain.yml",
+      "name": "MVGroup Main",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/mypornclub.yml",
+      "name": "MyPornClub",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/myspleen.yml",
+      "name": "MySpleen",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nanyangpt.yml",
+      "name": "NanyangPT (南洋)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ncore.yml",
+      "name": "nCore",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nekobt.yml",
+      "name": "nekoBT",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nethd.yml",
+      "name": "NetHD",
+      "privacy": "semi-private",
+      "language": "vi-VN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/new-team.yml",
+      "name": "New-Team",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/newheaven.yml",
+      "name": "New Heaven",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/newretro.yml",
+      "name": "The New Retro",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/newstudio.yml",
+      "name": "NewStudio",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/newstudiol.yml",
+      "name": "NewStudioL",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nicept-api.yml",
+      "name": "NicePT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/nicept.yml",
+      "name": "NicePT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/nipponsei.yml",
+      "name": "Nipponsei",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/nirvana.yml",
+      "name": "Nirvana (API)",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/njtupt.yml",
+      "name": "njtupt (浦园)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nobs.yml",
+      "name": "NOBS",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/noname-club.yml",
+      "name": "NoNaMe Club",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/noname-clubl.yml",
+      "name": "NoNaMe ClubL",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nordicbytes.yml",
+      "name": "NordicBytes",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nordicquality.yml",
+      "name": "NordicQuality (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nostradamus.yml",
+      "name": "Nostradamus",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/novahd.yml",
+      "name": "NovaHD",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/nyaasi.yml",
+      "name": "Nyaa.si",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/okpt.yml",
+      "name": "OKPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/oldgreektracker.yml",
+      "name": "Old Greek Tracker (OGT)",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/oldtoonsworld.yml",
+      "name": "OldToonsWorld (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/onejav.yml",
+      "name": "OneJAV",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/onlyencodes-api.yml",
+      "name": "OnlyEncodes+ (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/opencd.yml",
+      "name": "OpenCD",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/opensharing.yml",
+      "name": "OpenSharing",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/order66.yml",
+      "name": "Order66",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/oshenpt-api.yml",
+      "name": "OshenPT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/oshenpt.yml",
+      "name": "OshenPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ourbits.yml",
+      "name": "OurBits",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/p2pbg.yml",
+      "name": "P2PBG",
+      "privacy": "private",
+      "language": "bg-BG",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/panda.yml",
+      "name": "Panda",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pandacd.yml",
+      "name": "PandaCD",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/parabellumhd-api.yml",
+      "name": "ParabellumHD (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/party-tracker.yml",
+      "name": "Party-Tracker",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pctorrent.yml",
+      "name": "PC-torrent",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/peeratiko.yml",
+      "name": "Peeratiko",
+      "privacy": "private",
+      "language": "el-GR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/peergarden.yml",
+      "name": "PeerGarden",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/peersfm.yml",
+      "name": "Peers.FM",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/periodical.yml",
+      "name": "Periodical",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/phoenixproject.yml",
+      "name": "Phoenix Project",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/phoenixpt-api.yml",
+      "name": "PhoenixPT (凤凰PT) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/phoenixpt.yml",
+      "name": "PhoenixPT (凤凰PT)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pier720.yml",
+      "name": "720pier",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pignetwork.yml",
+      "name": "PigNetwork (猪猪网)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pixelcove.yml",
+      "name": "PixelCove",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/pixelcove2fa.yml",
+      "name": "PixelCove2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/playletpt.yml",
+      "name": "PlayletPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/plugintorrent.yml",
+      "name": "plugintorrent",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/podzemlje.yml",
+      "name": "Podzemlje",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/polishtorrent.yml",
+      "name": "Polish Torrent (API)",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/polishtracker-api.yml",
+      "name": "PolishTracker (API)",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pornolab.yml",
+      "name": "PornoLab",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/pornorip.yml",
+      "name": "Pornorip",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/pornotorrent.yml",
+      "name": "PornoTorrent",
+      "privacy": "public",
+      "language": "pt-BR",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/pornrips.yml",
+      "name": "PornRips",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/pornxlab.yml",
+      "name": "PornXLab",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/portugas-api.yml",
+      "name": "Portugas (API)",
+      "privacy": "private",
+      "language": "pt-PT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/postman-api.yml",
+      "name": "Postman (API)",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/postman.yml",
+      "name": "Postman",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/proaudiotorrents.yml",
+      "name": "ProAudioTorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/proporno.yml",
+      "name": "ProPorno",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/ptcafe-api.yml",
+      "name": "PTCafe (咖啡) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptcafe.yml",
+      "name": "PTCafe (咖啡)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptcc.yml",
+      "name": "PTCC (我的PT)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pterclub.yml",
+      "name": "PTerClub (PT之友俱乐部)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptfans.yml",
+      "name": "PTFans",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptfiles.yml",
+      "name": "PTFiles",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptgtk-api.yml",
+      "name": "PT GTK (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptgtk.yml",
+      "name": "PT GTK",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pthome.yml",
+      "name": "PThome",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptitzmx.yml",
+      "name": "PT分享站 (itzmx)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptlgs.yml",
+      "name": "PTLGS",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptsbao.yml",
+      "name": "PTSBAO (烧包)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptskit-api.yml",
+      "name": "PTSKIT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptskit.yml",
+      "name": "PTSKIT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pttey.yml",
+      "name": "PTTey",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pttime.yml",
+      "name": "PTTime",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptzone-api.yml",
+      "name": "PTzone (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ptzone.yml",
+      "name": "PTzone",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/punkshorror.yml",
+      "name": "Punk's Horror Tracker",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/puntotorrent.yml",
+      "name": "PuntoTorrent",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pussytorrents.yml",
+      "name": "PussyTorrents",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/putao.yml",
+      "name": "PuTao (葡萄)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pwtorrents.yml",
+      "name": "PWTorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/pwtorrents2fa.yml",
+      "name": "PWTorrents2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/qingwa.yml",
+      "name": "Qingwa (青蛙)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/r3vwtf.yml",
+      "name": "R3V WTF!",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/racing4everyone-api.yml",
+      "name": "Racing4Everyone (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/racing4us.yml",
+      "name": "Racing4us",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/racingforme.yml",
+      "name": "RacingForMe",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/railgunpt.yml",
+      "name": "RailgunPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rainbowtracker.yml",
+      "name": "Rainbow Tracker",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rastastugan-api.yml",
+      "name": "Rastastugan (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/redstartorrent.yml",
+      "name": "Red Star Torrent",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/reelflix-api.yml",
+      "name": "ReelFLiX (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/retromoviesclub-api.yml",
+      "name": "RetroMoviesClub (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/retrotoon.yml",
+      "name": "RetroToon",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rgfootball.yml",
+      "name": "RGFootball",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rintor.yml",
+      "name": "RinTor",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/rintornet.yml",
+      "name": "RinTor.NeT",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/riperam.yml",
+      "name": "RiperAM",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rockethd.yml",
+      "name": "RocketHD (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/romanianmetaltorrents.yml",
+      "name": "Romanian Metal Torrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/rousi-pro.yml",
+      "name": "Rousi.pro",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rudub.yml",
+      "name": "RUDUB",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rustorka.yml",
+      "name": "Rustorka",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/rutor.yml",
+      "name": "RuTor",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/samaritano.yml",
+      "name": "SAMARITANO (API)",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sapibr.yml",
+      "name": "SAPIbr (API)",
+      "privacy": "private",
+      "language": "pt-PT",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sbpt.yml",
+      "name": "SBPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/scenerush.yml",
+      "name": "SceneRush",
+      "privacy": "private",
+      "language": "pt-PT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/scenetime-api.yml",
+      "name": "SceneTime (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/seedcore-api.yml",
+      "name": "SeedCore (API)",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/seedfile.yml",
+      "name": "SeedFile",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/seedpool-api.yml",
+      "name": "seedpool (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/selezen.yml",
+      "name": "seleZen",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/sewerpt.yml",
+      "name": "SewerPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sextorrent-api.yml",
+      "name": "SexTorrent (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sexypics.yml",
+      "name": "Sexy-Pics",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/shadowbit.yml",
+      "name": "Shadowbit",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/shakaw.yml",
+      "name": "ShaKaw",
+      "privacy": "private",
+      "language": "pt-BR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/shanaproject.yml",
+      "name": "Shana Project",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/shareisland-api.yml",
+      "name": "Shareisland (API)",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/showrss.yml",
+      "name": "showRSS",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/siambit.yml",
+      "name": "SiamBIT",
+      "privacy": "private",
+      "language": "th-TH",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/siqi.yml",
+      "name": "Siqi",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/skidrowrepack.yml",
+      "name": "SkidrowRepack",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/skipthecommercials-api.yml",
+      "name": "SkipTheCommercials (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sktorrent-org.yml",
+      "name": "SkTorrent.org",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sktorrent.yml",
+      "name": "Sk-CzTorrent",
+      "privacy": "semi-private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/snowpt.yml",
+      "name": "SnowPT",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sosulki.yml",
+      "name": "sosulki",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/soulvoice-api.yml",
+      "name": "SoulVoice (聆音Club) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/soulvoice.yml",
+      "name": "SoulVoice (聆音Club)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/speedmasterhd.yml",
+      "name": "Speedmaster HD",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/spiritofrevolution.yml",
+      "name": "Spirit of Revolution",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sportscora.yml",
+      "name": "SportsCora (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sportscult.yml",
+      "name": "SportsCult",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/springsunday.yml",
+      "name": "SpringSunday",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/stellarwinds.yml",
+      "name": "Stellarwinds",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/sukebeinyaasi.yml",
+      "name": "sukebei.nyaa.si",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/superbits.yml",
+      "name": "Superbits",
+      "privacy": "private",
+      "language": "sv-SE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/swarmazon-api.yml",
+      "name": "Swarmazon (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tangpt.yml",
+      "name": "TangPT (躺平)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tapochek.yml",
+      "name": "Tapochek",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tasmanit.yml",
+      "name": "Tasmanit",
+      "privacy": "private",
+      "language": "en-AU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/teamctgame.yml",
+      "name": "Team CT Game",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/teamflix.yml",
+      "name": "TeamFlix",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/teamhd.yml",
+      "name": "TeamHD",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/teamos.yml",
+      "name": "TeamOS",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/thebrothers.yml",
+      "name": "The Brothers",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thecrazyones.yml",
+      "name": "The Crazy Ones",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/theempire.yml",
+      "name": "The Empire",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thefallingangels.yml",
+      "name": "The Falling Angels",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thegeeks.yml",
+      "name": "The Geeks",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/thekitchen.yml",
+      "name": "The Kitchen",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/theleachzone-api.yml",
+      "name": "TheLeachZone (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/themixingbowl.yml",
+      "name": "themixingbowl",
+      "privacy": "semi-private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/thenewfun.yml",
+      "name": "The-New-Fun",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thenewheaven.yml",
+      "name": "The New Heaven",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/theoccult.yml",
+      "name": "The Occult",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/theoldschool-api.yml",
+      "name": "The Old School (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thepiratebay.yml",
+      "name": "The Pirate Bay",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/theplace.yml",
+      "name": "The Place",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/theshow.yml",
+      "name": "The Show",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/thevault.yml",
+      "name": "The Vault",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/thewordmusic.yml",
+      "name": "The Word Music",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/thorhub-api.yml",
+      "name": "Thor HUB (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tjupt.yml",
+      "name": "TJUPT (北洋园PT)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tlfbits.yml",
+      "name": "TLFBits",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tmghub.yml",
+      "name": "TmGHuB",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tokyotosho.yml",
+      "name": "Tokyo Toshokan",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tormac.yml",
+      "name": "Tormac",
+      "privacy": "private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tornado.yml",
+      "name": "Tornado",
+      "privacy": "private",
+      "language": "sl-SI",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrent-heaven.yml",
+      "name": "Torrent Heaven",
+      "privacy": "private",
+      "language": "nl-NL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrent-pirat.yml",
+      "name": "torrent-pirat",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/torrent-turk.yml",
+      "name": "TOrrent-tuRK",
+      "privacy": "private",
+      "language": "tr-TR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrent9.yml",
+      "name": "Torrent9",
+      "privacy": "public",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentbd.yml",
+      "name": "TorrentBD",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentby.yml",
+      "name": "torrent.by",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/torrentbyte.yml",
+      "name": "TorrentByte",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentccf.yml",
+      "name": "TorrentCCF",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentclaw.yml",
+      "name": "TorrentClaw",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentcore.yml",
+      "name": "Torrent[CORE]",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentdd.yml",
+      "name": "TorrentDD",
+      "privacy": "private",
+      "language": "th-TH",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentdownload.yml",
+      "name": "TorrentDownload",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentdownloads.yml",
+      "name": "Torrent Downloads",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenteros-api.yml",
+      "name": "Torrenteros (API)",
+      "privacy": "private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenthaven-api.yml",
+      "name": "TorrentHaven (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenthr-api.yml",
+      "name": "TorrentHR (API)",
+      "privacy": "private",
+      "language": "hr-HR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenting.yml",
+      "name": "Torrenting",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentkitty.yml",
+      "name": "TorrentKitty",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/torrentleech.yml",
+      "name": "TorrentLeech",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentlt.yml",
+      "name": "Torrent.LT",
+      "privacy": "private",
+      "language": "lt-LT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentmasters.yml",
+      "name": "TorrentMasters",
+      "privacy": "semi-private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrentproject2.yml",
+      "name": "TorrentProject2",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/torrentsome.yml",
+      "name": "Torrentsome",
+      "privacy": "public",
+      "language": "ko-KR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenttip.yml",
+      "name": "Torrenttip",
+      "privacy": "public",
+      "language": "ko-KR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/torrenttrader.yml",
+      "name": "Torrent Trader",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/totheglory.yml",
+      "name": "ToTheGlory",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/totheglory2fa.yml",
+      "name": "ToTheGlory2FA",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/tr4ker.yml",
+      "name": "TR4KER",
+      "privacy": "semi-private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/trackermk.yml",
+      "name": "TrackerMK",
+      "privacy": "private",
+      "language": "mk-MK",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/trackerzero.yml",
+      "name": "TrackerZero",
+      "privacy": "private",
+      "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/traht.yml",
+      "name": "TrahT",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/trancetraffic.yml",
+      "name": "TranceTraffic",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/trezzor.yml",
+      "name": "TreZzoR",
+      "privacy": "private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/trezzorcookie.yml",
+      "name": "TreZzoRCookie",
+      "privacy": "private",
+      "language": "cs-CZ",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/tribalmixes.yml",
+      "name": "TribalMixes",
+      "privacy": "semi-private",
+      "language": "en-GB",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/turkseed-api.yml",
+      "name": "TurkSeed (API)",
+      "privacy": "private",
+      "language": "tr-TR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/turktorrent.yml",
+      "name": "TurkTorrent",
+      "privacy": "private",
+      "language": "tr-TR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/u2.yml",
+      "name": "U2",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/u3c3.yml",
+      "name": "U3C3",
+      "privacy": "public",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/uatorrent.yml",
+      "name": "UATorrent",
+      "privacy": "semi-private",
+      "language": "uk-UA",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ubits.yml",
+      "name": "UBits",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/uindex.yml",
+      "name": "Uindex",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ultrabits-api.yml",
+      "name": "Ultrabits (API)",
+      "privacy": "private",
+      "language": "sv-SE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ultrahd-api.yml",
+      "name": "UltraHD (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ultrahd.yml",
+      "name": "UltraHD",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/unbreakable.yml",
+      "name": "Unbreakable",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/unionfansub.yml",
+      "name": "Union Fansub",
+      "privacy": "semi-private",
+      "language": "es-ES",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/unlimitz.yml",
+      "name": "Unlimitz",
+      "privacy": "private",
+      "language": "th-TH",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/uploadcx.yml",
+      "name": "upload.cx (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/upscalevault.yml",
+      "name": "Upscale Vault (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/utopia.yml",
+      "name": "UTOPIA (API)",
+      "privacy": "private",
+      "language": "uk-UA",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/uztracker.yml",
+      "name": "UzTracker",
+      "privacy": "semi-private",
+      "language": "ru-RU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/v3x.yml",
+      "name": "V3X",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/vault-network.yml",
+      "name": "Vault network",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/vc-lib-api.yml",
+      "name": "VC-Lib (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/vc-lib.yml",
+      "name": "VC-Lib",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/vietmediaf.yml",
+      "name": "VietMediaF",
+      "privacy": "private",
+      "language": "vi-VN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/vsthouse.yml",
+      "name": "VSTHouse",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/vstorrent.yml",
+      "name": "VSTorrent",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/vsttorrents.yml",
+      "name": "VST Torrentz",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/whiteangel.yml",
+      "name": "White Angel",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/wihd.yml",
+      "name": "World-In-HD",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/wintersakura.yml",
+      "name": "WinterSakura",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/world-of-tomorrow-api.yml",
+      "name": "World-of-Tomorrow (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/world-torrent.yml",
+      "name": "World-torrent",
+      "privacy": "public",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xdy-api.yml",
+      "name": "XDY (修道院) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xdy.yml",
+      "name": "XDY (修道院)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xingtan.yml",
+      "name": "Xingtan (杏坛)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/xingwan.yml",
+      "name": "Xingwan (星湾)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xingyung.yml",
+      "name": "Xingyung (星陨阁)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xloli-api.yml",
+      "name": "xloli (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xloli.yml",
+      "name": "xloli",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xtorrenty.yml",
+      "name": "xTorrenty",
+      "privacy": "private",
+      "language": "pl-PL",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xtremebytes.yml",
+      "name": "Xtreme Bytes",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xwtclassics.yml",
+      "name": "XWT-Classics",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xwtclassics2fa.yml",
+      "name": "XWT-Classics2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xwtorrents.yml",
+      "name": "XWtorrents",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xwtorrents2fa.yml",
+      "name": "XWtorrents2FA",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/xxxclub.yml",
+      "name": "XXXClub",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/xxxtor.yml",
+      "name": "xxxtor",
+      "privacy": "public",
+      "language": "ru-RU",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/yggreborn-api.yml",
+      "name": "YggReborn (API)",
+      "privacy": "private",
+      "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/yts.yml",
+      "name": "YTS",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": true,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/yuscene-api.yml",
+      "name": "YUSCENE (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/zamundalife.yml",
+      "name": "Zamunda LIFE",
+      "privacy": "public",
+      "language": "bg-BG",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/zappateers.yml",
+      "name": "Zappateers",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
+      "path": "definitions/v11/zenith.yml",
+      "name": "Zenith",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/zmpt-api.yml",
+      "name": "ZmPT (织梦) (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/zmpt.yml",
+      "name": "ZmPT (织梦)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/zrpt.yml",
+      "name": "ZRPT (自然)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": false,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/ztracker.yml",
+      "name": "Ztracker",
+      "privacy": "semi-private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v12/blueroms.yml",
+      "name": "BlueRoms",
+      "privacy": "public",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    }
+  ]
+}

@@ -896,9 +896,11 @@ public static class ApiEndpoints
                             (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl, body.ApiKey ?? "");
                         }
                         TorznabCaps caps;
+                        string verifiedDetail = "";
                         try
                         {
                             var (ok, detail, parsed) = await TestTorznabAsync(httpFactory, name, baseUrl, apiKey, ct);
+                            verifiedDetail = detail;
                             if (!ok)
                             {
                                 if (savedId is int failedId) await UpsertIndexerHealthAsync(c, failedId, false, detail, ct);
@@ -915,7 +917,7 @@ public static class ApiEndpoints
                         return Results.Ok(new
                         {
                             ok = true, service, name,
-                            detail = $"Indexer '{name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.",
+                            detail = verifiedDetail,
                             categories = caps.Categories.Select(x => new { x.Id, x.Name }),
                             searchAvailable = caps.SearchAvailable, tvSearchAvailable = caps.TvSearchAvailable, movieSearchAvailable = caps.MovieSearchAvailable,
                         });
@@ -1382,6 +1384,16 @@ public static class ApiEndpoints
         var baseUri = UrlGuard.RequireServiceUrl(baseUrl);
         var http = httpFactory.CreateClient(OutboundHttp.TorznabClient);
         http.BaseAddress = new Uri(baseUri, "/");
+        if (TorznabClient.IsDirectNyaa(baseUri))
+        {
+            using var rss = await OutboundHttp.SendWithRetryAsync(http,
+                () => new HttpRequestMessage(HttpMethod.Get, "?page=rss&q=OneArr"), ct);
+            if (!rss.IsSuccessStatusCode)
+                return (false, $"Nyaa RSS returned HTTP {(int)rss.StatusCode}", null);
+            TorznabClient.ParseNyaaRss(await rss.Content.ReadAsStringAsync(ct), name);
+            return (true, "Nyaa RSS is reachable and returns a valid feed.", new TorznabCaps(
+                [new TorznabCategory(5000, "TV / Anime")], true, true, false));
+        }
         using var response = await OutboundHttp.SendWithRetryAsync(http,
             () => new HttpRequestMessage(HttpMethod.Get, "api?t=caps&apikey=" + Uri.EscapeDataString(apiKey)), ct);
         if (!response.IsSuccessStatusCode)
