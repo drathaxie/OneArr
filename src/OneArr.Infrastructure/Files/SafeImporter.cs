@@ -42,7 +42,8 @@ public sealed class SafeImporter : IImporter
         {
             source = CanonicalUnder(request.TorrentRoot, request.SourcePath);
             RequireNoLinksBelow(request.TorrentRoot, source);
-            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath, Path.GetFileName(source));
+            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath,
+                request.DestinationFileName ?? Path.GetFileName(source));
             RequireNoLinksBelow(request.DestinationRoot, dest);
         }
         catch (UnauthorizedAccessException ex)
