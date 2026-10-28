@@ -303,6 +303,7 @@ function IndexersSection() {
   const [editing, setEditing] = useState<Indexer | "new" | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const [suggestedName, setSuggestedName] = useState("");
+  const [suggestedUrl, setSuggestedUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -358,7 +359,7 @@ function IndexersSection() {
           <h2>Indexers (Torznab / Newznab)</h2>
           <div className="row">
             <button onClick={() => setShowCatalog(true)}>Browse tracker catalog</button>
-            <button onClick={() => { setSuggestedName(""); setEditing("new"); }}>Add indexer</button>
+            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setEditing("new"); }}>Add indexer</button>
             <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
           </div>
         </div>
@@ -409,18 +410,18 @@ function IndexersSection() {
           ))}
         </div>
       </div>
-      {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)} onGeneric={name => { setSuggestedName(name); setShowCatalog(false); setEditing("new"); }} />}
-      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)} onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setShowCatalog(false); setEditing("new"); }} />}
+      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function IndexerDialog({ initial, suggestedName, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; onClose: () => void; onSaved: () => void }) {
+function IndexerDialog({ initial, suggestedName, suggestedUrl, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; suggestedUrl?: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initial?.name ?? suggestedName ?? "");
-  const [url, setUrl] = useState(initial?.baseUrl ?? "");
+  const [url, setUrl] = useState(initial?.baseUrl ?? suggestedUrl ?? "");
   const [key, setKey] = useState("");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
-  const [movies, setMovies] = useState(initial?.moviesEnabled ?? true);
+  const [movies, setMovies] = useState(initial?.moviesEnabled ?? (suggestedUrl === "https://nyaa.si/" ? false : true));
   const [tv, setTv] = useState(initial?.tvEnabled ?? true);
   const [priority, setPriority] = useState(initial?.priority ?? 0);
   const [busy, setBusy] = useState(false);
