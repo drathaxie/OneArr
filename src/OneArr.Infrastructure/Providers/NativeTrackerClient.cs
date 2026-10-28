@@ -199,20 +199,18 @@ public sealed class NativeTrackerClient
     {
         var baseUri = ValidateBase(indexer.BaseUrl);
         var session = await GetSessionAsync(indexer, ct);
+        // Do not dispose the HttpClient before the caller has consumed the
+        // response stream; that can cancel in-flight streamed .torrent files.
         var http = NewClient(baseUri);
-        try
+        var response = await RequestAsync(http, baseUri, path, HttpMethod.Get, session.Cookies, null, ct);
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.Found)
         {
-            var response = await RequestAsync(http, baseUri, path, HttpMethod.Get, session.Cookies, null, ct);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.Found)
-            {
-                response.Dispose();
-                if (indexer.Id > 0) _sessions.TryRemove(indexer.Id, out _);
-                var fresh = await GetSessionAsync(indexer, ct);
-                response = await RequestAsync(http, baseUri, path, HttpMethod.Get, fresh.Cookies, null, ct);
-            }
-            return response;
+            response.Dispose();
+            if (indexer.Id > 0) _sessions.TryRemove(indexer.Id, out _);
+            var fresh = await GetSessionAsync(indexer, ct);
+            response = await RequestAsync(http, baseUri, path, HttpMethod.Get, fresh.Cookies, null, ct);
         }
-        finally { http.Dispose(); }
+        return response;
     }
 
     public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
