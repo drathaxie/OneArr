@@ -147,6 +147,36 @@ describe("Indexer management", () => {
     expect(put.body!.apiKey).toBe("");
   });
 
+  it("edits and tests encrypted private tracker credentials without revealing stored secrets", async () => {
+    routes["GET /api/indexers"] = () => ({ body: [{
+      id: 42, name: "TorrentLeech", baseUrl: "https://www.torrentleech.org/",
+      host: "www.torrentleech.org", protocol: "TorrentLeech", enabled: true,
+      moviesEnabled: true, tvEnabled: true, priority: 0, hasKey: true,
+      healthStatus: "Not tested", lastTestedAt: null, lastError: null,
+    }] });
+    routes["PUT /api/indexers/42"] = () => ({ body: {} });
+    await renderSettings();
+    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await screen.findByText("TorrentLeech");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByLabelText("Username")).toBeTruthy();
+    expect(dialog.getByLabelText("Password")).toBeTruthy();
+    expect(dialog.queryByLabelText("API key")).toBeNull();
+    fireEvent.change(dialog.getByLabelText("Username"), { target: { value: "updated-user" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(calls.some(c => c.path === "/api/connections/test")).toBe(true));
+    const test = calls.find(c => c.path === "/api/connections/test")!;
+    expect(test.body!.service).toBe("native-tracker");
+    expect(test.body!.indexerId).toBe(42);
+    expect((test.body!.trackerSettings as Record<string, string>).password).toBe("");
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some(c => c.path === "/api/indexers/42" && c.method === "PUT")).toBe(true));
+    const put = calls.find(c => c.path === "/api/indexers/42" && c.method === "PUT")!;
+    expect(put.body!.trackerId).toBe("torrentleech");
+    expect(put.body!.apiKey).toBe("");
+  });
+
   it("deletes only after confirmation", async () => {
     routes["DELETE /api/indexers/7"] = () => ({ status: 204 });
     await renderSettings();
