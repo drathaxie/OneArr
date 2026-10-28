@@ -432,7 +432,7 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
   const [trackerPassword, setTrackerPassword] = useState("");
   const [trackerAlt2fa, setTrackerAlt2fa] = useState("");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
-  const [movies, setMovies] = useState(initial?.moviesEnabled ?? (suggestedUrl === "https://nyaa.si/" ? false : true));
+  const [movies, setMovies] = useState(initial?.moviesEnabled ?? (suggestedUrl?.startsWith("https://nyaa.si/") ? false : true));
   const [tv, setTv] = useState(initial?.tvEnabled ?? true);
   const [priority, setPriority] = useState(initial?.priority ?? 0);
   const [busy, setBusy] = useState(false);
