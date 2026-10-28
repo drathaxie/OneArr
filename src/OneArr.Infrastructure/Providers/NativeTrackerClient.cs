@@ -90,7 +90,18 @@ public sealed class NativeTrackerClient
         using var request = new HttpRequestMessage(method, target) { Content = body };
         request.Headers.Referrer = baseUri;
         if (!string.IsNullOrEmpty(cookie)) request.Headers.TryAddWithoutValidation("Cookie", cookie);
-        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        try
+        {
+            return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException)
+        {
+            throw new ExternalServiceException("Network error connecting to TorrentLeech");
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new ExternalServiceException("TorrentLeech did not respond before the timeout");
+        }
     }
 
     private static string? HtmlField(string html, string field)
