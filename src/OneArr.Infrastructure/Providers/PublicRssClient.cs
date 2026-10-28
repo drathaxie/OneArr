@@ -43,7 +43,7 @@ public sealed class PublicRssClient
     private async Task<IReadOnlyList<ReleaseCandidate>> CachedFeedAsync(
         string url, string name, MediaType type, CancellationToken ct)
     {
-        var key = ((int)type).ToString(CultureInfo.InvariantCulture) + "|" + url;
+        var key = ((int)type).ToString(CultureInfo.InvariantCulture) + "|" + name + "|" + url;
         if (_cache.TryGetValue(key, out var cached) && cached.Expires > DateTimeOffset.UtcNow)
             return cached.Entries;
         var gate = _gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
