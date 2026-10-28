@@ -180,7 +180,7 @@ describe("Indexer settings", () => {
         : [],
     });
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     fireEvent.click(screen.getByRole("button", { name: "Add indexer" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "fixture" } });
     fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://127.0.0.1:9002/" } });
