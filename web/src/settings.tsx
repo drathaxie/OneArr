@@ -843,7 +843,7 @@ function ConnectionTests({ scope, indexers, clients }: { scope: "all" | "metadat
       <div className="row">
         {(scope === "all" || scope === "metadata") && <button disabled={busy !== null} onClick={() => test("tmdb", { service: "tmdb" })}>{busy === "tmdb" ? "Testing…" : "Test TMDb"}</button>}
         {(scope === "all" || scope === "indexers") && indexers.map((i: any) => (
-          <button key={i.id} disabled={busy !== null} onClick={() => test(`indexer-${i.id}`, { service: "torznab", indexerId: i.id })}>Test indexer: {i.name}</button>
+          <button key={i.id} disabled={busy !== null} onClick={() => test(`indexer-${i.id}`, { service: i.protocol === "TorrentLeech" ? "native-tracker" : "torznab", indexerId: i.id })}>Test indexer: {i.name}</button>
         ))}
         {(scope === "all" || scope === "clients") && clients.map((c: any) => (
           <button key={c.id} disabled={busy !== null} onClick={() => test(`client-${c.id}`, { service: "qbittorrent", clientId: c.id })}>Test qBittorrent: {c.name}</button>
