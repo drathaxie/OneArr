@@ -5,6 +5,7 @@ using OneArr.Domain;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Http;
 using OneArr.Infrastructure.Security;
+using OneArr.Infrastructure.Providers;
 
 namespace OneArr.Infrastructure.Services;
 
@@ -28,14 +29,17 @@ public sealed class ReleaseService
     private readonly IReleaseRanker _ranker;
     private readonly IDownloadClient _downloads;
     private readonly TimeProvider _time;
+    private readonly NativeTrackerClient? _native;
 
-    public ReleaseService(IDbContextFactory<OneArrDbContext> db, IIndexerClient indexer, IReleaseRanker ranker, IDownloadClient downloads, TimeProvider time)
+    public ReleaseService(IDbContextFactory<OneArrDbContext> db, IIndexerClient indexer,
+        IReleaseRanker ranker, IDownloadClient downloads, TimeProvider time, NativeTrackerClient? native = null)
     {
         _db = db;
         _indexer = indexer;
         _ranker = ranker;
         _downloads = downloads;
         _time = time;
+        _native = native;
     }
 
     public async Task<ReleaseSearchResult> SearchAsync(int mediaItemId, int? episodeId, CancellationToken ct)
@@ -105,7 +109,27 @@ public sealed class ReleaseService
         var category = item.MediaType == MediaType.Movie ? client.MovieCategory : client.TvCategory;
 
         var hash = request.InfoHash?.ToLowerInvariant();
-        var returnedHash = await _downloads.AddAsync(client, request.Link, category, ct);
+        string returnedHash;
+        if (Uri.TryCreate(request.Link, UriKind.Absolute, out var torrentUrl) &&
+            NativeTrackerClient.IsTorrentLeechDownload(torrentUrl))
+        {
+            // qBittorrent cannot fetch a private URL without OneArr's
+            // authenticated session. Fetch with the native adapter and upload
+            // the .torrent body directly, never forwarding site cookies.
+            var configured = await db.Indexers.AsNoTracking().Where(i => i.Enabled).ToListAsync(ct);
+            var owner = configured.FirstOrDefault(i =>
+                TrackerSecretBox.IsNative(i.ApiKey) &&
+                Uri.TryCreate(i.BaseUrl, UriKind.Absolute, out var u) &&
+                u.Authority.Equals(torrentUrl.Authority, StringComparison.OrdinalIgnoreCase));
+            if (owner is null || _native is null)
+                throw new ExternalServiceException("TorrentLeech release requires a configured and enabled native tracker");
+            var bytes = await _native.DownloadTorrentAsync(owner, torrentUrl, ct);
+            returnedHash = await _downloads.AddTorrentAsync(client, bytes, category, ct);
+        }
+        else
+        {
+            returnedHash = await _downloads.AddAsync(client, request.Link, category, ct);
+        }
         hash ??= string.IsNullOrEmpty(returnedHash) ? null : returnedHash;
 
         var job = new DownloadJob
