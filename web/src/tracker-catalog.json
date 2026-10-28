@@ -1,6 +1,6 @@
 {
   "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
-  "sourceMetadataHash": "4b5941604493b29f",
+  "sourceMetadataHash": "19c7e680a7d7ba58",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -5282,18 +5282,7 @@
       "links": [
         "https://alpharatio.cc/"
       ],
-      "fields": [
-        {
-          "name": "field-0",
-          "label": "IndexerSettingsFreeleechOnly",
-          "type": "text"
-        },
-        {
-          "name": "field-1",
-          "label": "IndexerAlphaRatioSettingsExcludeScene",
-          "type": "text"
-        }
-      ],
+      "fields": [],
       "source": "Prowlarr/Prowlarr"
     },
     {
@@ -5324,7 +5313,7 @@
     {
       "path": "native/Anidub.cs",
       "name": "Anidub",
-      "privacy": "semiprivate",
+      "privacy": "semi-private",
       "language": "unknown",
       "movies": true,
       "tv": true,
@@ -5355,7 +5344,7 @@
         {
           "name": "field-1",
           "label": "Passkey",
-          "type": "text"
+          "type": "password"
         },
         {
           "name": "field-2",
@@ -5501,31 +5490,21 @@
         },
         {
           "name": "field-1",
-          "label": "IndexerSettingsRssKey",
-          "type": "text"
-        },
-        {
-          "name": "field-2",
-          "label": "IndexerSettingsFreeleechOnly",
-          "type": "text"
-        },
-        {
-          "name": "field-3",
           "label": "IndexerBeyondHDSettingsLimitedOnly",
           "type": "text"
         },
         {
-          "name": "field-4",
+          "name": "field-2",
           "label": "IndexerBeyondHDSettingsRefundOnly",
           "type": "text"
         },
         {
-          "name": "field-5",
+          "name": "field-3",
           "label": "IndexerBeyondHDSettingsRewindOnly",
           "type": "text"
         },
         {
-          "name": "field-6",
+          "name": "field-4",
           "label": "IndexerBeyondHDSettingsSearchTypes",
           "type": "text"
         }
@@ -5685,11 +5664,6 @@
           "name": "field-1",
           "label": "IndexerGazelleGamesSettingsSearchGroupNames",
           "type": "text"
-        },
-        {
-          "name": "field-2",
-          "label": "IndexerSettingsFreeleechOnly",
-          "type": "text"
         }
       ],
       "source": "Prowlarr/Prowlarr"
@@ -5773,11 +5747,6 @@
         },
         {
           "name": "field-1",
-          "label": "IndexerSettingsFreeleechOnly",
-          "type": "text"
-        },
-        {
-          "name": "field-2",
           "label": "IndexerIPTorrentsSettingsSearchSortBy",
           "type": "text"
         }
@@ -5855,11 +5824,6 @@
         {
           "name": "field-0",
           "label": "ApiKey",
-          "type": "text"
-        },
-        {
-          "name": "field-1",
-          "label": "IndexerSettingsFreeleechOnly",
           "type": "text"
         }
       ],
@@ -5979,11 +5943,6 @@
       "fields": [
         {
           "name": "field-0",
-          "label": "IndexerSettingsBaseUrl",
-          "type": "text"
-        },
-        {
-          "name": "field-1",
           "label": "ApiKey",
           "type": "text"
         }
@@ -6038,7 +5997,7 @@
     {
       "path": "native/PornoLab.cs",
       "name": "PornoLab",
-      "privacy": "semiprivate",
+      "privacy": "semi-private",
       "language": "unknown",
       "movies": false,
       "tv": false,
@@ -6150,7 +6109,7 @@
     {
       "path": "native/RuTracker.cs",
       "name": "RuTracker.org",
-      "privacy": "semiprivate",
+      "privacy": "semi-private",
       "language": "unknown",
       "movies": true,
       "tv": true,
@@ -6204,7 +6163,7 @@
         {
           "name": "field-0",
           "label": "Passkey",
-          "type": "text"
+          "type": "password"
         }
       ],
       "source": "Prowlarr/Prowlarr"
@@ -6337,7 +6296,7 @@
     {
       "path": "native/Toloka.cs",
       "name": "Toloka.to",
-      "privacy": "semiprivate",
+      "privacy": "semi-private",
       "language": "unknown",
       "movies": true,
       "tv": true,
@@ -6443,7 +6402,7 @@
     {
       "path": "native/Uniotaku.cs",
       "name": "UniOtaku",
-      "privacy": "semiprivate",
+      "privacy": "semi-private",
       "language": "unknown",
       "movies": true,
       "tv": true,
