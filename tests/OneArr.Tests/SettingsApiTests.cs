@@ -71,6 +71,27 @@ public class SettingsApiTests
     }
 
     [Fact]
+    public async Task NamingPreviewEndpointRequiresAuthenticationAndDoesNotChangeFiles()
+    {
+        using var factory = new ApiFactory();
+        var anon = factory.CreateClient();
+        var sample = new { kind = "movie", template = "{Title} ({Year}) - {Quality}",
+            title = "A: Movie", originalFile = "release.mkv", year = 2026, quality = "1080p" };
+        var unauthorized = await anon.PostAsJsonAsync("/api/naming/preview", sample);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        var client = await SignedInAsync(factory);
+        var preview = await client.PostAsJsonAsync("/api/naming/preview", sample);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var json = await preview.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("A Movie (2026) - 1080p.mkv", json.GetProperty("fileName").GetString());
+        Assert.False(json.GetProperty("applied").GetBoolean());
+        var bad = await client.PostAsJsonAsync("/api/naming/preview", new {
+            kind = "movie", template = "{Title}/../../bad", title = "A Movie", originalFile = "release.mkv"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+    }
+
+    [Fact]
     public async Task DefaultsAreSafeBeforeAnySettingIsSaved()
     {
         using var factory = new ApiFactory();
