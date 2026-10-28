@@ -64,7 +64,7 @@ function titleFromPath(path: string): string {
   return base.split("-").map(word => word === "api" ? "API" : word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
-export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; onGeneric: (name: string, url?: string) => void }) {
+export function TrackerCatalog({ onClose, onGeneric, onNative }: { onClose: () => void; onGeneric: (name: string, url?: string) => void; onNative?: (name: string, url: string, trackerId: string) => void }) {
   const [paths, setPaths] = useState<string[]>(bundled.definitionPaths);
   const [filter, setFilter] = useState("");
   const [privacyFilter, setPrivacyFilter] = useState("all");
@@ -165,7 +165,10 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
             {detail.links.length > 0 && <p><a href={detail.links[0]} target="_blank" rel="noreferrer">Tracker website</a></p>}
             <h3>Configuration required</h3>
             {detail.fields.length ? <ul>{detail.fields.map(f => <li key={f.name}>{f.label} <span className="muted">({f.type})</span></li>)}</ul> : <p className="muted">No site credentials specified in this definition.</p>}
-            {selected?.endsWith("/nyaasi.yml") ? <>
+            {selected?.endsWith("/torrentleech.yml") && onNative ? <>
+              <p className="muted">Native account login, JSON searches and authenticated torrent downloads are supported for TorrentLeech. Credentials are encrypted in OneArr.</p>
+              <button onClick={() => onNative(detail.name, detail.links[0] ?? "https://www.torrentleech.org/", "torrentleech")}>Add TorrentLeech (native)</button>
+            </> : selected?.endsWith("/nyaasi.yml") ? <>
               <p className="muted">Native RSS search is supported for this public tracker, without login or Prowlarr.</p>
               <button onClick={() => onGeneric(detail.name, "https://nyaa.si/")}>Add Nyaa (native RSS)</button>
             </> : <>
