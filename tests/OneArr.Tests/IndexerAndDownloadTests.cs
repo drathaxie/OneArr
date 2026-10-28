@@ -43,6 +43,92 @@ public class TorznabClientTests
     }
 
     [Fact]
+    public async Task ActualNyaaRssUrl_RetainsCategoryAndTrustedFilterInSearch()
+    {
+        var xml = """
+            <rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa" version="2.0">
+              <channel><item>
+                <title>Test Show S01E02 1080p</title>
+                <link>https://nyaa.si/download/2345.torrent</link>
+                <nyaa:infoHash>abcdef0123456789abcdef0123456789abcdef01</nyaa:infoHash>
+                <nyaa:seeders>42</nyaa:seeders>
+                <nyaa:size>1.5 GiB</nyaa:size>
+              </item></channel>
+            </rss>
+            """;
+        var handler = new FakeHandler(_ => FakeHandler.Text(xml, contentType: "application/rss+xml"));
+        var client = new TorznabClient(new FakeFactory(handler));
+        var idx = new IndexerConfig { Name = "Nyaa RSS", BaseUrl = "https://nyaa.si/?page=rss&c=1_2&f=2" };
+        var results = await client.SearchAsync(idx,
+            new ReleaseSearch(MediaType.Series, "Test Show", null, 1, 2, "5000"), CancellationToken.None);
+        Assert.Single(results);
+        Assert.Contains("page=rss&q=Test%20Show&c=1_2&f=2", handler.Requests.Single().RequestUri!.Query);
+        Assert.False(TorznabClient.IsDirectNyaa(new Uri("https://nyaa.si/?page=download")));
+        Assert.False(TorznabClient.IsDirectNyaa(new Uri("https://nyaa.si.evil.test/?page=rss")));
+    }
+
+    [Fact]
+    public async Task GenericPublicRss_UsesRecentFeedAndDoesNotCallApi()
+    {
+        var xml = """
+            <rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa" version="2.0">
+            <channel><item>
+              <title>Test Show S01E02 1080p WEB-DL</title>
+              <link>https://rss.example/download/125.torrent</link>
+              <nyaa:size>1.3 GiB</nyaa:size>
+              <nyaa:seeders>19</nyaa:seeders>
+              <nyaa:infoHash>073740343fc24ada2790b79f0b3053c01014f41c</nyaa:infoHash>
+              <pubDate>Wed, 28 Oct 2026 20:33:58 -0000</pubDate>
+            </item><item>
+              <title>Different Show S04E01</title><link>https://rss.example/download/999.torrent</link>
+              <nyaa:size>900 MiB</nyaa:size>
+            </item></channel></rss>
+            """;
+        var handler = new FakeHandler(req => {
+            Assert.Equal("/download.rss", req.RequestUri!.AbsolutePath);
+            Assert.DoesNotContain("apikey", req.RequestUri.Query);
+            return FakeHandler.Text(xml, contentType: "application/rss+xml");
+        });
+        var client = new TorznabClient(new FakeFactory(handler));
+        var idx = new IndexerConfig { Name = "Custom RSS", BaseUrl = "https://rss.example/download.rss",
+            ApiKey = PublicRssClient.ProtocolMarker };
+        var result = await client.SearchAsync(idx, new ReleaseSearch(
+            MediaType.Series, "Test Show", null, 1, 2, "5000"), CancellationToken.None);
+        var found = Assert.Single(result);
+        Assert.Equal(19, found.Seeders);
+        Assert.Equal(1395864371L, found.Size);
+        Assert.Equal("073740343fc24ada2790b79f0b3053c01014f41c", found.InfoHash);
+    }
+
+    [Fact]
+    public void GenericRss_RejectsHtmlWebPagesAndDetailLinks()
+    {
+        Assert.Throws<ExternalServiceException>(() => PublicRssClient.ParseFeed(
+            "<html><body>Login</body></html>", "Bad RSS", MediaType.Series));
+        var xml = """
+            <rss><channel><item><title>Test Show S01E01</title>
+            <link>https://site.test/view/1234</link></item></channel></rss>
+            """;
+        Assert.Empty(PublicRssClient.ParseFeed(xml, "Not downloads", MediaType.Series));
+    }
+
+    [Fact]
+    public void AtomFeedWithTorrentEnclosureIsSupported()
+    {
+        var xml = """
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><title>Test Movie 2026 1080p BluRay</title>
+                <link rel="enclosure" type="application/x-bittorrent" href="https://site.test/download/3"/>
+                <updated>2026-10-28T20:30:00Z</updated>
+              </entry>
+            </feed>
+            """;
+        var row = Assert.Single(PublicRssClient.ParseFeed(xml, "Atom", MediaType.Movie));
+        Assert.Equal("https://site.test/download/3", row.Link);
+        Assert.Contains(2000, row.Categories);
+    }
+
+    [Fact]
     public async Task NativeNyaaSearch_ParsesRssAndEscapesQuery()
     {
         var xml = """
