@@ -1057,6 +1057,77 @@ row below 860px), and the poster grid is fluid (`repeat(auto-fill, minmax(180px,
   screenshots show poster frames with alt text; layout, aspect, and spacing are verified.
   Jesse's real 205-series library on his PC remains the final visual check.
 
+## Indexer Manager, Download Clients & Interactive Search (branch `feature/indexer-client-management`, PR open, NOT merged)
+
+Base: main 4d97b283 (PR #8 merge) + the PR #9 responsive correction integrated as aa1638b
+(2 files: styles.css, settings.tsx) so the feature does not omit it. If PR #9 merges first, that
+commit drops out on rebase before this PR merges. Nothing here merges, tags, releases, enables
+automatic grabbing, touches real media, deletes torrents, or alters monitoring preferences.
+
+What already existed (verified in code, reused, not rebuilt): secrets redacted in GET responses
+(hasKey/hasPassword only); a real Torznab caps test and a real qBittorrent category-listing test
+at POST /api/connections/test with sanitized errors; manual search already returning per-indexer
+errors; server-side grab validation (duplicates, Missing-state, rejected releases) authoritative;
+download jobs already recording their owning client id, with queue sync never reassigning them.
+
+What this adds:
+- IndexerConfig gains MoviesEnabled, TvEnabled (both default true; the migration sets existing
+  rows to true so an upgrade never silently stops searching an indexer) and Priority (LOWER is
+  searched first; ties break by Id; default 0 preserves Id order). New IndexerHealth table
+  (IndexerId PK, LastTestedAt, LastStatus, LastError) written only by connection tests, never
+  by searches. Migration IndexerClientManagement, verified with an empty EF probe migration.
+- Full CRUD: POST/PUT/DELETE for /api/indexers and /api/download-clients. Edits keep stable
+  DB ids; an empty API key/password on PUT preserves the stored secret (a non-empty value
+  replaces it); deleting a client never touches download jobs (they keep their owning-client id).
+  Validation errors return 400/502 with sanitized messages; unknown ids return 404.
+- Connection tests, no longer behind Advanced: Test on every row and inside every Add/Edit
+  dialog. Saved records test their stored values and update their health row; unsaved form
+  values test exactly what was typed via /api/connections/test (baseUrl + key, or baseUrl +
+  username/password/categories) without saving anything or writing health. Torznab 401/403
+  now reports an authentication failure instead of a bare HTTP code. Tests are read-only:
+  sign-in + category listing only, never adding/pausing/deleting torrents.
+- POST /api/connections/test-all: every enabled indexer + client in one call, max 4 concurrent,
+  30 s per item, 120 s per batch, one failure never stops the others, each result updating only
+  its own health row. No polling, no background work.
+- Manual search transparency: /api/search now returns per-indexer outcomes (results /
+  no-results / failed / skipped with the reason: Disabled, Movies not enabled, TV not enabled)
+  alongside the existing errors; disabled and media-type-disabled indexers are reported as
+  skipped instead of silently omitted. Torznab pubDate is parsed into ReleaseCandidate
+  (naive dates read as UTC) and returned as publishDateUtc for the Age column.
+- Manual grab client selection: GrabRequest takes an optional DownloadClientId; the server
+  validates it exists and is enabled, otherwise the first enabled client stays the default.
+  The chosen client's id and category are recorded on the job, as before.
+- Frontend: Settings Indexers and Download Clients are full management lists (responsive rows
+  that stack on narrow screens, not clipped tables) with text filter, enabled/health filters,
+  sorting, Test/Edit/Enable-Disable/Delete on every row (delete is two-click confirmed),
+  Test All, and Add/Edit dialogs with an in-form Test button, loading states, and
+  "Leave blank to keep the stored key/password" placeholders (secrets are never rendered).
+  Manual search gains client-side sort (best match / quality / size / seeders / newest),
+  filters (indexer, accepted/rejected, minimum seeders), an Age column, a per-indexer outcome
+  list, and a download-client selector defaulting to the first enabled client; the server
+  still re-validates every grab.
+- Tests: 12 new frontend tests (manager lists, sorting/filtering, row + form Test buttons,
+  unsaved-test-no-save, edit-preserves-secret, two-click delete, Test All, search outcomes +
+  age + filters + sort + selected client in grab) — 43 frontend tests pass locally, vite
+  build clean. 12 new backend tests (CRUD + key/password preservation proven against the
+  stored row, unsaved tests persisting nothing, health failure-then-success, Test All
+  enabled-only + failure isolation, validation/404s, client-delete ownership preservation,
+  search outcomes + publish dates, per-media-type skips, grab client selection + rejection)
+  — backend suites run in CI on the PR (local dotnet test execution hangs in this sandbox:
+  the vstest testhost never connects, a sandbox-only quirk).
+- Visual acceptance: real backend + seeded test library + local fake Torznab/qBittorrent
+  servers screenshotted at 1728/1366/390 (see PR). Layout verified: management rows, dialogs,
+  filters, health badges, transparency panel. Sandbox limitation found during this run, NOT
+  an app bug: the sandbox blocks the assistant's direct TCP connections ("Other TCP
+  connections is turned off"), so the app's loopback calls to the fake servers fail there
+  while curl and the browser reach them fine. Success-path screenshots (caps test, manual
+  search results) were therefore captured against public fixture URLs after the branch was
+  pushed; Jesse's PC run with real local services remains the final check.
+- Known limitations: no live-service testing was done (no real indexer or qBittorrent was
+  contacted); the qBittorrent connection-test success path is covered by tests, not by a
+  live screenshot; priority is a plain number (no drag-to-reorder); Test All has no
+  per-item progress display beyond the final summary.
+
 ## Next
 
 0. Library: check that the Windows CI job ran `LibraryWindowsTests`, then preview a real library folder before applying.

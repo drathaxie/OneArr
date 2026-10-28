@@ -219,6 +219,50 @@ export interface ReleaseResult {
   accepted: boolean;
   score: number;
   reasons: string[];
+  publishDateUtc: string | null;
+}
+
+// GET /indexers and GET /download-clients never return secrets — only hasKey/hasPassword flags
+// and derived health status. lastTestedAt/lastSeenAt are null when never tested.
+export interface Indexer {
+  id: number;
+  name: string;
+  baseUrl: string;
+  host: string;
+  protocol: string;
+  enabled: boolean;
+  moviesEnabled: boolean;
+  tvEnabled: boolean;
+  priority: number;
+  hasKey: boolean;
+  healthStatus: string;
+  lastTestedAt: string | null;
+  lastError: string | null;
+}
+
+export interface DownloadClient {
+  id: number;
+  name: string;
+  baseUrl: string;
+  host: string;
+  type: string;
+  username: string;
+  movieCategory: string;
+  tvCategory: string;
+  enabled: boolean;
+  hasPassword: boolean;
+  healthStatus: string;
+  lastSeenAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
+
+export interface IndexerSearchOutcome {
+  id: number;
+  name: string;
+  status: string;
+  resultCount: number;
+  message: string | null;
 }
 
 export interface Job {

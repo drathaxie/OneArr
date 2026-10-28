@@ -335,13 +335,45 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("MoviesEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TvEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("Indexers", (string)null);
+                });
+
+            modelBuilder.Entity("OneArr.Domain.IndexerHealth", b =>
+                {
+                    b.Property<int>("IndexerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastTestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("IndexerId");
+
+                    b.ToTable("IndexerHealth", (string)null);
                 });
 
             modelBuilder.Entity("OneArr.Domain.JobHistory", b =>

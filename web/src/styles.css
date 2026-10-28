@@ -65,7 +65,10 @@ h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
 /* Library / page toolbars: the search input grows, selects keep their natural size, and
    the view switch sits at the end. Everything wraps instead of overflowing. */
 .toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; min-width: 0; }
-.toolbar > input { flex: 1 1 220px; min-width: 0; }
+/* The search field grows to a useful desktop size but never past ~450px, so sorting,
+   filtering, and the view switch sit beside it instead of being pushed to a second row
+   by a search box that swallowed the whole toolbar. It still shrinks and wraps on phones. */
+.toolbar > input { flex: 1 1 350px; max-width: 450px; min-width: 0; }
 .toolbar > select { flex: 0 1 auto; }
 .toolbar-actions { margin-left: auto; display: flex; gap: .5rem; flex: none; }
 
@@ -97,8 +100,12 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 .auth { max-width: 380px; margin: 12vh auto; }
 .results { list-style: none; margin: 0; padding: 0; }
 
-/* Poster grid: columns are fluid (180-210px on desktop), never a hardcoded count, so the
-   grid fills whatever content width the viewport gives it. */
+/* Poster grid: genuinely responsive, never a hardcoded column count and never a capped
+   page container. auto-fill picks the count from the viewport, and the 180px minimum
+   self-caps card width: the count increments exactly when a card would stretch past
+   ~208px, so cards always land in 180-210px (7 columns of ~195px at 1728px, 5 at 1366px).
+   A fixed 210px max was tried and rejected: it counts tracks at the max, dropping 1728px
+   to 6 columns of exactly 210px instead of the targeted 7. */
 .poster-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 .poster-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 .poster-button { border: 0; padding: 0; background: none; width: 100%; cursor: pointer; display: block; flex: none; }
@@ -119,11 +126,26 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 .settings-sidebar .nav.sub { margin-left: 1rem; font-size: .9rem; }
 .settings-content { min-width: 0; }
 .settings-overview-list { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .9rem; }
+/* Settings overview cards: at least ~260px, so wide desktops get 4-5 readable columns
+   (5 at 1728px, 4 at 1366px) instead of nine tall, narrow cards in one row. align-items
+   stops short cards stretching vertically to match the longest card in their row. */
+.settings-overview-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; }
 .dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: grid; place-items: start center; padding: 4vh 1rem 1rem; overflow-y: auto; z-index: 50; }
 .dialog { width: min(720px, 100%); max-height: none; }
 .detail-head { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 1rem; align-items: start; }
 .detail-poster { max-width: 200px; border-radius: 8px; }
 .table-wrap { overflow-x: auto; }
+
+/* Management lists (indexers, download clients): a row per item with name, health and
+   actions. Desktop shows columns; narrow windows stack each row instead of clipping
+   a wide table, so Test/Edit/Enable/Delete stay reachable everywhere. */
+.manage-list { display: grid; gap: .5rem; margin-top: .75rem; }
+.manage-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) auto; gap: .75rem; align-items: center; padding: .6rem .75rem; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.manage-name { font-weight: 600; overflow-wrap: break-word; }
+.manage-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+@media (max-width: 860px) {
+  .manage-row { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 1100px) {
   .shell { grid-template-columns: 180px minmax(0, 1fr); }
