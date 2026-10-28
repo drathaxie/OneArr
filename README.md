@@ -3,6 +3,27 @@
 
 ### Tracker catalog and direct RSS
 
+**RSS sources do not require an API key.** In Settings → Indexers choose
+**Add RSS feed**, enter a name and a full HTTP(S) RSS/Atom URL, then Test and
+Save. OneArr reads its latest entries, extracts torrent links or magnets and
+size/seed/hash metadata if supplied, and filters matches locally. Because
+many feeds publish *only the newest uploads*, RSS does not supply historical
+search and OneArr cannot find older releases omitted by the feed.
+
+For **Nyaa.si**, the integrated site adapter is preferable: select Nyaa from
+the catalog, or enter a URL such as `https://nyaa.si/?page=rss&c=1_2&f=2`
+in the standard indexer form. OneArr uses Nyaa's RSS search query and
+preserves category/trusted filters. No key or username is needed. Nyaa
+reports names, sizes, seeders and info hashes used by the release ranker.
+For generic RSS sources, use **Add RSS feed** rather than pasting the URL
+into a Torznab indexer; those endpoints don't support `api?t=caps`.
+
+Feeds are read-only until a user grabs an eligible release (or existing
+automatic-grab settings permit it). XML parsing prohibits DTD resolution
+and caps download size. Existing qBittorrent categories and monitored-state
+controls are unchanged.
+
+
 Settings → Indexers → **Browse tracker catalog** lists known tracker definitions from
 [Prowlarr/Indexers](https://github.com/Prowlarr/Indexers), with offline search and
 filters for privacy, language, movies and TV. The metadata-only manifest can be
