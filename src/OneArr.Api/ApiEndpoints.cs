@@ -23,7 +23,7 @@ public static class ApiEndpoints
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
     // Priority: LOWER values are searched first; ties break by Id. Default 0 preserves Id order.
     public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
-        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null);
+        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
@@ -42,7 +42,7 @@ public static class ApiEndpoints
     // torznab, + Username/Password/categories for qbittorrent) with no Id: the values are tested
     // without being saved, and no health row is written because there is nothing to attach it to.
     public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null, string? Username = null, string? Password = null, string? MovieCategory = null, string? TvCategory = null,
-        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null);
+        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
     public sealed record ApplyPreviewBody(int PreviewId, bool Confirmed);
     public sealed record BulkImportBody(bool Confirmed, List<BulkApproval>? Approvals);
 
@@ -284,8 +284,12 @@ public static class ApiEndpoints
             if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Indexer name is required");
             UrlGuard.RequireServiceUrl(body.BaseUrl);
             await using var c = await db.CreateDbContextAsync(ct);
-            var secret = body.TrackerId is not null
-                ? CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, null, body.BaseUrl)
+            if (body.Protocol is not null && body.Protocol is not ("rss" or "torznab"))
+                throw new ArgumentException("Unsupported indexer protocol");
+            if (body.Protocol == "rss" && body.TrackerId is not null)
+                throw new ArgumentException("RSS cannot use a native account-login adapter");
+            var secret = body.Protocol == "rss" ? PublicRssClient.ProtocolMarker :
+                body.TrackerId is not null ? CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, null, body.BaseUrl)
                 : body.ApiKey ?? "";
             var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = secret, Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority };
             c.Indexers.Add(row);
@@ -302,8 +306,21 @@ public static class ApiEndpoints
             if (row is null) return Results.NotFound();
             row.Name = body.Name.Trim();
             row.BaseUrl = body.BaseUrl.Trim();
+            if (body.Protocol is not null && body.Protocol is not ("rss" or "torznab"))
+                throw new ArgumentException("Unsupported indexer protocol");
+            if (body.Protocol == "rss" && (body.TrackerId is not null || TrackerSecretBox.IsNative(row.ApiKey)))
+                throw new ArgumentException("Cannot convert native account tracker into RSS");
+            // Explicitly selected RSS never carries an API key or password.
+            if (body.Protocol == "rss")
+                row.ApiKey = PublicRssClient.ProtocolMarker;
+            else if (PublicRssClient.IsPublicRss(row.ApiKey))
+            {
+                if (body.Protocol == "torznab")
+                    row.ApiKey = body.ApiKey ?? "";
+                // A normal edit on an RSS indexer retains RSS protocol.
+            }
             // Native credentials remain encrypted; blank edit fields preserve their existing secrets.
-            if (body.TrackerId is not null)
+            else if (body.TrackerId is not null)
                 row.ApiKey = CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, row.ApiKey, body.BaseUrl);
             else if (TrackerSecretBox.IsNative(row.ApiKey))
             {
@@ -891,7 +908,8 @@ public static class ApiEndpoints
                         {
                             var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
                             if (indexer is null) return Results.NotFound();
-                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.ApiKey);
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) ||
+                                !string.IsNullOrWhiteSpace(body.ApiKey) || body.Protocol is not null;
                             if (!hasOverrides)
                             {
                                 if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
@@ -901,13 +919,16 @@ public static class ApiEndpoints
                             {
                                 name = indexer.Name;
                                 baseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? indexer.BaseUrl : body.BaseUrl;
-                                apiKey = string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
+                                apiKey = body.Protocol == "rss" ? PublicRssClient.ProtocolMarker :
+                                    body.Protocol == "torznab" && PublicRssClient.IsPublicRss(indexer.ApiKey) ? body.ApiKey ?? "" :
+                                    string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
                             }
                         }
                         else
                         {
                             if (string.IsNullOrWhiteSpace(body.BaseUrl)) return Results.BadRequest(new { error = "indexerId or baseUrl is required" });
-                            (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl, body.ApiKey ?? "");
+                            (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl,
+                                body.Protocol == "rss" ? PublicRssClient.ProtocolMarker : body.ApiKey ?? "");
                         }
                         TorznabCaps caps;
                         string verifiedDetail = "";
@@ -1400,9 +1421,11 @@ public static class ApiEndpoints
     {
         i.Id, i.Name, i.BaseUrl,
         host = HostOf(i.BaseUrl),
-        protocol = TrackerSecretBox.IsNative(i.ApiKey) ? "TorrentLeech" : "Torznab",
+        protocol = TrackerSecretBox.IsNative(i.ApiKey) ? "TorrentLeech" :
+            PublicRssClient.IsPublicRss(i.ApiKey) ? "RSS" :
+            Uri.TryCreate(i.BaseUrl, UriKind.Absolute, out var nyaaUrl) && TorznabClient.IsDirectNyaa(nyaaUrl) ? "Nyaa RSS" : "Torznab",
         i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
-        hasKey = i.ApiKey.Length > 0,
+        hasKey = i.ApiKey.Length > 0 && !PublicRssClient.IsPublicRss(i.ApiKey),
         healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
         lastTestedAt = h?.LastTestedAt,
         lastError = h?.LastError,
@@ -1467,12 +1490,22 @@ public static class ApiEndpoints
         if (TorznabClient.IsDirectNyaa(baseUri))
         {
             using var rss = await OutboundHttp.SendWithRetryAsync(http,
-                () => new HttpRequestMessage(HttpMethod.Get, "?page=rss&q=OneArr"), ct);
+                () => new HttpRequestMessage(HttpMethod.Get, TorznabClient.NyaaSearchPath(baseUri, "OneArr")), ct);
             if (!rss.IsSuccessStatusCode)
                 return (false, $"Nyaa RSS returned HTTP {(int)rss.StatusCode}", null);
             TorznabClient.ParseNyaaRss(await rss.Content.ReadAsStringAsync(ct), name);
             return (true, "Nyaa RSS is reachable and returns a valid feed.", new TorznabCaps(
                 [new TorznabCategory(5000, "TV / Anime")], true, true, false));
+        }
+        if (PublicRssClient.IsPublicRss(apiKey))
+        {
+            // Both media types parse the same feed. The test is read-only and
+            // checks that a structurally valid RSS/Atom document is returned.
+            var feed = new PublicRssClient(httpFactory);
+            var entries = await feed.FetchAsync(baseUrl, name, MediaType.Series, ct);
+            return (true, $"RSS feed is reachable ({entries.Count} recent torrent entries). RSS supplies recent releases but cannot search archives.",
+                new TorznabCaps([new TorznabCategory(5000, "TV / RSS"),
+                    new TorznabCategory(2000, "Movies / RSS")], true, true, true));
         }
         using var response = await OutboundHttp.SendWithRetryAsync(http,
             () => new HttpRequestMessage(HttpMethod.Get, "api?t=caps&apikey=" + Uri.EscapeDataString(apiKey)), ct);

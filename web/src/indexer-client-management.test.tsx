@@ -79,7 +79,7 @@ afterEach(() => {
 describe("Indexer management", () => {
   it("lists indexers with health and filters by name", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     expect(await screen.findByText("Zulu")).toBeTruthy();
     expect(screen.getByText("Healthy", { selector: "span" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Filter indexers"), { target: { value: "alp" } });
@@ -89,7 +89,7 @@ describe("Indexer management", () => {
 
   it("sorts by name when asked", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.change(screen.getByLabelText("Sort indexers"), { target: { value: "name" } });
     const text = document.body.textContent ?? "";
@@ -98,7 +98,7 @@ describe("Indexer management", () => {
 
   it("tests a row by saved id and shows the detail", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.click(screen.getAllByRole("button", { name: "Test" })[0]);
     expect(await screen.findByText(/answered caps with 3 categories/)).toBeTruthy();
@@ -108,7 +108,7 @@ describe("Indexer management", () => {
 
   it("tests unsaved form values without saving", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     fireEvent.click(screen.getByRole("button", { name: "Add indexer" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "draft" } });
     fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://draft.test/" } });
@@ -116,27 +116,49 @@ describe("Indexer management", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Test" }));
     expect(await screen.findByText(/answered caps with 3 categories/)).toBeTruthy();
     const test = calls.find((c) => c.method === "POST" && c.path === "/api/connections/test")!;
-    expect(test.body).toEqual({ service: "torznab", baseUrl: "http://draft.test/", apiKey: "draft-key" });
+    expect(test.body).toEqual({ service: "torznab", baseUrl: "http://draft.test/", apiKey: "draft-key", protocol: "torznab" });
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/indexers")).toBe(false);
+  });
+
+  it("adds an RSS feed without an API key and tests it as RSS", async () => {
+    routes["POST /api/indexers"] = () => ({ body: {} });
+    await renderSettings();
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
+    fireEvent.click(screen.getByRole("button", { name: "Add RSS feed" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByLabelText("Indexer protocol")).toHaveProperty("value", "rss");
+    expect(dialog.queryByLabelText("API key")).toBeNull();
+    fireEvent.change(dialog.getByLabelText("Name"), { target: { value: "Nyaa latest feed" } });
+    fireEvent.change(dialog.getByLabelText("RSS feed URL"), { target: { value: "https://nyaa.si/?page=rss&c=1_2" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(calls.some(x => x.method === "POST" && x.path === "/api/connections/test")).toBe(true));
+    const test = calls.find(x => x.method === "POST" && x.path === "/api/connections/test")!;
+    expect(test.body?.protocol).toBe("rss");
+    expect(test.body?.apiKey).toBe("");
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some(x => x.method === "POST" && x.path === "/api/indexers")).toBe(true));
+    const add = calls.find(x => x.method === "POST" && x.path === "/api/indexers")!;
+    expect(add.body?.protocol).toBe("rss");
+    expect(add.body?.apiKey).toBe("");
   });
 
   it("tests an edit dialog with the saved id so a blank key reuses the stored key", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://zulu2.test/" } });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Test" }));
     expect(await screen.findByText(/answered caps with 3 categories/)).toBeTruthy();
     const test = calls.find((c) => c.method === "POST" && c.path === "/api/connections/test")!;
-    expect(test.body).toEqual({ service: "torznab", indexerId: 7, baseUrl: "http://zulu2.test/", apiKey: "" });
+    expect(test.body).toEqual({ service: "torznab", indexerId: 7, baseUrl: "http://zulu2.test/", apiKey: "", protocol: "torznab" });
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
   });
 
   it("edits without clearing the stored key", async () => {
     routes["PUT /api/indexers/7"] = () => ({ status: 200, body: {} });
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Zulu-renamed" } });
@@ -156,7 +178,7 @@ describe("Indexer management", () => {
     }] });
     routes["PUT /api/indexers/42"] = () => ({ body: {} });
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("TorrentLeech");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     const dialog = within(screen.getByRole("dialog"));
@@ -180,7 +202,7 @@ describe("Indexer management", () => {
   it("deletes only after confirmation", async () => {
     routes["DELETE /api/indexers/7"] = () => ({ status: 204 });
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -190,7 +212,7 @@ describe("Indexer management", () => {
 
   it("tests all enabled indexers and clients in one call", async () => {
     await renderSettings();
-    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
     await screen.findByText("Zulu");
     fireEvent.click(screen.getByRole("button", { name: "Test all" }));
     expect(await screen.findByText(/Tested 1, passed 1/)).toBeTruthy();

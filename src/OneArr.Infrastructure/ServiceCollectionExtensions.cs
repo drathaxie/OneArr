@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IReleaseParser, ReleaseParser>();
         services.AddSingleton<IReleaseRanker, ReleaseRanker>();
         services.AddSingleton<NativeTrackerClient>();
+        services.AddSingleton<PublicRssClient>();
         services.AddSingleton<IIndexerClient, TorznabClient>();
         services.AddSingleton<IDownloadClient, QBittorrentClient>();
         services.AddSingleton<IImporter, SafeImporter>();
