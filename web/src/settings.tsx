@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, type ConnectionTestResult, type DownloadClient, type Indexer, type QualityProfile, type SettingsData } from "./api";
+import { TrackerCatalog } from "./tracker-catalog";
 import { ErrorLine, useLoad } from "./common";
 import { LibraryPanel, RootFolderTool } from "./library";
 import { Migration } from "./migration";
@@ -300,6 +301,8 @@ function IndexersSection() {
   const [healthFilter, setHealthFilter] = useState("all");
   const [sort, setSort] = useState("priority");
   const [editing, setEditing] = useState<Indexer | "new" | null>(null);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [suggestedName, setSuggestedName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -354,7 +357,8 @@ function IndexersSection() {
         <div className="row spread">
           <h2>Indexers (Torznab / Newznab)</h2>
           <div className="row">
-            <button onClick={() => setEditing("new")}>Add indexer</button>
+            <button onClick={() => setShowCatalog(true)}>Browse tracker catalog</button>
+            <button onClick={() => { setSuggestedName(""); setEditing("new"); }}>Add indexer</button>
             <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
           </div>
         </div>
@@ -405,13 +409,14 @@ function IndexersSection() {
           ))}
         </div>
       </div>
-      {editing && <IndexerDialog initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)} onGeneric={name => { setSuggestedName(name); setShowCatalog(false); setEditing("new"); }} />}
+      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function IndexerDialog({ initial, onClose, onSaved }: { initial: Indexer | null; onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState(initial?.name ?? "");
+function IndexerDialog({ initial, suggestedName, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(initial?.name ?? suggestedName ?? "");
   const [url, setUrl] = useState(initial?.baseUrl ?? "");
   const [key, setKey] = useState("");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
