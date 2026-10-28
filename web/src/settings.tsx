@@ -18,6 +18,7 @@ const CATEGORIES: Category[] = [
   { id: "media", label: "Media Management", description: "Root folders, default folders per media type, library folders, path mappings, bulk root-folder changes, and library scanning with scan review.", subsections: [
     { id: "media-defaults", label: "Default root folders" },
     { id: "media-paths", label: "Import paths" },
+    { id: "media-naming", label: "Naming preview" },
     { id: "media-bulk", label: "Bulk root folders" },
     { id: "media-library", label: "Library folders & scan" },
     { id: "media-mappings", label: "Path mappings", advanced: true },
@@ -167,6 +168,7 @@ function MediaSection({ advanced }: { advanced: boolean }) {
           <div id="media-paths"><MediaPathsForm data={data} onSaved={reload} /></div>
         </>
       )}
+      <div id="media-naming"><NamingPreview /></div>
       <div id="media-bulk" className="card">
         <h2>Bulk root folders</h2>
         <p className="muted">Change the root folder for many titles at once, per media type. Only where future downloads go changes; existing files are not moved.</p>
@@ -226,6 +228,70 @@ function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
       <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
       <ErrorLine message={message} />
       <button className="primary" type="submit">Save import paths</button>
+    </form>
+  );
+}
+
+function NamingPreview() {
+  const [kind, setKind] = useState<"movie" | "series">("movie");
+  const [template, setTemplate] = useState("{Title} ({Year}) - {Quality}");
+  const [title, setTitle] = useState("Example Movie");
+  const [year, setYear] = useState("2026");
+  const [season, setSeason] = useState("1");
+  const [episode, setEpisode] = useState("2");
+  const [episodeTitle, setEpisodeTitle] = useState("The Arrival");
+  const [quality, setQuality] = useState("1080p WEB-DL");
+  const [original, setOriginal] = useState("Example.Movie.2026.1080p.mkv");
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function changeKind(next: "movie" | "series") {
+    setKind(next);
+    setTemplate(next === "movie" ? "{Title} ({Year}) - {Quality}" : "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle} - {Quality}");
+    setTitle(next === "movie" ? "Example Movie" : "Example Series");
+    setOriginal(next === "movie" ? "Example.Movie.2026.1080p.mkv" : "Example.Series.S01E02.1080p.mkv");
+    setPreview(null); setError(null);
+  }
+
+  async function run() {
+    setBusy(true); setPreview(null); setError(null);
+    try {
+      const result = await api<{ fileName: string; applied: boolean }>("POST", "/api/naming/preview", {
+        kind, template, title, originalFile: original,
+        year: Number(year), season: Number(season), episode: Number(episode), episodeTitle, quality,
+      });
+      setPreview(result.fileName);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <form className="card" onSubmit={e => { e.preventDefault(); void run(); }}>
+      <h2>File naming preview</h2>
+      <p className="muted">Design a naming format without touching files. This is preview-only; importing still retains original release filenames until automatic naming is separately enabled and verified.</p>
+      <label>Media type
+        <select aria-label="Naming media type" value={kind} onChange={e => changeKind(e.target.value as "movie" | "series")}>
+          <option value="movie">Movie</option>
+          <option value="series">TV episode</option>
+        </select>
+      </label>
+      <label>Filename template<input aria-label="Filename template" value={template} onChange={e => setTemplate(e.target.value)} maxLength={220} required /></label>
+      <p className="muted">Tokens: {"{Title}"}, {"{Year}"}, {"{Season:00}"}, {"{Episode:00}"}, {"{EpisodeTitle}"}, {"{Quality}"}, {"{ReleaseGroup}"}, {"{OriginalName}"}. Extension is retained automatically.</p>
+      <div className="row">
+        <label>Title<input value={title} onChange={e => setTitle(e.target.value)} required /></label>
+        {kind === "movie" ? <label>Year<input type="number" min="1900" max="2100" value={year} onChange={e => setYear(e.target.value)} /></label> :
+          <>
+            <label>Season<input type="number" min="0" max="999" value={season} onChange={e => setSeason(e.target.value)} /></label>
+            <label>Episode<input type="number" min="1" max="999" value={episode} onChange={e => setEpisode(e.target.value)} /></label>
+            <label>Episode title<input value={episodeTitle} onChange={e => setEpisodeTitle(e.target.value)} /></label>
+          </>}
+        <label>Quality<input value={quality} onChange={e => setQuality(e.target.value)} /></label>
+        <label>Original filename<input value={original} onChange={e => setOriginal(e.target.value)} required /></label>
+      </div>
+      <ErrorLine message={error} />
+      {preview && <p aria-live="polite">Preview filename: <code>{preview}</code></p>}
+      <button type="submit" disabled={busy}>{busy ? "Previewing…" : "Preview filename"}</button>
     </form>
   );
 }
