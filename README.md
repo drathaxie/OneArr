@@ -1,5 +1,30 @@
 # OneArr
 
+
+### Tracker catalog and direct RSS
+
+Settings → Indexers → **Browse tracker catalog** lists known tracker definitions from
+[Prowlarr/Indexers](https://github.com/Prowlarr/Indexers), with offline search and
+filters for privacy, language, movies and TV. The metadata-only manifest can be
+refreshed in the UI and is regenerated weekly in CI. These entries are **not**
+all configured or supported indexers: a site definition is different from a
+Torznab/Newznab API.
+
+The native **Nyaa.si** RSS adapter is supported: select Nyaa.si and choose
+**Add Nyaa (native RSS)** to fill its public RSS address, then Test and Save.
+This performs a read-only RSS test; searches use Nyaa's RSS query and do not
+require Prowlarr, Jackett, Docker or a site account. You can still configure
+existing Torznab/Newznab feeds manually, including their API keys.
+
+Other entries show the site's required configuration labels for reference.
+Their website username/password/cookie fields cannot yet be used in OneArr;
+**do not paste tracker site passwords into the generic Torznab API-key box**.
+Full native Cardigann login/search, cookie handling and authenticated torrent
+downloads are tracked in [issue #14](https://github.com/drathaxie/OneArr/issues/14).
+This limitation is intentional: OneArr never marks a catalog-only definition
+as connected or transmits private tracker credentials to GitHub.
+
+
 ## Windows (recommended)
 
 Install from a release. You need nothing else installed: no Docker, WSL, Git, Node.js or .NET SDK.
