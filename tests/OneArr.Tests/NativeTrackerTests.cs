@@ -123,6 +123,20 @@ public class NativeTrackerTests
     }
 
     [Fact]
+    public void TorrentInfoHashMatchesSha1OfExactInfoDictionary()
+    {
+        var torrent = Encoding.ASCII.GetBytes("d8:announce12:https://a.tld4:infod4:name4:testee");
+        // Malformed announce fields must fail closed, not skip validation.
+        Assert.Throws<ExternalServiceException>(() => QBittorrentClient.TorrentInfoHash(torrent));
+        var valid = Encoding.ASCII.GetBytes("d4:infod4:name4:testee");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
+            Encoding.ASCII.GetBytes("d4:name4:teste"))).ToLowerInvariant();
+        Assert.Equal(expected, QBittorrentClient.TorrentInfoHash(valid));
+        Assert.Throws<ExternalServiceException>(() => QBittorrentClient.TorrentInfoHash(
+            Encoding.ASCII.GetBytes("d4:infod4:name4:test")));
+    }
+
+    [Fact]
     public async Task MultipartUploadToQbittorrentSendsBytesAndCategory()
     {
         var captured = "";
