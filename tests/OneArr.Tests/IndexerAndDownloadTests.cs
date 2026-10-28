@@ -101,6 +101,26 @@ public class TorznabClientTests
     }
 
     [Fact]
+    public async Task PublicRssFeedIsFetchedOnceAcrossMultipleSearches()
+    {
+        var xml = """
+            <rss><channel><item><title>Test Show S01E02 1080p WEB-DL</title>
+              <enclosure url="https://feed.example/download/77.torrent" length="1395864371" type="application/x-bittorrent"/>
+            </item></channel></rss>
+            """;
+        var handler = new FakeHandler(_ => FakeHandler.Text(xml, contentType: "application/rss+xml"));
+        var factory = new FakeFactory(handler);
+        var shared = new PublicRssClient(factory);
+        var client = new TorznabClient(factory, rss: shared);
+        var idx = new IndexerConfig { Name = "feed", BaseUrl = "https://feed.example/rss",
+            ApiKey = PublicRssClient.ProtocolMarker };
+        var search = new ReleaseSearch(MediaType.Series, "Test Show", null, 1, 2, "5000");
+        Assert.Single(await client.SearchAsync(idx, search, CancellationToken.None));
+        Assert.Single(await client.SearchAsync(idx, search, CancellationToken.None));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public void GenericRss_RejectsHtmlWebPagesAndDetailLinks()
     {
         Assert.Throws<ExternalServiceException>(() => PublicRssClient.ParseFeed(
