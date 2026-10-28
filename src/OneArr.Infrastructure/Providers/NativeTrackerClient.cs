@@ -252,13 +252,13 @@ public sealed class NativeTrackerClient
             // Retry exactly once without the category filter, never silently
             // return zero results on both failed requests.
             using var fallback = await AuthGetAsync(indexer, BuildSearchPath(search.Type, keyword, false), ct);
-            return await ParseResponseAsync(indexer, fallback, ct, "unfiltered");
+            return await ParseResponseAsync(indexer, fallback, search.Type, ct, "unfiltered");
         }
-        return await ParseResponseAsync(indexer, response, ct, "category-filtered");
+        return await ParseResponseAsync(indexer, response, search.Type, ct, "category-filtered");
     }
 
     private static async Task<IReadOnlyList<ReleaseCandidate>> ParseResponseAsync(
-        IndexerConfig indexer, HttpResponseMessage response, CancellationToken ct, string route)
+        IndexerConfig indexer, HttpResponseMessage response, MediaType expectedMedia, CancellationToken ct, string route)
     {
         if (!response.IsSuccessStatusCode)
             throw new ExternalServiceException($"TorrentLeech {route} search returned HTTP {(int)response.StatusCode}; login success does not verify searching");
@@ -267,7 +267,11 @@ public sealed class NativeTrackerClient
         var data = await response.Content.ReadAsStringAsync(ct);
         if (data.Length > 8_000_000) throw new ExternalServiceException("TorrentLeech search response too large");
         var origin = ValidateBase(indexer.BaseUrl);
+        // A fallback without categories can contain software, games, music and
+        // books. Never pass those to the release ranker as if they were movies.
+        var category = expectedMedia == MediaType.Movie ? 2000 : 5000;
         return ParseSearch(data, indexer.Name)
+            .Where(item => item.Categories.Contains(category))
             .Select(item => item with { Link = new Uri(origin, item.Link).AbsoluteUri })
             .ToList();
     }
@@ -296,7 +300,15 @@ public sealed class NativeTrackerClient
                 if (string.IsNullOrWhiteSpace(id) || !id.All(char.IsAsciiDigit) ||
                     string.IsNullOrWhiteSpace(file) || string.IsNullOrWhiteSpace(title)) continue;
                 var category = int.TryParse(Read("categoryID"), out var cat) ? cat : 0;
-                var mediaCat = category is 26 or 27 or 32 or 34 or 35 ? 5000 : 2000;
+                // Use the exact site's movie/TV category IDs from Prowlarr's
+                // TorrentLeech definition. Unknown IDs must not default to Movie.
+                var mediaCat = category switch
+                {
+                    8 or 9 or 11 or 12 or 13 or 14 or 15 or 29 or 36 or 37 or 43 or 47 => 2000,
+                    26 or 27 or 32 or 34 or 35 or 44 => 5000,
+                    _ => 0
+                };
+                if (mediaCat == 0) continue;
                 _ = int.TryParse(Read("seeders"), out var seeders);
                 _ = long.TryParse(Read("size"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
                 DateTimeOffset? date = null;
