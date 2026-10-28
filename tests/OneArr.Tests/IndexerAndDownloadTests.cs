@@ -287,9 +287,9 @@ public class QBittorrentClientTests
     }
 
     [Theory]
-    [InlineData("{\\"success_count\\":1,\\"pending_count\\":0,\\"failure_count\\":0}", HttpStatusCode.OK, true)]
-    [InlineData("{\\"success_count\\":0,\\"pending_count\\":1,\\"failure_count\\":0}", HttpStatusCode.Accepted, true)]
-    [InlineData("{\\"success_count\\":0,\\"pending_count\\":0,\\"failure_count\\":1}", HttpStatusCode.OK, false)]
+    [InlineData("""{"success_count":1,"pending_count":0,"failure_count":0}""", HttpStatusCode.OK, true)]
+    [InlineData("""{"success_count":0,"pending_count":1,"failure_count":0}""", HttpStatusCode.Accepted, true)]
+    [InlineData("""{"success_count":0,"pending_count":0,"failure_count":1}""", HttpStatusCode.OK, false)]
     public async Task ModernTorrentAddResponse_RequiresSuccessOrPending(string body, HttpStatusCode status, bool accepted)
     {
         var handler = new FakeHandler(req =>
