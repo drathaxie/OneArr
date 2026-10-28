@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -155,6 +157,75 @@ public class SettingsApiTests
         Assert.False(before.GetProperty("automaticGrabbing").GetBoolean());
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
         Assert.True(after.GetProperty("automaticGrabbing").GetBoolean());
+    }
+
+    [Fact]
+    public async Task QualityProfilesCanBeEditedAndDeleteIsGuardedByDefaultsAndRemainingProfiles()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/quality-profiles");
+        Assert.Equal(2, initial.GetArrayLength());
+        var first = initial[0].GetProperty("id").GetInt32();
+        var second = initial[1].GetProperty("id").GetInt32();
+
+        var invalid = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "Nope", minResolution = 2160, cutoffResolution = 720, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var badName = await client.PostAsJsonAsync("/api/quality-profiles", new {
+            name = " ", minResolution = 720, cutoffResolution = 1080, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, badName.StatusCode);
+
+        var saved = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "My 1080p", minResolution = 720, cutoffResolution = 1080, allowWebSources = false
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var profile = await saved.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("My 1080p", profile.GetProperty("name").GetString());
+        Assert.False(profile.GetProperty("allowWebSources").GetBoolean());
+
+        await client.PutAsJsonAsync("/api/settings", new { defaultMovieProfileId = first });
+        var blockedDefault = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, blockedDefault.StatusCode);
+        Assert.Contains("default", await blockedDefault.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+
+        var deleteUnused = await client.DeleteAsync($"/api/quality-profiles/{second}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteUnused.StatusCode);
+        // Even after changing the default, the only remaining profile may not be deleted.
+        var deleteLast = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, deleteLast.StatusCode);
+        Assert.Contains("last", await deleteLast.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task QualityProfileInUseByMediaIsNeverDeleted()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var profiles = await client.GetFromJsonAsync<JsonElement>("/api/quality-profiles");
+        var first = profiles[0].GetProperty("id").GetInt32();
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<OneArr.Infrastructure.Persistence.OneArrDbContext>>();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            db.MediaItems.Add(new OneArr.Domain.MediaItem {
+                MediaType = OneArr.Domain.MediaType.Movie, Provider = "tmdb", ProviderId = "123",
+                Title = "Test Film", RootFolder = "C:\\Media", QualityProfileId = first
+            });
+            await db.SaveChangesAsync();
+        }
+        var deleted = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, deleted.StatusCode);
+        Assert.Contains("assigned", await deleted.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        // Editing is allowed and preserves stable references.
+        var edit = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "Retuned", minResolution = 1080, cutoffResolution = 2160, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
+        await using var db2 = await dbFactory.CreateDbContextAsync();
+        Assert.Equal(first, (await db2.MediaItems.SingleAsync()).QualityProfileId);
     }
 
     [Fact]
