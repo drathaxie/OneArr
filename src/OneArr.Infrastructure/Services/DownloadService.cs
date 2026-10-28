@@ -756,6 +756,9 @@ public sealed class DownloadService
                 return Reject(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, labels, labelTexts, "Destination exists with different content; not overwriting", conflict: true);
             }
             var sameVolume = SafeImporter.IsSameVolume(source, dest);
+            if (!sameVolume && CopySpaceGuard.CopyProblem(dest, info.Length) is string spaceError)
+                return Reject(file, dest, info.Length, info.LastWriteTimeUtc.Ticks,
+                    labels, labelTexts, spaceError);
             return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), sameVolume ? "hardlink" : "copy", (sameVolume ? "Hardlink on the same volume" : "Copy to a different volume (verified, SHA-256)") + unmatchedNote, false, sameVolume, labels, labelTexts);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or ArgumentException or NotSupportedException or IOException)
