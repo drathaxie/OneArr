@@ -10,19 +10,16 @@ using OneArr.Infrastructure.Security;
 namespace OneArr.Infrastructure.Providers;
 
 /// <summary>
-/// qBittorrent WebUI API v2 client. Cookie (SID) login is cached per configured client and re-established on 403.
+/// qBittorrent WebUI API v2 client. The complete session cookie (SID or QBT_SID_port) is cached and renewed on 403.
 /// Only adds torrents to a configured category and lists torrents in that category; it never deletes.
 /// </summary>
 public sealed class QBittorrentClient : IDownloadClient
 {
     private readonly IHttpClientFactory _factory;
     private readonly ConcurrentDictionary<int, string> _sessions = new();
-    // Clients whose last login returned "Ok." but no SID cookie. That is a real,
-    // documented shape (localhost / whitelisted-subnet bypass, or a production
-    // HTTP handler that consumed Set-Cookie instead of exposing it), not a
-    // credential failure, so it is remembered only as a boolean, never with
-    // any cookie value, so a later 403 can be reported as a post-login 403
-    // instead of being misreported as bad credentials.
+    // A login with no session cookie may be a localhost/whitelisted-subnet bypass.
+    // Don't call it authenticated until a protected API request actually succeeds.
+    // Store only this diagnostic flag, never a password or a response body.
     private readonly ConcurrentDictionary<int, bool> _loginsWithoutSid = new();
 
     public QBittorrentClient(IHttpClientFactory factory)
@@ -42,9 +39,24 @@ public sealed class QBittorrentClient : IDownloadClient
         }), "api/v2/torrents/add", HttpMethod.Post);
 
         var body = (await response.Content.ReadAsStringAsync(ct)).Trim();
-        if (!response.IsSuccessStatusCode || !body.Equals("Ok.", StringComparison.OrdinalIgnoreCase))
+        if (!response.IsSuccessStatusCode)
             throw new ExternalServiceException($"qBittorrent rejected the torrent (HTTP {(int)response.StatusCode}, {body.Length} bytes of body)");
-        return hash ?? "";
+        // Legacy: "Ok.". New WebAPI: structured counts; HTTP 202
+        // indicates that the torrent is accepted but still pending.
+        if (body.Equals("Ok.", StringComparison.OrdinalIgnoreCase)) return hash ?? "";
+        if (body.StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.Object &&
+                    (ResultCount(root, "success_count") > 0 || ResultCount(root, "pending_count") > 0))
+                    return hash ?? "";
+            }
+            catch (JsonException) { /* Reject malformed responses below. */ }
+        }
+        throw new ExternalServiceException($"qBittorrent returned an unexpected torrent-add response (HTTP {(int)response.StatusCode}, {body.Length} bytes of body)");
     }
 
     public async Task<IReadOnlyList<DownloadClientItem>> ListAsync(DownloadClientConfig client, string category, CancellationToken ct)
@@ -130,7 +142,7 @@ public sealed class QBittorrentClient : IDownloadClient
                 var withoutSid = _loginsWithoutSid.ContainsKey(client.Id);
                 response.Dispose();
                 throw new ExternalServiceException(withoutSid
-                    ? $"qBittorrent signed in (login returned Ok.) but {path} returned HTTP 403 with no session cookie issued. This is not a username/password failure; check host-header validation, CSRF protection, or the bypass subnet for this source IP, and whether the HTTP client is consuming the Set-Cookie header instead of returning it."
+                    ? $"qBittorrent login returned a success-shaped response with no session cookie, but {path} returned HTTP 403 after re-login. Authentication could not be verified; this is not a username/password failure verdict. Check the WebUI address, authentication bypass settings, host-header validation and CSRF protection."
                     : $"qBittorrent signed in but {path} returned HTTP 403 after re-login. This is not a username/password failure; check host-header validation, CSRF protection, or whether the session is valid for this source IP and host.");
             }
         }
@@ -139,16 +151,13 @@ public sealed class QBittorrentClient : IDownloadClient
 
     private async Task<HttpResponseMessage> SendOnceAsync(HttpClient http, int clientId, Func<HttpContent>? body, string path, HttpMethod method, CancellationToken ct)
     {
-        var sid = _sessions.GetValueOrDefault(clientId) ?? "";
+        var sessionCookie = _sessions.GetValueOrDefault(clientId) ?? "";
         return await OutboundHttp.SendWithRetryAsync(http, () =>
         {
             var req = new HttpRequestMessage(method, path);
-            // Only send a Cookie header when a session actually exists.
-            // Sending an empty "SID=" would mask a bypass case (where the
-            // request is meant to succeed with no session) and, with
-            // automatic cookie handling enabled, a manual Cookie header can
-            // suppress the handler's own stored cookie.
-            if (sid.Length > 0) req.Headers.Add("Cookie", "SID=" + sid);
+            // Keep the name issued by qBittorrent: SID or QBT_SID_<port>.
+            // Do not send an empty cookie for localhost/whitelisted bypasses.
+            if (sessionCookie.Length > 0) req.Headers.Add("Cookie", sessionCookie);
             req.Headers.Referrer = http.BaseAddress;
             if (body is not null) req.Content = body();
             return req;
@@ -171,51 +180,55 @@ public sealed class QBittorrentClient : IDownloadClient
             return req;
         }, ct, maxRetries: 0);
 
-        var text = (await response.Content.ReadAsStringAsync(ct)).Trim();
+        var body = (await response.Content.ReadAsStringAsync(ct)).Trim();
 
-        // Documented qBittorrent WebUI API login shapes, kept distinct on
-        // purpose: collapsing them is what made a server-logged successful
-        // login surface as a credential failure in the Test button.
-        // - 403 on login: the client IP is banned after too many failed
-        //   attempts, not a per-attempt credential verdict.
-        // - 200 + "Fails.": the credential verdict.
-        // - 200 + "Ok.": success, and the response should carry an SID
-        //   cookie, but see the no-SID case below.
-        // - Anything else: an unexpected response (wrong service, reverse
-        //   proxy, version difference), not a credential verdict.
-        // Only the shape (status, body length, SID present/absent) is ever
-        // reported. The body itself, any cookie value, and the credentials
-        // are never put in an exception message.
+        // qBittorrent <=5.1: HTTP 200 + "Ok." / "Fails.", SID cookie.
+        // qBittorrent >=5.2: HTTP 204 with no body, QBT_SID_<port> cookie.
+        // Some intermediaries turn 204 into 200 without adding a response body.
+        // If no cookie is issued (e.g. auth bypass), a protected read must
+        // still succeed before the connection test reports success.
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+            throw new ExternalServiceException("qBittorrent login returned HTTP 401. Check the username and password in Settings.");
         if (response.StatusCode == HttpStatusCode.Forbidden)
-            throw new ExternalServiceException("qBittorrent login returned HTTP 403. Per the qBittorrent WebUI API this means the client IP is banned after too many failed login attempts; do not keep retrying, and check the ban before re-checking the username and password.");
+            throw new ExternalServiceException("qBittorrent login returned HTTP 403. Check whether the client IP is banned or WebUI access is denied; do not keep retrying.");
         if (!response.IsSuccessStatusCode)
-            throw new ExternalServiceException($"qBittorrent login returned HTTP {(int)response.StatusCode}. This is an unexpected login response, not a username/password failure; check the service URL, reverse proxy, and qBittorrent version.");
-        if (text.Equals("Fails.", StringComparison.OrdinalIgnoreCase))
+            throw new ExternalServiceException($"qBittorrent login returned HTTP {(int)response.StatusCode}. Check the service URL, reverse proxy, and qBittorrent version.");
+        if (body.Equals("Fails.", StringComparison.OrdinalIgnoreCase))
             throw new ExternalServiceException("qBittorrent login failed. Check the username and password in Settings.");
-        if (!text.Equals("Ok.", StringComparison.OrdinalIgnoreCase))
-            throw new ExternalServiceException($"qBittorrent login returned HTTP 200 with an unexpected body ({text.Length} bytes, neither 'Ok.' nor 'Fails.'). This is not treated as a username/password failure; check whether the URL points at qBittorrent, a reverse proxy, or a different service.");
 
+        var recognized = body.Equals("Ok.", StringComparison.OrdinalIgnoreCase)
+            || (body.Length == 0 && response.StatusCode is HttpStatusCode.OK or HttpStatusCode.NoContent);
+        if (!recognized)
+            throw new ExternalServiceException($"qBittorrent login returned HTTP {(int)response.StatusCode} with an unexpected body ({body.Length} bytes, neither 'Ok.' nor 'Fails.'). This is not treated as a username/password failure; check the WebUI address or reverse proxy.");
+
+        // Preserve the exact cookie name as well as its value. Sending
+        // a QBT_SID_<port> token under the old SID name leads to a 403.
         var cookie = response.Headers.TryGetValues("Set-Cookie", out var values)
-            ? values.Select(v => v.Split(';')[0]).FirstOrDefault(v => v.StartsWith("SID=", StringComparison.Ordinal))
+            ? values.Select(v => v.Split(';', 2)[0].Trim()).FirstOrDefault(IsQbitSessionCookie)
             : null;
-        if (cookie is null || cookie.Length <= "SID=".Length)
+        if (cookie is null)
         {
-            // "Ok." with no SID is not a credential failure and must not
-            // be reported as one. It happens when qBittorrent bypasses
-            // authentication for this source IP (localhost / whitelisted
-            // subnet), and it is also exactly what the client sees when a
-            // production HTTP handler with automatic cookie handling
-            // consumes Set-Cookie instead of exposing it, even though the
-            // server logged a successful login. Validation is not weakened
-            // here: the following authenticated request is the proof. If
-            // it succeeds, the connection genuinely works; if it returns
-            // 403, SendAsync reports that post-login 403 distinctly.
             _sessions[client.Id] = "";
             _loginsWithoutSid[client.Id] = true;
             return;
         }
         _loginsWithoutSid.TryRemove(client.Id, out _);
-        _sessions[client.Id] = cookie["SID=".Length..];
+        _sessions[client.Id] = cookie;
+    }
+
+    private static int ResultCount(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var count)
+            ? count : 0;
+
+    private static bool IsQbitSessionCookie(string cookie)
+    {
+        var equalsAt = cookie.IndexOf('=');
+        if (equalsAt <= 0 || equalsAt == cookie.Length - 1) return false;
+        var name = cookie[..equalsAt];
+        if (name == "SID") return true;
+        if (!name.StartsWith("QBT_SID_", StringComparison.Ordinal)) return false;
+        var port = name["QBT_SID_".Length..];
+        return port.Length > 0 && port.All(char.IsAsciiDigit);
     }
 
     private static byte[] Base32Decode(string input)
