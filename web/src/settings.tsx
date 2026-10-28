@@ -414,7 +414,7 @@ function IndexersSection() {
         </div>
       </div>
       {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)}
-        onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setSuggestedNativeId(""); setSuggestedProtocol("torznab"); setShowCatalog(false); setEditing("new"); }}
+        onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setSuggestedNativeId(""); setSuggestedProtocol(url?.startsWith("https://nyaa.si/") ? "rss" : "torznab"); setShowCatalog(false); setEditing("new"); }}
         onNative={(name, url, trackerId) => { setSuggestedName(name); setSuggestedUrl(url); setSuggestedNativeId(trackerId); setSuggestedProtocol("torznab"); setShowCatalog(false); setEditing("new"); }} />}
       {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} suggestedNativeId={suggestedNativeId} suggestedProtocol={suggestedProtocol} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
@@ -427,7 +427,7 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
   const [key, setKey] = useState("");
   const nativeId = initial?.protocol === "TorrentLeech" ? "torrentleech" : suggestedNativeId ?? "";
   const [protocol, setProtocol] = useState<"rss" | "torznab">(
-    initial?.protocol === "RSS" ? "rss" : suggestedProtocol ?? "torznab");
+    initial?.protocol === "RSS" || initial?.protocol === "Nyaa RSS" ? "rss" : suggestedProtocol ?? "torznab");
   const [trackerUsername, setTrackerUsername] = useState("");
   const [trackerPassword, setTrackerPassword] = useState("");
   const [trackerAlt2fa, setTrackerAlt2fa] = useState("");
