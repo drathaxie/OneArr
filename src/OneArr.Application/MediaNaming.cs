@@ -33,7 +33,9 @@ public static class MediaNaming
             input.OriginalFile.Contains('/') || input.OriginalFile.Contains('\\'))
             throw new ArgumentException("Original filename must be a single file name");
         var extension = Path.GetExtension(input.OriginalFile);
-        if (!Regex.IsMatch(extension, @"^\.[A-Za-z0-9]{2,6}$"))
+        if (!Regex.IsMatch(extension, @"^\.[A-Za-z0-9]{2,6}$") ||
+            !new[] { ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".mpg", ".mpeg", ".webm" }
+                .Contains(extension.ToLowerInvariant(), StringComparer.Ordinal))
             throw new ArgumentException("Original filename has an unsupported extension");
         var originalName = Path.GetFileNameWithoutExtension(input.OriginalFile);
         string Value(string token) => token switch
@@ -64,6 +66,7 @@ public static class MediaNaming
     private static string Clean(string input)
     {
         var text = Unsafe.Replace(input, " ");
+        text = Regex.Replace(text, @"\.{2,}", " ");
         text = Whitespace.Replace(text, " ").Trim(' ', '.');
         return text;
     }
