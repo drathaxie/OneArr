@@ -21,7 +21,16 @@ public static class ServiceCollectionExtensions
         // Every outbound client has a finite timeout; retries live in OutboundHttp.
         services.AddHttpClient(OutboundHttp.TmdbClient, c => c.Timeout = TimeSpan.FromSeconds(15));
         services.AddHttpClient(OutboundHttp.TorznabClient, c => c.Timeout = TimeSpan.FromSeconds(30));
-        services.AddHttpClient(OutboundHttp.QbittorrentClient, c => c.Timeout = TimeSpan.FromSeconds(15));
+        // qBittorrent only: QBittorrentClient manages the SID cookie itself.
+        // Automatic cookie handling must be off for this named client, or
+        // the handler can consume Set-Cookie instead of exposing it to the
+        // client (so a server-logged successful login looks like "no
+        // session cookie") and a manually added Cookie header can be
+        // suppressed. This is production-only: tests use a FakeFactory
+        // handler, which is why the tests passed while the real Test
+        // button failed. Other named clients are unchanged.
+        services.AddHttpClient(OutboundHttp.QbittorrentClient, c => c.Timeout = TimeSpan.FromSeconds(15))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false });
         services.AddHttpClient(OutboundHttp.LegacyClient, c => c.Timeout = TimeSpan.FromSeconds(20));
 
         services.AddSingleton<IReleaseParser, ReleaseParser>();
