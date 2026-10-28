@@ -144,7 +144,7 @@ public class NativeTrackerTests
         var movieId = await world.AddMovieAsync("The Matrix", 1999);
         await using (var db = await world.Db.CreateDbContextAsync())
         {
-            db.Indexers.Add(Config());
+            db.Indexers.Add(Config(0));
             await db.SaveChangesAsync();
         }
         var uploads = 0;
