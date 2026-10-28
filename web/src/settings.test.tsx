@@ -166,7 +166,37 @@ describe("Quality profile settings", () => {
     fireEvent.change(screen.getByLabelText("Cutoff resolution"), { target: { value: "720" } });
     fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
 
-    expect(await screen.findByText(/cutoff >= minimum/)).toBeTruthy();
+    expect(await screen.findByText(/Cutoff cannot be lower than the minimum resolution/)).toBeTruthy();
+  });
+});
+
+describe("Quality profile management", () => {
+  it("edits a profile without changing its identity or deleting media", async () => {
+    routes["PUT /api/quality-profiles/1"] = () => ({
+      body: { id: 1, name: "HD edited", minResolution: 1080, cutoffResolution: 2160, allowWebSources: false },
+    });
+    await renderSettings();
+    await openSection("Profiles", "Quality profiles");
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile HD-1080p" }));
+    fireEvent.change(screen.getByLabelText("Edit profile name"), { target: { value: "HD edited" } });
+    const edit = screen.getByRole("form", { name: "Edit HD-1080p" });
+    fireEvent.change(edit.querySelector('select[aria-label="Minimum resolution"]')!, { target: { value: "1080" } });
+    fireEvent.change(edit.querySelector('select[aria-label="Cutoff resolution"]')!, { target: { value: "2160" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(calls.some(x => x.path === "/api/quality-profiles/1" && x.method === "PUT")).toBe(true));
+    const put = calls.find(x => x.path === "/api/quality-profiles/1" && x.method === "PUT")!;
+    expect(put.body).toEqual({ name: "HD edited", minResolution: 1080, cutoffResolution: 2160, allowWebSources: true });
+  });
+
+  it("asks for explicit delete confirmation and shows an in-use conflict", async () => {
+    routes["DELETE /api/quality-profiles/1"] = () => ({ status: 409, body: { error: "Profile is assigned to existing movies." } });
+    await renderSettings();
+    await openSection("Profiles", "Quality profiles");
+    fireEvent.click(screen.getByRole("button", { name: "Delete profile HD-1080p" }));
+    expect(calls.filter(x => x.method === "DELETE")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    await waitFor(() => expect(calls.some(x => x.method === "DELETE" && x.path === "/api/quality-profiles/1")).toBe(true));
+    expect(await screen.findByText(/assigned to existing movies/)).toBeTruthy();
   });
 });
 
