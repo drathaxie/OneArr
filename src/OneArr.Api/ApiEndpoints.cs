@@ -27,6 +27,7 @@ public static class ApiEndpoints
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
+    public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
     public sealed record SeasonSelection(int SeasonNumber, bool Monitored);
@@ -157,6 +158,24 @@ public static class ApiEndpoints
             await c.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return Results.NoContent();
+        });
+
+        // Pure preview: never stores naming preferences and never touches the filesystem.
+        // Existing imports still preserve original filenames until a later,
+        // separately tested opt-in naming policy is implemented.
+        api.MapPost("/naming/preview", (NamingPreviewBody body) =>
+        {
+            try
+            {
+                var file = MediaNaming.Preview(new MediaNaming.Request(
+                    body.Kind, body.Template, body.Title, body.OriginalFile, body.Year,
+                    body.Season, body.Episode, body.EpisodeTitle, body.Quality, body.ReleaseGroup));
+                return Results.Ok(new { fileName = file, applied = false });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
 
         api.MapGet("/metadata/search", async (string q, string type, IMetadataProvider metadata, CancellationToken ct) =>

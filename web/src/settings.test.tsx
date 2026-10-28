@@ -72,6 +72,24 @@ afterEach(() => {
   setToken(null);
 });
 
+describe("Read-only naming preview", () => {
+  it("renders a filename without enabling renaming or changing import settings", async () => {
+    routes["POST /api/naming/preview"] = () => ({
+      body: { fileName: "Example Movie (2026) - 1080p WEB-DL.mkv", applied: false },
+    });
+    await renderSettings();
+    await openSection("Media Management", "Default root folders");
+    expect(screen.getByText(/preview-only; importing still retains original release filenames/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Preview filename" }));
+    await waitFor(() => expect(calls.some(x => x.method === "POST" && x.path === "/api/naming/preview")).toBe(true));
+    const call = calls.find(x => x.path === "/api/naming/preview")!;
+    expect(call.body!.kind).toBe("movie");
+    expect(call.body!.template).toBe("{Title} ({Year}) - {Quality}");
+    expect(await screen.findByText("Example Movie (2026) - 1080p WEB-DL.mkv")).toBeTruthy();
+    expect(putCalls()).toHaveLength(0);
+  });
+});
+
 describe("General settings", () => {
   it("shows the TMDb key as configured without ever filling the field with it", async () => {
     await renderSettings();
