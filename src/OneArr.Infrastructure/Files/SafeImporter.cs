@@ -42,7 +42,8 @@ public sealed class SafeImporter : IImporter
         {
             source = CanonicalUnder(request.TorrentRoot, request.SourcePath);
             RequireNoLinksBelow(request.TorrentRoot, source);
-            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath, Path.GetFileName(source));
+            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath,
+                request.DestinationFileName ?? Path.GetFileName(source));
             RequireNoLinksBelow(request.DestinationRoot, dest);
         }
         catch (UnauthorizedAccessException ex)
@@ -72,6 +73,12 @@ public sealed class SafeImporter : IImporter
 
         if (TryHardLink(source, dest, out var linkReason))
             return new ImportOutcome(ImportAction.Hardlink, dest, true, "Hardlinked on the same volume");
+
+        // A failed hardlink falls back to a real data copy. Always check the
+        // actual destination volume before allocating a temporary file.
+        var spaceError = CopySpaceGuard.CopyProblem(dest, info.Length);
+        if (spaceError is not null)
+            return new ImportOutcome(ImportAction.Failed, dest, false, spaceError);
 
         var temp = dest + ".onearr-" + Guid.NewGuid().ToString("N") + ".tmp";
         try

@@ -112,7 +112,8 @@ public sealed record ImportRequest(
     string DestinationRelativePath,
     string TorrentRoot,
     bool DryRun,
-    int? DownloadJobId);
+    int? DownloadJobId,
+    string? DestinationFileName = null);
 
 public sealed record ImportOutcome(ImportAction Action, string DestinationPath, bool Success, string Message);
 

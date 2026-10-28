@@ -117,7 +117,9 @@ public class NativeTrackerTests
             if (path.StartsWith("/torrents/browse/list/exact/1/query/"))
                 return FakeHandler.Text("""
                     {"torrentList":[{"fid":5678,"filename":"Film.2026.torrent","name":"Film 2026 1080p WEB-DL",
-                    "categoryID":37,"seeders":12,"size":1073741824}]}
+                    "categoryID":37,"seeders":12,"size":1073741824},
+                    {"fid":5679,"filename":"Software.torrent","name":"Film 2026 1080p WEB-DL",
+                    "categoryID":17,"seeders":99,"size":1073741824}]}
                     """);
             return Html("Wrong route", HttpStatusCode.NotFound);
         });
@@ -153,6 +155,23 @@ public class NativeTrackerTests
             new ReleaseSearch(MediaType.Series, "Show", null, 1, 2, "5000"), CancellationToken.None));
         Assert.Contains("unfiltered search returned HTTP 404", ex.Message);
         Assert.DoesNotContain("my-password", ex.Message);
+    }
+
+    [Fact]
+    public void UnknownTorrentLeechCategoriesAreNotMislabelledAsMovies()
+    {
+        var rows = NativeTrackerClient.ParseSearch("""
+            {"torrentList":[
+              {"fid":1,"filename":"movie.torrent","name":"Movie 1080p","categoryID":37,"seeders":2,"size":10},
+              {"fid":2,"filename":"tv.torrent","name":"Series S01E02","categoryID":44,"seeders":5,"size":20},
+              {"fid":3,"filename":"game.torrent","name":"Software","categoryID":17,"seeders":2,"size":30},
+              {"fid":4,"filename":"unknown.torrent","name":"Unknown","categoryID":999,"seeders":2,"size":40}
+            ]}
+            """, "TorrentLeech");
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.Title == "Movie 1080p" && r.Categories.Contains(2000));
+        Assert.Contains(rows, r => r.Title == "Series S01E02" && r.Categories.Contains(5000));
+        Assert.DoesNotContain(rows, r => r.Title == "Software" || r.Title == "Unknown");
     }
 
     [Fact]
