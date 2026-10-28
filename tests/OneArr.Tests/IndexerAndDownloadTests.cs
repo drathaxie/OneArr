@@ -43,6 +43,43 @@ public class TorznabClientTests
     }
 
     [Fact]
+    public async Task NativeNyaaSearch_ParsesRssAndEscapesQuery()
+    {
+        var xml = """
+            <rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa" version="2.0">
+              <channel><item>
+                <title>Test Show S01E02 1080p</title>
+                <link>https://nyaa.si/download/1234.torrent</link>
+                <pubDate>Mon, 26 Dec 2022 16:47:05 -0000</pubDate>
+                <nyaa:seeders>42</nyaa:seeders>
+                <nyaa:infoHash>ABCDEF0123456789ABCDEF0123456789ABCDEF01</nyaa:infoHash>
+                <nyaa:size>1.5 GiB</nyaa:size>
+              </item></channel>
+            </rss>
+            """;
+        var handler = new FakeHandler(_ => FakeHandler.Text(xml, contentType: "application/rss+xml"));
+        var client = new TorznabClient(new FakeFactory(handler));
+        var idx = new IndexerConfig { Name = "Nyaa.si", BaseUrl = "https://nyaa.si/" };
+        var results = await client.SearchAsync(idx,
+            new ReleaseSearch(MediaType.Series, "Test Show", null, 1, 2, "5000"), CancellationToken.None);
+        Assert.Single(results);
+        Assert.Equal(42, results[0].Seeders);
+        Assert.Equal(1610612736L, results[0].Size);
+        Assert.Equal("abcdef0123456789abcdef0123456789abcdef01", results[0].InfoHash);
+        Assert.Contains(5000, results[0].Categories);
+        Assert.Equal("https://nyaa.si/download/1234.torrent", results[0].Link);
+        Assert.Equal("/?page=rss&q=Test%20Show", handler.Requests.Single().RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public void NativeNyaa_RejectsAnHtmlLoginPage()
+    {
+        Assert.Throws<ExternalServiceException>(() => TorznabClient.ParseNyaaRss("<html>login</html>", "Nyaa"));
+        Assert.False(TorznabClient.IsDirectNyaa(new Uri("https://nyaa.si.evil.example/")));
+        Assert.True(TorznabClient.IsDirectNyaa(new Uri("https://nyaa.si/")));
+    }
+
+    [Fact]
     public async Task RateLimitedIndexerReportsFriendlyError()
     {
         var handler = new FakeHandler(_ => FakeHandler.Text("slow down", HttpStatusCode.TooManyRequests, "text/plain"));
