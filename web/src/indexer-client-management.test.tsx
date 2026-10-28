@@ -120,6 +120,19 @@ describe("Indexer management", () => {
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/indexers")).toBe(false);
   });
 
+  it("tests an edit dialog with the saved id so a blank key reuses the stored key", async () => {
+    await renderSettings();
+    await openSection("Indexers", "Indexers (Torznab / Newznab)");
+    await screen.findByText("Zulu");
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://zulu2.test/" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Test" }));
+    expect(await screen.findByText(/answered caps with 3 categories/)).toBeTruthy();
+    const test = calls.find((c) => c.method === "POST" && c.path === "/api/connections/test")!;
+    expect(test.body).toEqual({ service: "torznab", indexerId: 7, baseUrl: "http://zulu2.test/", apiKey: "" });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
   it("edits without clearing the stored key", async () => {
     routes["PUT /api/indexers/7"] = () => ({ status: 200, body: {} });
     await renderSettings();
@@ -166,7 +179,7 @@ describe("Download client management", () => {
     expect(test.body).toEqual({ service: "qbittorrent", clientId: 3 });
   });
 
-  it("tests unsaved client values without saving and edits without clearing the password", async () => {
+  it("tests edit-dialog values with the saved id and edits without clearing the password", async () => {
     routes["PUT /api/download-clients/3"] = () => ({ status: 200, body: {} });
     await renderSettings();
     await openSection("Download Clients", "Download clients (qBittorrent)");
@@ -177,7 +190,9 @@ describe("Download client management", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/connections/test")).toBe(true));
     const test = calls.find((c) => c.method === "POST" && c.path === "/api/connections/test")!;
     expect(test.body!.service).toBe("qbittorrent");
+    expect(test.body!.clientId).toBe(3);
     expect(test.body!.baseUrl).toBe("http://qbit2.test:8080");
+    expect(test.body!.password).toBe("");
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/download-clients")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/api/download-clients/3")).toBe(true));

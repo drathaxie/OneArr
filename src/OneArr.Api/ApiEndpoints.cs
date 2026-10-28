@@ -864,17 +864,31 @@ public static class ApiEndpoints
                     }
                     case "torznab":
                     {
-                        // Saved record: test its stored values and record the diagnostic outcome.
-                        // Unsaved form values (baseUrl, no indexerId): test exactly what was typed,
-                        // save nothing, and record no health — there is nothing to attach it to.
+                        // Saved record with no overrides (row Test): test its stored values
+                        // and record the diagnostic outcome. Saved record WITH form overrides
+                        // (edit-dialog Test): test the form's URL, falling back to the stored
+                        // key when the key field is blank — the dialog never sees the secret —
+                        // save nothing, and record no health, since the values tested are not
+                        // the saved ones. Unsaved form values (baseUrl, no indexerId): test
+                        // exactly what was typed, save nothing, record no health.
                         string name, baseUrl, apiKey;
                         int? savedId = null;
                         if (body.IndexerId is int indexerId)
                         {
                             var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
                             if (indexer is null) return Results.NotFound();
-                            if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
-                            (name, baseUrl, apiKey, savedId) = (indexer.Name, indexer.BaseUrl, indexer.ApiKey, indexer.Id);
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.ApiKey);
+                            if (!hasOverrides)
+                            {
+                                if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
+                                (name, baseUrl, apiKey, savedId) = (indexer.Name, indexer.BaseUrl, indexer.ApiKey, indexer.Id);
+                            }
+                            else
+                            {
+                                name = indexer.Name;
+                                baseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? indexer.BaseUrl : body.BaseUrl;
+                                apiKey = string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
+                            }
                         }
                         else
                         {
@@ -908,19 +922,39 @@ public static class ApiEndpoints
                     }
                     case "qbittorrent":
                     {
-                        // Saved record: test its stored values and record the diagnostic outcome.
-                        // Unsaved form values (baseUrl, no clientId): test exactly what was typed,
-                        // save nothing, and record no health. Empty categories fall back to the
-                        // standard defaults, matching what the form prefills on save.
+                        // Saved record with no overrides (row Test): test its stored values
+                        // and record the diagnostic outcome. Saved record WITH form overrides
+                        // (edit-dialog Test): form values win, blank fields fall back to the
+                        // stored record — notably the password, which the dialog never sees —
+                        // save nothing, record no health. Unsaved form values (baseUrl, no
+                        // clientId): test exactly what was typed, save nothing, record no
+                        // health. Empty categories there fall back to the standard defaults,
+                        // matching what the form prefills on save.
                         DownloadClientConfig client;
                         int? savedId = null;
                         if (body.ClientId is int clientId)
                         {
                             var saved = await c.DownloadClients.AsNoTracking().FirstOrDefaultAsync(x => x.Id == clientId, ct);
                             if (saved is null) return Results.NotFound();
-                            if (!saved.Enabled) return Results.Ok(new { ok = false, service, detail = $"Download client '{saved.Name}' is disabled." });
-                            client = saved;
-                            savedId = saved.Id;
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.Username) || !string.IsNullOrWhiteSpace(body.Password) || !string.IsNullOrWhiteSpace(body.MovieCategory) || !string.IsNullOrWhiteSpace(body.TvCategory);
+                            if (!hasOverrides)
+                            {
+                                if (!saved.Enabled) return Results.Ok(new { ok = false, service, detail = $"Download client '{saved.Name}' is disabled." });
+                                client = saved;
+                                savedId = saved.Id;
+                            }
+                            else
+                            {
+                                client = new DownloadClientConfig
+                                {
+                                    Name = saved.Name,
+                                    BaseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? saved.BaseUrl : body.BaseUrl,
+                                    Username = string.IsNullOrWhiteSpace(body.Username) ? saved.Username : body.Username,
+                                    Password = string.IsNullOrWhiteSpace(body.Password) ? saved.Password : body.Password,
+                                    MovieCategory = string.IsNullOrWhiteSpace(body.MovieCategory) ? saved.MovieCategory : body.MovieCategory.Trim(),
+                                    TvCategory = string.IsNullOrWhiteSpace(body.TvCategory) ? saved.TvCategory : body.TvCategory.Trim(),
+                                };
+                            }
                         }
                         else
                         {
@@ -990,62 +1024,7 @@ public static class ApiEndpoints
         // background work — the caller re-reads the lists when this returns.
         api.MapPost("/connections/test-all", async (IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient, CancellationToken ct) =>
         {
-            await using var c = await db.CreateDbContextAsync(ct);
-            var indexers = await c.Indexers.AsNoTracking().Where(i => i.Enabled).OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
-            var clients = await c.DownloadClients.AsNoTracking().Where(x => x.Enabled).OrderBy(x => x.Id).ToListAsync(ct);
-            using var gate = new SemaphoreSlim(4);
-            using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            batchCts.CancelAfter(TimeSpan.FromSeconds(120));
-            var batchCt = batchCts.Token;
-
-            async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneIndexerAsync(IndexerConfig indexer)
-            {
-                await gate.WaitAsync(batchCt);
-                try
-                {
-                    using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
-                    itemCts.CancelAfter(TimeSpan.FromSeconds(30));
-                    var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name, indexer.BaseUrl, indexer.ApiKey, itemCts.Token);
-                    // A fresh context per item: DbContext is not thread-safe across concurrent tests.
-                    await using var hc = await db.CreateDbContextAsync(batchCt);
-                    await UpsertIndexerHealthAsync(hc, indexer.Id, ok, ok ? null : detail, batchCt);
-                    return ("indexer", indexer.Id, indexer.Name, ok, detail);
-                }
-                catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or InvalidOperationException or OperationCanceledException)
-                {
-                    var detail = ex is OperationCanceledException ? $"Indexer '{indexer.Name}' timed out." : OutboundHttp.Redact(ex.Message);
-                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
-                    await UpsertIndexerHealthAsync(hc, indexer.Id, false, detail, CancellationToken.None);
-                    return ("indexer", indexer.Id, indexer.Name, false, detail);
-                }
-                finally { gate.Release(); }
-            }
-
-            async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneClientAsync(DownloadClientConfig client)
-            {
-                await gate.WaitAsync(batchCt);
-                try
-                {
-                    using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
-                    itemCts.CancelAfter(TimeSpan.FromSeconds(30));
-                    var (ok, detail, _, _) = await TestQbitAsync(downloadClient, client, itemCts.Token);
-                    // A fresh context per item: DbContext is not thread-safe across concurrent tests.
-                    await using var hc = await db.CreateDbContextAsync(batchCt);
-                    await UpsertClientHealthAsync(hc, client.Id, ok, ok ? null : detail, batchCt);
-                    return ("client", client.Id, client.Name, ok, detail);
-                }
-                catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or InvalidOperationException or OperationCanceledException)
-                {
-                    var detail = ex is OperationCanceledException ? $"Download client '{client.Name}' timed out." : OutboundHttp.Redact(ex.Message);
-                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
-                    await UpsertClientHealthAsync(hc, client.Id, false, detail, CancellationToken.None);
-                    return ("client", client.Id, client.Name, false, detail);
-                }
-                finally { gate.Release(); }
-            }
-
-            var tasks = indexers.Select(TestOneIndexerAsync).Concat(clients.Select(TestOneClientAsync)).ToList();
-            var results = await Task.WhenAll(tasks);
+            var results = await TestAllCoreAsync(db, httpFactory, downloadClient, TimeSpan.FromSeconds(120), ct);
             return Results.Ok(new
             {
                 results = results.Select(r => new { kind = r.Kind, id = r.Id, name = r.Name, ok = r.Ok, detail = r.Detail }),
@@ -1222,6 +1201,94 @@ public static class ApiEndpoints
         await using var c = await db.CreateDbContextAsync(ct);
         if (!await c.QualityProfiles.AnyAsync(p => p.Id == profileId, ct)) throw new ArgumentException("Quality profile does not exist");
         return profileId;
+    }
+
+    // Batch test core, extracted from the endpoint so tests can drive it with a short
+    // deadline. Every item always yields a result: the gate wait sits INSIDE the per-item
+    // handler, so a batch-deadline expiry while tests are queued reports those tests as
+    // skipped instead of faulting Task.WhenAll — and the gate is only released when it was
+    // actually acquired. Failure-path health writes are best-effort: a dead database must
+    // not turn a per-item result into a fault.
+    internal static async Task<(string Kind, int Id, string Name, bool Ok, string Detail)[]> TestAllCoreAsync(
+        IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient,
+        TimeSpan batchTimeout, CancellationToken ct)
+    {
+        await using var c = await db.CreateDbContextAsync(ct);
+        var indexers = await c.Indexers.AsNoTracking().Where(i => i.Enabled).OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
+        var clients = await c.DownloadClients.AsNoTracking().Where(x => x.Enabled).OrderBy(x => x.Id).ToListAsync(ct);
+        using var gate = new SemaphoreSlim(4);
+        using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        batchCts.CancelAfter(batchTimeout);
+        var batchCt = batchCts.Token;
+
+        async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneIndexerAsync(IndexerConfig indexer)
+        {
+            var acquired = false;
+            var started = false;
+            try
+            {
+                await gate.WaitAsync(batchCt);
+                acquired = true;
+                started = true;
+                using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
+                itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name, indexer.BaseUrl, indexer.ApiKey, itemCts.Token);
+                // A fresh context per item: DbContext is not thread-safe across concurrent tests.
+                await using var hc = await db.CreateDbContextAsync(batchCt);
+                await UpsertIndexerHealthAsync(hc, indexer.Id, ok, ok ? null : detail, batchCt);
+                return ("indexer", indexer.Id, indexer.Name, ok, detail);
+            }
+            catch (Exception ex)
+            {
+                var detail = ex is OperationCanceledException
+                    ? started ? $"Indexer '{indexer.Name}' timed out." : $"Indexer '{indexer.Name}' skipped: batch deadline reached before the test started."
+                    : OutboundHttp.Redact(ex.Message);
+                try
+                {
+                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
+                    await UpsertIndexerHealthAsync(hc, indexer.Id, false, detail, CancellationToken.None);
+                }
+                catch { /* best-effort: the result below still reports the outcome */ }
+                return ("indexer", indexer.Id, indexer.Name, false, detail);
+            }
+            finally { if (acquired) gate.Release(); }
+        }
+
+        async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneClientAsync(DownloadClientConfig client)
+        {
+            var acquired = false;
+            var started = false;
+            try
+            {
+                await gate.WaitAsync(batchCt);
+                acquired = true;
+                started = true;
+                using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
+                itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                var (ok, detail, _, _) = await TestQbitAsync(downloadClient, client, itemCts.Token);
+                // A fresh context per item: DbContext is not thread-safe across concurrent tests.
+                await using var hc = await db.CreateDbContextAsync(batchCt);
+                await UpsertClientHealthAsync(hc, client.Id, ok, ok ? null : detail, batchCt);
+                return ("client", client.Id, client.Name, ok, detail);
+            }
+            catch (Exception ex)
+            {
+                var detail = ex is OperationCanceledException
+                    ? started ? $"Download client '{client.Name}' timed out." : $"Download client '{client.Name}' skipped: batch deadline reached before the test started."
+                    : OutboundHttp.Redact(ex.Message);
+                try
+                {
+                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
+                    await UpsertClientHealthAsync(hc, client.Id, false, detail, CancellationToken.None);
+                }
+                catch { /* best-effort: the result below still reports the outcome */ }
+                return ("client", client.Id, client.Name, false, detail);
+            }
+            finally { if (acquired) gate.Release(); }
+        }
+
+        var tasks = indexers.Select(TestOneIndexerAsync).Concat(clients.Select(TestOneClientAsync)).ToList();
+        return await Task.WhenAll(tasks);
     }
 
     // Secrets are never in these DTOs: only a hasKey/hasPassword flag. Health status is derived so a

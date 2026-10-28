@@ -424,7 +424,15 @@ function IndexerDialog({ initial, onClose, onSaved }: { initial: Indexer | null;
 
   async function testUnsaved() {
     setTesting(true); setErr(null);
-    try { setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "torznab", baseUrl: url, apiKey: key })); }
+    try {
+      // Editing: pass the saved record's id so the server reuses the stored key
+      // when the field is blank, while still testing the form's unsaved URL.
+      // Override tests never rewrite health and never return the secret.
+      const body = initial
+        ? { service: "torznab", indexerId: initial.id, baseUrl: url, apiKey: key }
+        : { service: "torznab", baseUrl: url, apiKey: key };
+      setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
+    }
     catch (x) { setErr((x as Error).message); }
     finally { setTesting(false); }
   }
@@ -452,7 +460,7 @@ function IndexerDialog({ initial, onClose, onSaved }: { initial: Indexer | null;
           <label className="inline"><input type="checkbox" checked={movies} onChange={(e) => setMovies(e.target.checked)} /> movies</label>
           <label className="inline"><input type="checkbox" checked={tv} onChange={(e) => setTv(e.target.checked)} /> TV</label>
           <label>Priority<input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
-          <p className="muted">Lower priority is searched first. Testing checks these exact values without saving.</p>
+          <p className="muted">{initial ? "Lower priority is searched first. Testing checks these values without saving; a blank key tests the stored key." : "Lower priority is searched first. Testing checks these exact values without saving."}</p>
           <ErrorLine message={err} />
           {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}</p>}
           {testResult?.categories && testResult.categories.length > 0 && <p className="muted">Categories: {testResult.categories.slice(0, 20).map((c) => `${c.id} ${c.name}`).join(", ")} · search: {testResult.searchAvailable ? "yes" : "no"}, TV search: {testResult.tvSearchAvailable ? "yes" : "no"}, movie search: {testResult.movieSearchAvailable ? "yes" : "no"}</p>}
@@ -599,7 +607,15 @@ function ClientDialog({ initial, onClose, onSaved }: { initial: DownloadClient |
 
   async function testUnsaved() {
     setTesting(true); setErr(null);
-    try { setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "qbittorrent", baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv })); }
+    try {
+      // Editing: pass the saved record's id so the server reuses the stored
+      // password when the field is blank, while still testing the form's
+      // unsaved values. Override tests never rewrite health.
+      const body = initial
+        ? { service: "qbittorrent", clientId: initial.id, baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv }
+        : { service: "qbittorrent", baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv };
+      setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
+    }
     catch (x) { setErr((x as Error).message); }
     finally { setTesting(false); }
   }
@@ -627,7 +643,7 @@ function ClientDialog({ initial, onClose, onSaved }: { initial: DownloadClient |
           <label>Movie category<input value={movie} onChange={(e) => setMovie(e.target.value)} /></label>
           <label>TV category<input value={tv} onChange={(e) => setTv(e.target.value)} /></label>
           <label className="inline"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> enabled</label>
-          <p className="muted">Testing signs in and lists these categories without saving, and never modifies torrents.</p>
+          <p className="muted">{initial ? "Testing signs in and lists these categories without saving, and never modifies torrents; a blank password tests the stored password." : "Testing signs in and lists these categories without saving, and never modifies torrents."}</p>
           <ErrorLine message={err} />
           {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}</p>}
           {testResult?.states && <p className="muted">Torrent states: {testResult.states.map((s) => `${s.state}: ${s.count}`).join(", ")} · content paths reported: {testResult.anyContentPath ? "yes" : "no"}</p>}

@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OneArr.Api;
+using OneArr.Application;
 using OneArr.Domain;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Providers;
@@ -347,7 +349,7 @@ public class IndexerClientManagementTests
             "<rss version=\"2.0\" xmlns:torznab=\"http://torznab.com/schemas/2015/feed\"><channel>"
             + "<item><title>The.Matrix.1999.1080p.BluRay.x264-GRP</title>"
             + "<link>magnet:?xt=urn:btih:" + MovieHash + "</link>"
-            + "<pubDate>Wed, 01 Oct 2026 12:00:00 GMT</pubDate>"
+            + "<pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate>"
             + "<torznab:attr name=\"seeders\" value=\"42\" /><torznab:attr name=\"infohash\" value=\"" + MovieHash + "\" />"
             + "</item></channel></rss>", contentType: "application/xml"));
         using var factory = new StubApiFactory(routing);
@@ -468,7 +470,7 @@ public class IndexerClientManagementTests
         const string head = "<rss version=\"2.0\" xmlns:torznab=\"http://torznab.com/schemas/2015/feed\"><channel>";
         var dated = TorznabClient.Parse(head
             + "<item><title>Movie.2021.1080p.WEB</title><link>magnet:?xt=urn:btih:" + MovieHash + "</link>"
-            + "<pubDate>Wed, 01 Oct 2026 12:00:00 GMT</pubDate></item></channel></rss>", "fixture");
+            + "<pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item></channel></rss>", "fixture");
         Assert.Equal(new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero), dated[0].PublishDateUtc);
 
         var undated = TorznabClient.Parse(head
@@ -504,6 +506,133 @@ public class IndexerClientManagementTests
         {
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Edit_dialog_test_reuses_saved_key_for_blank_field_and_writes_no_health()
+    {
+        var expectedKey = "saved-key";
+        var routing = new RoutingHandler();
+        routing.Route("indexer.test", req =>
+            QueryValue(req, "apikey") == expectedKey
+                ? FakeHandler.Text(CapsXml, contentType: "application/xml")
+                : FakeHandler.Text("unauthorized", HttpStatusCode.Unauthorized, "text/plain"));
+        using var factory = new StubApiFactory(routing);
+        var client = await SignedInAsync(factory);
+
+        var created = await PostJsonAsync(client, "/api/indexers", new
+        {
+            name = "fixture", baseUrl = "http://indexer.test/", apiKey = "saved-key",
+            enabled = true, moviesEnabled = true, tvEnabled = true, priority = 0,
+        });
+        var id = created.RootElement.GetProperty("id").GetInt32();
+
+        // Edit-dialog Test: blank key field plus a changed URL. The server must test the
+        // new URL with the STORED key (only it authenticates), save nothing, and record
+        // no health — the values tested are not the saved ones.
+        var tested = await PostJsonAsync(client, "/api/connections/test", new
+        {
+            service = "torznab", indexerId = id, baseUrl = "http://indexer.test/changed", apiKey = "",
+        });
+        Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());
+        Assert.DoesNotContain("saved-key", tested.RootElement.GetRawText());
+
+        var listed = await GetJsonAsync(client, "/api/indexers");
+        Assert.Equal("http://indexer.test/", listed.RootElement[0].GetProperty("baseUrl").GetString());
+        Assert.Equal("Not tested", listed.RootElement[0].GetProperty("healthStatus").GetString());
+
+        // A supplied key overrides the stored one for this one test only.
+        expectedKey = "typed-key";
+        tested = await PostJsonAsync(client, "/api/connections/test", new
+        {
+            service = "torznab", indexerId = id, baseUrl = "http://indexer.test/changed", apiKey = "typed-key",
+        });
+        Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());
+        listed = await GetJsonAsync(client, "/api/indexers");
+        Assert.Equal("http://indexer.test/", listed.RootElement[0].GetProperty("baseUrl").GetString());
+        Assert.Equal("Not tested", listed.RootElement[0].GetProperty("healthStatus").GetString());
+    }
+
+    [Fact]
+    public async Task Edit_dialog_test_reuses_saved_password_for_blank_field_and_writes_no_health()
+    {
+        var expectedPassword = "saved-pw";
+        var routing = new RoutingHandler();
+        routing.Route("qbit-auth.test", req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var form = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (form.Contains("password=" + expectedPassword))
+                {
+                    var r = FakeHandler.Text("Ok.", contentType: "text/plain");
+                    r.Headers.Add("Set-Cookie", "SID=fakesid; HttpOnly; path=/");
+                    return r;
+                }
+                return FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden, "text/plain");
+            }
+            if (req.RequestUri!.AbsolutePath == "/api/v2/torrents/info")
+                return FakeHandler.Text("[]");
+            return FakeHandler.Text("not found", HttpStatusCode.NotFound, "text/plain");
+        });
+        using var factory = new StubApiFactory(routing);
+        var client = await SignedInAsync(factory);
+
+        var created = await PostJsonAsync(client, "/api/download-clients", new
+        {
+            name = "qbit", baseUrl = "http://qbit-auth.test", username = "admin", password = "saved-pw",
+            movieCategory = "onearr-movies", tvCategory = "onearr-tv", enabled = true,
+        });
+        var id = created.RootElement.GetProperty("id").GetInt32();
+
+        // Blank password field: the server must test with the STORED password.
+        var tested = await PostJsonAsync(client, "/api/connections/test", new
+        {
+            service = "qbittorrent", clientId = id, baseUrl = "http://qbit-auth.test",
+            username = "admin", password = "", movieCategory = "onearr-movies", tvCategory = "onearr-tv",
+        });
+        Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());
+        Assert.DoesNotContain("saved-pw", tested.RootElement.GetRawText());
+
+        var listed = await GetJsonAsync(client, "/api/download-clients");
+        Assert.Equal("Not tested", listed.RootElement[0].GetProperty("healthStatus").GetString());
+    }
+
+    [Fact]
+    public async Task Test_all_batch_deadline_reports_skipped_and_timed_out_instead_of_failing()
+    {
+        var routing = new RoutingHandler();
+        routing.Route("slow.test", req =>
+        {
+            System.Threading.Thread.Sleep(5000);
+            return FakeHandler.Text(CapsXml, contentType: "application/xml");
+        });
+        using var factory = new StubApiFactory(routing);
+        await using (var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext())
+        {
+            for (var i = 0; i < 6; i++)
+                db.Indexers.Add(new IndexerConfig { Name = $"slow-{i}", BaseUrl = "http://slow.test/", ApiKey = "k", Enabled = true, Priority = i });
+            await db.SaveChangesAsync();
+        }
+
+        // Six slow indexers, four gate slots, a 150 ms batch deadline: the four that
+        // start time out, the two still queued are reported skipped — and the call
+        // returns all six results instead of faulting.
+        var results = await ApiEndpoints.TestAllCoreAsync(
+            factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>(),
+            factory.Services.GetRequiredService<IHttpClientFactory>(),
+            factory.Services.GetRequiredService<IDownloadClient>(),
+            TimeSpan.FromMilliseconds(150), Ct);
+
+        Assert.Equal(6, results.Length);
+        Assert.Equal(2, results.Count(r => r.Detail.Contains("skipped", StringComparison.Ordinal)));
+        Assert.Equal(4, results.Count(r => r.Detail.Contains("timed out", StringComparison.Ordinal)));
+        Assert.All(results, r => Assert.False(r.Ok));
+
+        await using (var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext())
+        {
+            Assert.Equal(6, await db.IndexerHealth.CountAsync());
         }
     }
 }

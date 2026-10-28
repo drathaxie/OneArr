@@ -1128,6 +1128,32 @@ What this adds:
   live screenshot; priority is a plain number (no drag-to-reorder); Test All has no
   per-item progress display beyond the final summary.
 
+## PR #10 review corrections (2026-10-27, PR unmerged, run #99 failed 279/281)
+
+Jesse's review found three defects; all fixed on the same branch, no merge/tag/release:
+- Fixture weekday: torznab_search.xml and two inline test feeds said "Wed, 01 Oct 2026";
+  October 1, 2026 was a Thursday, and the parser (correctly) rejects the inconsistent
+  date, so the two age-related tests failed. Fixed to "Thu" in all three places; the
+  parser is unchanged, assertions retained.
+- Edit-dialog Test credential: the dialog sent its blank key/password field, so testing
+  an unchanged saved connection failed. Now the edit dialog sends the saved record's
+  id plus the form values, and the server falls back to the stored secret for blank
+  fields while testing the form's URL/categories — saving nothing and writing no
+  health for such override tests (row Test still tests pure saved values and writes
+  health). Covered by backend tests (torznab + qBittorrent) and frontend tests.
+- Test All deadline: the semaphore wait sat outside the per-item handler, so a
+  120 s batch expiry while tests were queued could fault Task.WhenAll (and the
+  finally block released a gate never acquired). The batch core is now extracted
+  (TestAllCoreAsync, internal, tests via InternalsVisibleTo), the gate wait sits
+  inside the handler with acquired/started flags, queued tests report "skipped:
+  batch deadline reached", started tests report "timed out", and failure-path
+  health writes are best-effort. Regression test drives the core with a 150 ms
+  deadline against six slow indexers: 4 timed out, 2 skipped, all six reported.
+- PR #9 sequencing: PR #9 still needs Jesse's merge first; only then does PR #10
+  rebase onto new main (dropping the integrated aa1638b correction) so its final
+  diff holds the features, not duplicate responsive-layout changes. Fresh fully
+  green Linux + Windows CI is required before PR #10 merges.
+
 ## Next
 
 0. Library: check that the Windows CI job ran `LibraryWindowsTests`, then preview a real library folder before applying.
