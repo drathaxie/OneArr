@@ -304,6 +304,7 @@ function IndexersSection() {
   const [showCatalog, setShowCatalog] = useState(false);
   const [suggestedName, setSuggestedName] = useState("");
   const [suggestedUrl, setSuggestedUrl] = useState("");
+  const [suggestedNativeId, setSuggestedNativeId] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -318,7 +319,7 @@ function IndexersSection() {
   async function testRow(i: Indexer) {
     setBusy(`indexer-${i.id}`); setMessage(null);
     try {
-      const res = await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "torznab", indexerId: i.id });
+      const res = await api<ConnectionTestResult>("POST", "/api/connections/test", { service: i.protocol === "TorrentLeech" ? "native-tracker" : "torznab", indexerId: i.id });
       setTestResult(res.detail);
       reload();
     } catch (x) { setMessage((x as Error).message); }
@@ -359,7 +360,7 @@ function IndexersSection() {
           <h2>Indexers (Torznab / Newznab)</h2>
           <div className="row">
             <button onClick={() => setShowCatalog(true)}>Browse tracker catalog</button>
-            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setEditing("new"); }}>Add indexer</button>
+            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setSuggestedNativeId(""); setEditing("new"); }}>Add indexer</button>
             <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
           </div>
         </div>
@@ -410,16 +411,22 @@ function IndexersSection() {
           ))}
         </div>
       </div>
-      {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)} onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setShowCatalog(false); setEditing("new"); }} />}
-      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)}
+        onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setSuggestedNativeId(""); setShowCatalog(false); setEditing("new"); }}
+        onNative={(name, url, trackerId) => { setSuggestedName(name); setSuggestedUrl(url); setSuggestedNativeId(trackerId); setShowCatalog(false); setEditing("new"); }} />}
+      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} suggestedNativeId={suggestedNativeId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function IndexerDialog({ initial, suggestedName, suggestedUrl, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; suggestedUrl?: string; onClose: () => void; onSaved: () => void }) {
+function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; suggestedUrl?: string; suggestedNativeId?: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initial?.name ?? suggestedName ?? "");
   const [url, setUrl] = useState(initial?.baseUrl ?? suggestedUrl ?? "");
   const [key, setKey] = useState("");
+  const nativeId = initial?.protocol === "TorrentLeech" ? "torrentleech" : suggestedNativeId ?? "";
+  const [trackerUsername, setTrackerUsername] = useState("");
+  const [trackerPassword, setTrackerPassword] = useState("");
+  const [trackerAlt2fa, setTrackerAlt2fa] = useState("");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [movies, setMovies] = useState(initial?.moviesEnabled ?? (suggestedUrl === "https://nyaa.si/" ? false : true));
   const [tv, setTv] = useState(initial?.tvEnabled ?? true);
@@ -435,7 +442,11 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, onClose, onSaved 
       // Editing: pass the saved record's id so the server reuses the stored key
       // when the field is blank, while still testing the form's unsaved URL.
       // Override tests never rewrite health and never return the secret.
-      const body = initial
+      const body = nativeId ? {
+        service: "native-tracker", ...(initial ? { indexerId: initial.id } : {}),
+        trackerId: nativeId, baseUrl: url,
+        trackerSettings: { username: trackerUsername, password: trackerPassword, alt2fatoken: trackerAlt2fa },
+      } : initial
         ? { service: "torznab", indexerId: initial.id, baseUrl: url, apiKey: key }
         : { service: "torznab", baseUrl: url, apiKey: key };
       setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
@@ -447,7 +458,10 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, onClose, onSaved 
   async function save() {
     setErr(null); setBusy(true);
     try {
-      const body = { name, baseUrl: url, apiKey: key, enabled, moviesEnabled: movies, tvEnabled: tv, priority };
+      const body = { name, baseUrl: url, apiKey: nativeId ? "" : key,
+        enabled, moviesEnabled: movies, tvEnabled: tv, priority,
+        ...(nativeId ? { trackerId: nativeId,
+          trackerSettings: { username: trackerUsername, password: trackerPassword, alt2fatoken: trackerAlt2fa } } : {}) };
       if (initial) await api("PUT", `/api/indexers/${initial.id}`, body);
       else await api("POST", "/api/indexers", body);
       onSaved();
@@ -462,12 +476,18 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, onClose, onSaved 
         <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
           <label>URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://indexer.example/api" required /></label>
-          <label>API key<input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? "Leave blank to keep the stored key" : "API key"} /></label>
+          {nativeId === "torrentleech" ? <>
+            <p className="muted">TorrentLeech native login. Fields are encrypted on the server and never returned to the browser.</p>
+            <label>Username<input autoComplete="off" value={trackerUsername} onChange={e => setTrackerUsername(e.target.value)} placeholder={initial ? "Leave blank to preserve stored username" : "Account username"} required={!initial} /></label>
+            <label>Password<input type="password" autoComplete="new-password" value={trackerPassword} onChange={e => setTrackerPassword(e.target.value)} placeholder={initial ? "Leave blank to preserve stored password" : "Account password"} required={!initial} /></label>
+            <label>Alternate 2FA token (optional)<input type="password" autoComplete="off" value={trackerAlt2fa} onChange={e => setTrackerAlt2fa(e.target.value)} placeholder={initial ? "Leave blank to preserve stored value" : "From your tracker profile"} /></label>
+          </> : <label>API key<input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? "Leave blank to keep the stored key" : "API key"} /></label>}
           <label className="inline"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> enabled</label>
           <label className="inline"><input type="checkbox" checked={movies} onChange={(e) => setMovies(e.target.checked)} /> movies</label>
           <label className="inline"><input type="checkbox" checked={tv} onChange={(e) => setTv(e.target.checked)} /> TV</label>
           <label>Priority<input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
-          <p className="muted">{initial ? "Lower priority is searched first. Testing checks these values without saving; a blank key tests the stored key." : "Lower priority is searched first. Testing checks these exact values without saving."}</p>
+          <p className="muted">{nativeId ? "Test performs an actual website sign-in. Download links are retrieved with the authenticated session and sent to qBittorrent as torrent bytes." :
+            initial ? "Lower priority is searched first. Testing checks these values without saving; a blank key tests the stored key." : "Lower priority is searched first. Testing checks these exact values without saving."}</p>
           <ErrorLine message={err} />
           {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}</p>}
           {testResult?.categories && testResult.categories.length > 0 && <p className="muted">Categories: {testResult.categories.slice(0, 20).map((c) => `${c.id} ${c.name}`).join(", ")} · search: {testResult.searchAvailable ? "yes" : "no"}, TV search: {testResult.tvSearchAvailable ? "yes" : "no"}, movie search: {testResult.movieSearchAvailable ? "yes" : "no"}</p>}
