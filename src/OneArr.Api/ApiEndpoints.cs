@@ -467,7 +467,7 @@ public static class ApiEndpoints
             return Results.Ok(ClientDto(row, h));
         });
 
-        api.MapDelete("/download-clients/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        api.MapDelete("/download-clients/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, SettingsStore settings, CancellationToken ct) =>
         {
             await using var c = await db.CreateDbContextAsync(ct);
             var row = await c.DownloadClients.FindAsync([id], ct);
@@ -476,6 +476,7 @@ public static class ApiEndpoints
             var h = await c.DownloadClientHealth.FindAsync([id], ct);
             if (h is not null) c.DownloadClientHealth.Remove(h);
             await c.SaveChangesAsync(ct);
+            await settings.SetAsync(DownloadPathMapper.SettingsKey(id), null, ct);
             return Results.NoContent();
         });
 
