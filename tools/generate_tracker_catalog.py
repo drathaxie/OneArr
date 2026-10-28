@@ -78,14 +78,18 @@ def native_entry(path: str, source: str) -> dict | None:
     if not name:
         return None
     privacy = match(r"public\s+override\s+IndexerPrivacy\s+Privacy\s*=>\s*IndexerPrivacy\.(\w+)", "Unknown").lower()
+    if privacy == "semiprivate":
+        privacy = "semi-private"
     desc = match(r'public\s+override\s+string\s+Description\s*=>\s*"([^"]*)"')
     url_section = source.split("public override string[] IndexerUrls", 1)[-1].split("public override", 1)[0]
     urls = re.findall(r'"(https://[^"\s]+)"', url_section)[:4]
     # C# settings attributes are used for reference labels only.
     labels = re.findall(r'\[FieldDefinition\([^)]*Label\s*=\s*"([^"]+)"', source, re.DOTALL)
+    readable = [label for label in dict.fromkeys(labels[:30])
+                if not label.startswith(("IndexerSettings", "IndexerAlpha", "IndexerZ"))]
     fields = [{"name": f"field-{i}", "label": label,
-               "type": "password" if re.search("password|cookie|token|api.key", label, re.I) else "text"}
-              for i, label in enumerate(dict.fromkeys(labels[:30]))]
+               "type": "password" if re.search("password|cookie|token|api.key|passkey", label, re.I) else "text"}
+              for i, label in enumerate(readable)]
     return {
         "path": "native/" + path.rsplit("/", 1)[-1],
         "name": name,
