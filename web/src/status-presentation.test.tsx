@@ -69,7 +69,8 @@ describe("monitoring vs availability presentation", () => {
     await screen.findByText("Showing 3 of 3.");
     const missing = within(cardFor("Missing Show"));
     expect(missing.getByText("Missing", { selector: "span" })).toBeTruthy();
-    expect(missing.getByText("Monitored", { selector: "span" })).toBeTruthy();
+    // Monitoring is the separate mono note, uppercased by the stamp design.
+    expect(missing.getByText("MONITORED", { selector: "span" })).toBeTruthy();
     const complete = within(cardFor("Complete Show"));
     expect(complete.getByText("Complete", { selector: "span" })).toBeTruthy();
   });

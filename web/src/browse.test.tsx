@@ -44,19 +44,21 @@ afterEach(() => {
 });
 
 describe("poster grid", () => {
-  it("shows posters by default with monitored and available badges", async () => {
+  it("shows posters by default with availability stamps and monitoring notes", async () => {
     render(<Movies />);
     await screen.findByText("Showing 2 of 2.");
     expect(screen.getByText("Dune")).toBeTruthy();
     // Arrival appears twice: once in its poster fallback and once in its card title.
     expect(screen.getAllByText("Arrival").length).toBe(2);
-    expect(document.querySelectorAll("span.badge.ok").length).toBe(1);
-    // Arrival is unmonitored, so its headline is Unmonitored, not Missing: the missing file
-    // is secondary information ("No file"), not a red badge competing with the state.
+    // Refined Concept A: availability is a stamp, not a badge; exactly one
+    // available stamp on the page (Dune), and no red badge anywhere.
+    expect(document.querySelectorAll("span.cc-stamp.ok").length).toBe(1);
     expect(document.querySelectorAll("span.badge.bad").length).toBe(0);
-    expect(screen.getByText("No file")).toBeTruthy();
-    expect(screen.getAllByText("Monitored").length).toBeGreaterThan(1);
-    expect(screen.getAllByText("Unmonitored").length).toBeGreaterThan(1);
+    // Arrival is unmonitored, so its stamp states the file fact ("No file"),
+    // not Missing, and monitoring is a separate mono note per card.
+    expect(screen.getByText("No file", { selector: "span" })).toBeTruthy();
+    expect(screen.getAllByText("MONITORED").length).toBe(1);
+    expect(screen.getAllByText("UNMONITORED").length).toBe(1);
     // Dune has a poster image; Arrival has none and gets the title fallback.
     expect(document.querySelector('img[alt="Dune poster"]')).toBeTruthy();
   });
@@ -71,11 +73,11 @@ describe("poster grid", () => {
     await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
   });
 
-  it("opening a card shows the detail view with linked files", async () => {
+  it("opening a card shows the dossier with linked files", async () => {
     render(<Movies />);
     await screen.findByText("Showing 2 of 2.");
     fireEvent.click(screen.getByRole("button", { name: "Open Dune" }));
-    await screen.findByText(/Linked files \(1\)/);
+    await screen.findByRole("complementary", { name: "Dossier for Dune" });
     expect(screen.getByText(/Dune\.mkv/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/media/1/detail")).toBe(true);
   });

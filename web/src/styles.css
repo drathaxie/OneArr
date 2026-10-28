@@ -1,38 +1,70 @@
+/* Concept A — Editorial Archive typography, bundled offline in web/public/fonts/
+   (see its README.md for the OFL license texts). Fraunces and Plex Sans are
+   variable fonts, declared once with weight ranges; Plex Mono ships static
+   Regular / Medium / SemiBold files. Roles: Fraunces for identity only (brand,
+   page titles, dossier titles), Plex Sans for all functional text, Plex Mono
+   for everything verifiable (years, profiles, paths, filenames, sizes, status). */
+@font-face { font-family: 'Fraunces'; font-weight: 100 900; font-style: normal; font-display: swap; src: url('/fonts/Fraunces-Regular.woff2') format('woff2'); }
+@font-face { font-family: 'Fraunces'; font-weight: 100 900; font-style: italic; font-display: swap; src: url('/fonts/Fraunces-Italic.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-weight: 100 700; font-style: normal; font-display: swap; src: url('/fonts/IBMPlexSans.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-display: swap; src: url('/fonts/IBMPlexMono-Regular.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 500; font-display: swap; src: url('/fonts/IBMPlexMono-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 600; font-display: swap; src: url('/fonts/IBMPlexMono-SemiBold.woff2') format('woff2'); }
+.mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace; }
+.serif { font-family: 'Fraunces', Georgia, serif; }
+
+/* Command Center tokens. Dark is the primary identity (charcoal, teal interactive
+   accent, amber only for attention, red only for destructive actions); light follows
+   the system and gets the same language in warm paper, with a darker teal so white
+   text on accent buttons stays readable. --on-accent is the text colour on accent
+   buttons: dark text on light teal in dark mode, white on dark teal in light mode. */
 :root {
-  --bg: #f5f6f8;
-  --panel: #ffffff;
-  --text: #1c2030;
-  --muted: #5c6378;
-  --border: #d9dde7;
-  --accent: #2b6cb0;
+  --bg: #f2f0ec;
+  --panel: #fffdf9;
+  --panel2: #f7f4ee;
+  --text: #1c1f24;
+  --muted: #5c6370;
+  --border: #ddd8ce;
+  --border-strong: #c4bcac;
+  --accent: #0f766e;
+  --on-accent: #ffffff;
   --danger: #b42318;
   --ok: #067647;
+  --warn: #b7791f;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #12151d;
-    --panel: #1b2030;
-    --text: #e7eaf2;
-    --muted: #9aa3b8;
-    --border: #2f3649;
-    --accent: #6ea8fe;
-    --danger: #ff8a80;
+    --bg: #0e1013;
+    --panel: #16191e;
+    --panel2: #1a1e24;
+    --text: #e8eaee;
+    --muted: #9aa0ab;
+    --border: #262a32;
+    --border-strong: #3a3f48;
+    --accent: #6db5a6;
+    --on-accent: #0e1013;
+    --danger: #ff7a6b;
     --ok: #6fd3a0;
+    --warn: #e0a83c;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #12151d;
-  --panel: #1b2030;
-  --text: #e7eaf2;
-  --muted: #9aa3b8;
-  --border: #2f3649;
-  --accent: #6ea8fe;
-  --danger: #ff8a80;
+  --bg: #0e1013;
+  --panel: #16191e;
+  --panel2: #1a1e24;
+  --text: #e8eaee;
+  --muted: #9aa0ab;
+  --border: #262a32;
+  --border-strong: #3a3f48;
+  --accent: #6db5a6;
+  --on-accent: #0e1013;
+  --danger: #ff7a6b;
   --ok: #6fd3a0;
+  --warn: #e0a83c;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 'IBM Plex Sans', system-ui, -apple-system, Segoe UI, sans-serif; }
 h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
 h2 { font-size: 1.15rem; margin: 0 0 .75rem; }
 h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
@@ -44,17 +76,25 @@ h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
 /* App shell: a fixed-width sidebar plus content that fills the rest of the viewport.
    The content column deliberately has NO max-width: the old 1200px cap left a third of
    a 1728px window empty and squeezed every page into a narrow column. */
-.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }
-.sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 1rem .75rem; display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
-.brand { font-weight: 700; font-size: 1.2rem; padding: .25rem .5rem 1rem; flex: none; }
-.nav { text-align: left; background: none; border: 0; color: var(--text); padding: .5rem .75rem; border-radius: 6px; cursor: pointer; font: inherit; white-space: nowrap; }
-.nav:hover { background: var(--bg); }
-.nav.active { background: var(--accent); color: #fff; }
-/* The generic button:hover rule below is more specific than .nav.active, so without this
-   the active nav item went pale (but kept its white text) whenever the cursor rested on it. */
-.nav.active:hover { background: var(--accent); color: #fff; }
-.signout { margin-top: auto; color: var(--muted); }
-.content { padding: 1.25rem 1.5rem; width: 100%; min-width: 0; }
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+/* Sidebar as archive index: transparent like the page, a hairline at the right,
+   Fraunces wordmark with a mono designation, numbered groups, counts in mono,
+   and the active item marked by a teal rule — never a full accent pill. */
+.sidebar { background: var(--bg); border-right: 1px solid var(--border); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.brand { font-size: 30px; font-weight: 600; letter-spacing: -.01em; line-height: 1; padding: 0 .6rem 1.4rem; flex: none; }
+.brand-mark { color: var(--accent); }
+.nav-group { display: flex; flex-direction: column; gap: .25rem; margin-bottom: 1.4rem; }
+.nav-heading { font-size: 11px; letter-spacing: .16em; color: var(--muted); font-weight: 600; padding: .5rem .6rem .4rem; }
+.nav-heading b { color: var(--accent); font-weight: 500; }
+.nav { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; text-align: left; background: none; border: 0; border-left: 3px solid transparent; color: var(--text); padding: .45rem .6rem .45rem calc(.6rem - 3px); border-radius: 0 6px 6px 0; cursor: pointer; font: inherit; font-weight: 500; font-size: 14px; white-space: nowrap; }
+.nav:hover { background: var(--panel); }
+.nav.active { border-left-color: var(--accent); background: var(--panel); font-weight: 600; }
+.nav-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nav.active .nav-count { color: var(--accent); }
+.side-note { margin-top: auto; padding: .75rem .6rem 0; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); line-height: 1.7; }
+.side-note b { color: var(--text); font-weight: 500; }
+.signout { margin-top: .75rem; color: var(--muted); }
+.content { padding: 1.875rem 2.125rem; width: 100%; min-width: 0; }
 
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
@@ -79,7 +119,8 @@ label.inline input { min-width: auto; }
 button { font: inherit; padding: .45rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
 button:hover:not(:disabled) { background: var(--bg); }
 button:disabled { opacity: .6; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+button.primary-danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 650; }
 button.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
 button.small { padding: .2rem .5rem; font-size: .85rem; }
 button.danger { color: var(--danger); }
@@ -92,10 +133,7 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 .badge { display: inline-block; padding: .05rem .45rem; border-radius: 999px; border: 1px solid var(--border); font-size: .8rem; white-space: nowrap; }
 .badge.ok { border-color: var(--ok); color: var(--ok); }
 .badge.bad { border-color: var(--danger); color: var(--danger); }
-.badge.warn { border-color: #b7791f; color: #b7791f; }
-@media (prefers-color-scheme: dark) {
-  .badge.warn { border-color: #e0a83c; color: #e0a83c; }
-}
+.badge.warn { border-color: var(--warn); color: var(--warn); }
 .reasons { font-size: .85rem; color: var(--muted); margin: .25rem 0 0; padding-left: 1rem; }
 .auth { max-width: 380px; margin: 12vh auto; }
 .results { list-style: none; margin: 0; padding: 0; }
@@ -148,17 +186,20 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
 }
 
 @media (max-width: 1100px) {
-  .shell { grid-template-columns: 180px minmax(0, 1fr); }
+  .shell { grid-template-columns: 200px minmax(0, 1fr); }
   .content { padding: 1rem 1.25rem; }
   .detail-head { grid-template-columns: 160px minmax(0, 1fr); }
   .detail-poster { max-width: 160px; }
 }
 @media (max-width: 860px) {
   /* Narrow windows: both sidebars become a single horizontally scrolling row instead of
-     a tall wrapped block. In Settings, only the active category's subsections stay visible. */
+     a tall wrapped block. In Settings, only the active category's subsections stay visible.
+     The archive designation and the grabbing footer note do not fit a scroll row, so
+     they hide here; the grabbing state itself remains visible in Settings. */
   .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: .5rem; }
   .brand { padding: .25rem .5rem .25rem .25rem; }
+  .side-note { display: none; }
   .sidebar .nav { flex: none; padding: .4rem .5rem; font-size: .9rem; }
   .signout { margin-top: 0; margin-left: auto; }
   .settings-shell { grid-template-columns: minmax(0, 1fr); }
@@ -174,4 +215,177 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
   .detail-poster { max-width: 160px; }
   .content { padding: 1rem; }
   .dialog-backdrop { padding: 2vh .5rem .5rem; }
+}
+
+/* ================= Refined Concept A — archive workstation ================= */
+/* Masthead: ruled catalog header. Fraunces for the page title (48px, slightly
+   compacted from the 56px mockup so more of the library fits at 1080p), Fraunces
+   italic for the single editorial line, mono for the inventory line. No hero. */
+.cc-page-head { margin-bottom: 0; min-width: 0; }
+.cc-page-title { font-size: 48px; line-height: 1.0; letter-spacing: -.02em; font-weight: 600; margin: 0 0 .5rem; }
+.cc-inventory { font-size: 13px; color: var(--muted); padding: .625rem 0; border-top: 1px solid var(--border); border-bottom: 2px solid var(--border-strong); margin: 0; }
+
+/* Operational ledger: one ruled row, no boxes, no fills, ~72px tall. Labels in
+   mono caps, values in semibold Sans, details in mono. State dots: healthy
+   green, wanted teal (information, not health), not-configured / problems
+   amber, idle / none grey. Red is reserved for destructive actions. */
+.cc-ledger { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--border); margin-bottom: 1.25rem; min-width: 0; }
+.cc-ledger-seg { background: none; border: 0; color: inherit; text-align: left; padding: .75rem 1.125rem .8125rem 0; cursor: pointer; font: inherit; min-width: 0; border-left: 1px solid var(--border); padding-left: 1.125rem; }
+.cc-ledger-seg:first-child { border-left: 0; padding-left: 0; }
+.cc-ledger-seg:hover .cc-ledger-action { text-decoration: underline; }
+.cc-ledger-label { display: block; font-size: 11px; letter-spacing: .14em; color: var(--muted); font-weight: 500; }
+.cc-ledger-value { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.cc-ledger-detail { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; overflow-wrap: break-word; }
+.cc-ledger-action { display: block; color: var(--accent); font-size: 12.5px; font-weight: 600; margin-top: 5px; }
+.cc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.cc-dot.ok { background: var(--ok); }
+.cc-dot.warn { background: var(--warn); }
+.cc-dot.info { background: var(--accent); }
+.cc-dot.idle { background: var(--muted); }
+
+/* Toolbar: a ruled workbench row, not a container. Search as an inset field,
+   Sort/Filter as labelled native selects (native elements, so keyboard and
+   screen-reader behaviour is unchanged), count in mono, view as a pill pair. */
+.cc-command-bar { display: flex; gap: 1.375rem; align-items: flex-end; flex-wrap: wrap; padding-bottom: 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.375rem; min-width: 0; }
+.cc-search { display: flex; align-items: center; gap: .5rem; flex: 1 1 280px; max-width: 440px; min-width: 0; margin: 0; color: var(--muted); }
+.cc-search input { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text); flex: 1; min-width: 0; height: 40px; padding: 0 .875rem; font-size: 14px; }
+.cc-ctl { display: flex; flex-direction: column; gap: 1px; margin: 0; }
+.cc-ctl > span { font-size: 11px; letter-spacing: .14em; color: var(--muted); font-weight: 600; }
+.cc-ctl select { background: none; border: 0; color: var(--text); font-size: 14px; font-weight: 600; padding: 2px 20px 2px 0; appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa0ab' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 2px center; }
+.cc-result-count { color: var(--muted); font-size: 13px; padding-bottom: 6px; font-variant-numeric: tabular-nums; }
+.cc-command-right { margin-left: auto; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.cc-seg { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.cc-seg button { border: 0; background: none; height: 32px; padding: 0 1rem; border-radius: 999px; font-weight: 600; font-size: 13.5px; }
+.cc-seg button.active { background: var(--accent); color: var(--on-accent); }
+.cc-command-right .primary { border-radius: 999px; height: 40px; padding: 0 1.25rem; font-weight: 700; font-size: 14px; }
+
+/* Workspace: grid + dossier. The dossier is a fixed-width column, never an
+   overlay on top of the grid, so opening it reflows the grid instead of
+   covering or cropping it. min-width: 0 on every track keeps the grid from
+   overflowing the viewport at narrow widths. */
+.cc-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.375rem; align-items: start; min-width: 0; }
+.cc-workspace.open { grid-template-columns: minmax(0, 1fr) 420px; }
+.cc-grid { display: grid; gap: 1.375rem; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); min-width: 0; }
+/* Catalog cards: the print carries a thin keyline like a mounted archive
+   print — the only border on the card. No chip overlaid on the art, no pill,
+   no shadow box. The ••• menu lives in the title row, so actions live in the
+   catalog entry, not on top of the artwork. Info heights are fixed (title two
+   lines, meta one, status one) so rows align. */
+.cc-card { background: none; border: 0; border-radius: 0; overflow: visible; display: flex; flex-direction: column; min-width: 0; }
+.cc-poster-wrap { position: relative; flex: none; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.cc-card.selected .cc-poster-wrap { box-shadow: 0 0 0 2px var(--accent); }
+.cc-poster-button { border: 0; padding: 0; background: none; width: 100%; cursor: pointer; display: block; }
+.cc-poster-button:hover { background: none; }
+.cc-card-info { padding-top: .6875rem; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.cc-card-head { display: flex; align-items: flex-start; gap: 8px; position: relative; }
+.cc-title { flex: 1; border: 0; background: none; padding: 0; text-align: left; font-weight: 500; font-size: 16px; line-height: 1.35; height: 43px; cursor: pointer; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.cc-card-menu { flex: none; width: 26px; height: 26px; border: 0; background: none; color: var(--muted); font-weight: 700; font-size: 16px; line-height: 1; padding: 0; }
+.cc-card-menu:hover { color: var(--text); background: none; }
+.cc-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 3; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 170px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.cc-menu button { border: 0; background: none; text-align: left; padding: .45rem .6rem; border-radius: 6px; }
+.cc-menu button:hover { background: var(--panel2); }
+.cc-meta { font-size: 13px; line-height: 1.5; height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+/* Series cards carry a second meta line (episode counts); that line is not
+   height-fixed, so series rows align with each other and movie rows with each
+   other — the two pages never mix. */
+.cc-card .cc-meta:not(.mono) { height: auto; white-space: normal; }
+.cc-status-row { display: flex; align-items: center; gap: 8px; height: 24px; margin-top: 4px; }
+/* Availability as an archive stamp: outlined, mono, small caps. The border is
+   the stamp's own colour at reduced strength, so the stamp reads as a mark on
+   the catalog entry rather than a coloured pill. */
+.cc-stamp { display: inline-block; font-size: 11.5px; letter-spacing: .08em; font-weight: 500; padding: 2px 7px 3px; border: 1px solid; border-radius: 3px; line-height: 1.3; text-transform: uppercase; white-space: nowrap; }
+.cc-stamp.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.cc-stamp.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.cc-stamp.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+.cc-stamp.muted { color: var(--muted); border-color: var(--border-strong); }
+.cc-mon-note { font-size: 12px; color: var(--muted); }
+tr.selected td { background: var(--panel2); }
+
+/* Dossier: the main operational workspace. A flex column: the head and the
+   actions footer are fixed, the middle scrolls independently, and the identity
+   block is sticky at the top of the scroll area — title, profile, and file
+   facts stay visible while sections scroll, and Search releases is always
+   reachable. The dossier is the one panel in the layout, marked by a teal
+   left edge. */
+.cc-dossier { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 0 12px 12px 0; position: sticky; top: 1rem; height: calc(100vh - 2rem); max-height: calc(100vh - 2rem); display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.cc-dossier-head { display: flex; justify-content: space-between; align-items: center; padding: .875rem 1.25rem 0; font-size: 11px; letter-spacing: .18em; color: var(--muted); font-weight: 500; flex: none; }
+.cc-dossier-head button { padding: .2rem .5rem; }
+.cc-dossier-scroll { flex: 1; overflow-y: auto; padding: 0 1.375rem 1.375rem; min-height: 0; }
+.cc-dossier-identity { display: flex; gap: 1.125rem; align-items: flex-start; min-width: 0; padding: 1rem 0 1.25rem; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.cc-dossier-poster { width: 128px; height: 192px; object-fit: cover; border: 1px solid var(--border); border-radius: 8px; flex: none; background: var(--bg); }
+.cc-dossier-fallback { display: grid; place-items: center; padding: .5rem; text-align: center; color: var(--muted); font-size: .85rem; }
+.cc-dossier-title { font-size: 30px; line-height: 1.12; letter-spacing: -.01em; font-weight: 600; margin: 2px 0 .5rem; text-wrap: balance; overflow-wrap: anywhere; }
+.cc-dossier-meta { margin: 0 0 4px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.cc-dossier-sec { margin-top: 1.375rem; }
+.cc-dossier-sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: .75rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
+.cc-dossier-sec-num { font-size: 11px; color: var(--accent); font-weight: 500; }
+.cc-dossier-sec-title { font-size: 11px; letter-spacing: .14em; color: var(--muted); font-weight: 600; }
+.cc-avail-box { border: 1px solid var(--border); border-radius: 8px; padding: .75rem .875rem; }
+.cc-avail-box p { margin: .5rem 0 0; font-size: 13px; color: var(--text); line-height: 1.6; }
+.cc-avail-box p.muted { color: var(--muted); }
+.cc-insp-note { font-size: 13px; line-height: 1.5; margin: .5rem 0 0; }
+.cc-dossier-sec input, .cc-dossier-sec select { width: 100%; height: 44px; border-radius: 8px; font-size: 14px; }
+.cc-dossier-sec select { appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa0ab' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; }
+.cc-dossier-sec input.mono { font-size: 12.5px; }
+/* Root folder as one attached unit: input plus Save, not two stacked controls. */
+.cc-root-group { display: flex; margin-top: .75rem; }
+.cc-root-group input { border-radius: 8px 0 0 8px; }
+.cc-root-group button { border-radius: 0 8px 8px 0; padding: 0 1.125rem; font-weight: 700; font-size: 13.5px; flex: none; height: 44px; }
+.cc-file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cc-file-table th { text-align: left; font-size: 11px; letter-spacing: .12em; color: var(--muted); padding: 0 8px 6px 0; font-weight: 600; font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+.cc-file-table td { padding: 8px 8px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.cc-file-name { font-weight: 500; overflow-wrap: anywhere; }
+.cc-file-num { text-align: right; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cc-file-state { text-align: right; white-space: nowrap; color: var(--ok); }
+.cc-file-total td { border-top: 1px solid var(--border-strong); color: var(--text); font-weight: 500; }
+.cc-overview { color: var(--text); font-size: 14px; line-height: 1.7; margin: 0; }
+.cc-switch-row { display: flex; align-items: flex-start; gap: 14px; }
+.cc-switch { width: 48px; height: 26px; flex: none; border-radius: 999px; border: 1px solid var(--border); background: var(--panel2); cursor: pointer; position: relative; padding: 0; margin-top: 2px; }
+.cc-knob { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); transition: left 140ms ease, background 140ms ease; }
+.cc-switch.on { background: #1f3a34; border-color: #2e5a50; }
+.cc-switch.on .cc-knob { left: 24px; background: #7fd8c5; }
+.cc-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Actions footer: fixed at the panel foot, never scrolled away from. Search
+   releases is full-width and primary; Files and Full details share a row;
+   Remove is separated by its own rule with its safety note underneath. */
+.cc-dossier-actions { flex: none; padding: 1.125rem 1.375rem 1.25rem; border-top: 2px solid var(--border-strong); background: var(--panel); }
+.cc-dossier-actions > .primary { width: 100%; height: 46px; font-weight: 700; font-size: 14px; }
+.cc-dossier-actions .row button { height: 40px; font-weight: 600; font-size: 13.5px; }
+.cc-danger-row { margin-top: .875rem; padding-top: .875rem; border-top: 1px solid var(--border); }
+.cc-danger-row > .danger { height: 40px; font-weight: 600; font-size: 13.5px; }
+.cc-kbd-hint { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); margin-top: 1.375rem; padding-top: .75rem; }
+.cc-kbd-hint kbd { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; color: var(--text); }
+.cc-dialog-title { display: flex; align-items: center; gap: .6rem; }
+.cc-dialog-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--danger); color: #fff; font-weight: 800; flex: none; }
+
+@media (max-width: 1400px) {
+  .cc-workspace.open { grid-template-columns: minmax(0, 1fr) 380px; }
+  .cc-ledger { grid-template-columns: repeat(2, 1fr); }
+  .cc-ledger-seg:nth-child(3) { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 900px) {
+  /* Stacked dossier: the panel flows in the page instead of holding a fixed
+     height, so nothing is trapped inside an internal scroll on tablets. */
+  .cc-workspace.open { grid-template-columns: minmax(0, 1fr); }
+  .cc-dossier { position: static; height: auto; max-height: none; }
+  .cc-dossier-scroll { overflow: visible; flex: none; }
+  .cc-dossier-identity { position: static; }
+}
+@media (max-width: 700px) {
+  .cc-page-title { font-size: 40px; }
+  .cc-ledger { grid-template-columns: minmax(0, 1fr); }
+  .cc-ledger-seg { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); }
+  .cc-ledger-seg:first-child { border-top: 0; }
+  .cc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .875rem; }
+  .cc-workspace.open { grid-template-columns: minmax(0, 1fr); }
+  /* Mobile dossier: a usable full-screen drawer, not a squeezed column. It
+     sits below dialogs (z-index 40 vs the dialog backdrop's 50) so the
+     Remove confirmation always renders above it. */
+  .cc-dossier { position: fixed; inset: 0; z-index: 40; height: 100dvh; max-height: none; border-radius: 0; border-width: 0 0 0 3px; }
+  .cc-dossier-scroll { overflow-y: auto; flex: 1; }
+  .cc-dossier-identity { position: sticky; }
 }

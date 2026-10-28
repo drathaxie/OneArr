@@ -52,8 +52,8 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
   const routes: Record<string, unknown> = {
     "GET /api/queue": queue,
-    "GET /activity/history": history,
-    "GET /activity/problems": problems,
+    "GET /api/activity/history": history,
+    "GET /api/activity/problems": problems,
     "GET /api/imports": [],
     "POST /api/queue/1/import-preview": { previewId: 7, jobId: 1, createdAt: "2026-10-01T12:11:00Z", plans: previewPlans, fingerprint: "abc" },
     "POST /api/queue/1/import-apply": { previewId: 7, jobId: 1, createdAt: "2026-10-01T12:11:00Z", plans: previewPlans, fingerprint: "abc" },

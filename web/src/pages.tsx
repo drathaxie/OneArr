@@ -1,40 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useRef } from "react";
 import { api, ApiError, formatBytes, posterUrl, type DownloadClient, type HistoryEntry, type ImportPreview, type IndexerSearchOutcome, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type Problem, type QualityProfile, type QueueData, type ReleaseResult, type SettingsData } from "./api";
-import { ErrorLine, useLoad } from "./common";
+import { availabilityClass, availabilityStamp, ConfirmDialog, ErrorLine, primaryStatus, useLoad } from "./common";
+import { InspectorPanel, OpsStrip, type CommandNavigate } from "./command-center";
 
 export { Settings } from "./settings";
 export { Migration } from "./migration";
 
-function availabilityClass(status: string | null | undefined): string {
-  if (status === "Complete" || status === "Available") return "badge ok";
-  if (status === "Missing") return "badge bad";
-  if (status === "Partial") return "badge warn";
-  return "badge";
-}
-
 function seriesAvailability(item: MediaItem): string {
   return item.availability ?? "Unknown";
-}
-
-/** Primary operational state, kept separate from physical availability on purpose.
- * An unmonitored title is never headlined Missing or Complete: monitoring is the
- * operational state, availability is secondary information (an unmonitored title with no
- * file is deliberately unwatched, not wanted). Monitored titles keep the availability
- * badge as primary, with Monitored alongside. Presentation only: the server's
- * availability, counts, and Wanted eligibility are untouched. */
-function primaryStatus(
-  item: Pick<MediaItem, "monitored" | "hasFile" | "availability" | "availableEpisodes" | "applicableEpisodes">,
-  kind: "movie" | "series",
-): { badge: string; badgeClass: string; secondary: string | null } {
-  const avail = kind === "series" ? (item.availability ?? "Unknown") : item.hasFile ? "Available" : "Missing";
-  if (item.monitored) return { badge: avail, badgeClass: availabilityClass(avail), secondary: null };
-  if (kind === "series") {
-    const secondary = item.applicableEpisodes != null && item.applicableEpisodes > 0
-      ? `${avail} · ${item.availableEpisodes ?? 0} / ${item.applicableEpisodes} episodes available`
-      : avail === "Unknown" ? "Episode data insufficient to classify" : avail;
-    return { badge: "Unmonitored", badgeClass: "badge", secondary };
-  }
-  return { badge: "Unmonitored", badgeClass: "badge", secondary: item.hasFile ? "File available" : "No file" };
 }
 
 export function Dashboard() {
@@ -78,12 +52,12 @@ function Stat({ label, value }: { label: string; value: number }) {
   return <div className="card"><div className="muted">{label}</div><div className="stat">{value}</div></div>;
 }
 
-export function Movies() {
-  return <MediaPage kind="movie" />;
+export function Movies({ onNavigate }: { onNavigate?: CommandNavigate }) {
+  return <MediaPage kind="movie" onNavigate={onNavigate} />;
 }
 
-export function Series() {
-  return <MediaPage kind="series" />;
+export function Series({ onNavigate }: { onNavigate?: CommandNavigate }) {
+  return <MediaPage kind="series" onNavigate={onNavigate} />;
 }
 
 function Poster({ item, size }: { item: MediaItem; size?: "card" | "thumb" }) {
@@ -92,18 +66,24 @@ function Poster({ item, size }: { item: MediaItem; size?: "card" | "thumb" }) {
   return <img className={size === "thumb" ? "poster-thumb" : "poster"} src={url} alt={`${item.title} poster`} loading="lazy" />;
 }
 
-function MediaPage({ kind }: { kind: "movie" | "series" }) {
+function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?: CommandNavigate }) {
   const label = kind === "movie" ? "Movies" : "Series";
   const { data: items, error, reload } = useLoad<MediaItem[]>(`/api/media?type=${kind}`, [kind]);
   const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
   const [filesId, setFilesId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [searchId, setSearchId] = useState<number | null>(null);
+  const [inspectorId, setInspectorId] = useState<number | null>(null);
+  const [menuId, setMenuId] = useState<number | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<MediaItem | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [view, setView] = useState<"grid" | "list">(() => (localStorage.getItem("onearr.view") as "grid" | "list") || "grid");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"title" | "year" | "status">("title");
   const [filter, setFilter] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
+  // The poster button that opened the inspector, so closing can return focus to it.
+  const openerRef = useRef<HTMLButtonElement | null>(null);
 
   function setViewMode(v: "grid" | "list") {
     setView(v);
@@ -114,10 +94,31 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     await api("PATCH", `/api/media/${item.id}`, { monitored: !item.monitored }).catch((e: Error) => setMessage(e.message));
     reload();
   }
-  async function remove(item: MediaItem) {
-    if (!confirm(`Remove "${item.title}" from OneArr? Files and torrents are not touched.`)) return;
+  // Removal is never immediate: pendingRemove renders a confirmation dialog, and the
+  // DELETE only runs when the user clicks Remove there. Cancel, Escape, and backdrop
+  // clicks all leave the title untouched. Files and torrents are never touched by this
+  // endpoint — that wording is part of the dialog itself.
+  async function confirmRemove() {
+    if (!pendingRemove) return;
+    const item = pendingRemove;
+    setPendingRemove(null);
+    if (inspectorId === item.id) closeInspector();
     await api("DELETE", `/api/media/${item.id}`).catch((e: Error) => setMessage(e.message));
     reload();
+  }
+  function openInspector(item: MediaItem, opener: HTMLButtonElement | null) {
+    openerRef.current = opener;
+    setInspectorId(item.id);
+  }
+  function closeInspector() {
+    // Focus management, part 2: focus returns to the poster of the title the
+    // inspector was showing when it closed (stepping changes that title, so the
+    // original opener is only a fallback), deferred a tick so the panel has
+    // unmounted before focus moves.
+    const current = inspectorId === null ? null : document.querySelector<HTMLButtonElement>(`[data-poster-button="${inspectorId}"]`);
+    const opener = current ?? openerRef.current;
+    setInspectorId(null);
+    setTimeout(() => { if (opener && document.contains(opener)) opener.focus(); }, 0);
   }
 
   const availabilityRank = (item: MediaItem) => {
@@ -138,27 +139,89 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
     return a.title.localeCompare(b.title);
   });
 
+  // Inspector stepping follows the visible, filtered, sorted order — the same order
+  // the grid shows — not the raw list order.
+  const inspectorIndex = inspectorId === null ? -1 : filtered.findIndex((i) => i.id === inspectorId);
+  const inspectorItem = inspectorIndex >= 0 ? filtered[inspectorIndex] : null;
+
+  // Dossier/grid synchronization on filtering: when the user changes the search
+  // text or the filter and the dossier's title leaves the visible list, the
+  // selection itself is cleared (not just hidden) so it cannot resurrect when
+  // the filter is cleared. Focus is deliberately not moved — it stays in the
+  // search input or filter select the user is typing in. Data reloads (a PATCH
+  // from the dossier, a removal) do not run this effect, so acting on a title
+  // from inside its own dossier never yanks the dossier away mid-action.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (inspectorId !== null && items && !filtered.some((i) => i.id === inspectorId)) setInspectorId(null);
+  }, [query, filter]);
+  function stepInspector(dir: -1 | 1) {
+    const next = inspectorIndex + dir;
+    if (next >= 0 && next < filtered.length) setInspectorId(filtered[next].id);
+  }
+
+  // Keyboard shortcuts for the inspector, with hard guards so they never interfere
+  // with text inputs, forms, menus, or the confirmation dialog:
+  // - if focus is in an input, textarea, select, or contenteditable element, skip all
+  // - if a poster menu is open, Escape closes the menu (and arrows do nothing)
+  // - if the remove dialog is open, it owns Escape (capture-phase handler in the dialog)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (inspectorId === null || pendingRemove !== null) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (e.key === "Escape" && menuId === null) {
+        e.preventDefault();
+        closeInspector();
+        return;
+      }
+      if (menuId !== null) {
+        if (e.key === "Escape") { e.preventDefault(); setMenuId(null); }
+        return;
+      }
+      if (e.key === "ArrowLeft") { e.preventDefault(); stepInspector(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); stepInspector(1); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // Re-bind when the inspector target or menu state changes so the guards above
+    // always see the current state; the handler itself is cheap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectorId, menuId, pendingRemove, filtered]);
+
+  // A poster menu closes when the user clicks anywhere outside it (its own button
+  // and items are the only inside targets).
+  useEffect(() => {
+    if (menuId === null) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest(".cc-menu") && !target.closest(".cc-card-menu")) setMenuId(null);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [menuId]);
+
   if (detailId !== null) {
     return <MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} />;
   }
 
   return (
     <>
-      <h2>{label}</h2>
-      <div className="row" style={{ marginBottom: "1rem" }}>
-        <button className="primary" onClick={() => setShowAdd(true)}>Add {kind === "movie" ? "Movie" : "Series"}</button>
-        <span className="muted">Root folders, profiles, and bulk changes live in Settings → Media Management.</span>
+      <div className="cc-page-head">
+        <h2 className="cc-page-title serif">{label}</h2>
+        <p className="cc-inventory mono">{(items ?? []).length} TITLES IN LIBRARY · {view === "grid" ? "POSTER" : "LIST"} VIEW</p>
       </div>
-      {showAdd && <AddMediaDialog kind={kind} profiles={profiles ?? []} onAdded={() => { setShowAdd(false); reload(); }} onClose={() => setShowAdd(false)} />}
-      <ErrorLine message={error ?? message} />
-      <div className="card">
-        <div className="toolbar">
-          <input aria-label={`Search ${label}`} placeholder="Search titles…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <OpsStrip onNavigate={onNavigate} />
+      <div className="cc-command-bar">
+        <label className="cc-search">⌕ <input aria-label={`Search ${label}`} placeholder="Search titles, years, profiles…" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        <label className="cc-ctl"><span className="mono">Sort</span>
           <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "title" | "year" | "status")}>
-            <option value="title">Sort: title</option>
-            <option value="year">Sort: year (newest)</option>
-            <option value="status">Sort: available first</option>
+            <option value="title">Title</option>
+            <option value="year">Year (newest)</option>
+            <option value="status">Available first</option>
           </select>
+        </label>
+        <label className="cc-ctl"><span className="mono">Filter</span>
           <select aria-label="Filter" value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="all">All</option>
             {kind === "movie" && (<><option value="available">Available</option><option value="missing">Missing</option></>)}
@@ -166,82 +229,166 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
             <option value="monitored">Monitored</option>
             <option value="unmonitored">Unmonitored</option>
           </select>
-          <div className="toolbar-actions">
-            <button className={view === "grid" ? "small primary" : "small"} onClick={() => setViewMode("grid")}>Posters</button>
-            <button className={view === "list" ? "small primary" : "small"} onClick={() => setViewMode("list")}>List</button>
+        </label>
+        <span className="cc-result-count mono">Showing {filtered.length} of {(items ?? []).length}.</span>
+        <div className="cc-command-right">
+          <div className="cc-seg" role="group" aria-label="View">
+            <button className={view === "grid" ? "active" : ""} onClick={() => setViewMode("grid")}>Posters</button>
+            <button className={view === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
           </div>
+          <button className="primary" onClick={() => setShowAdd(true)}>Add {kind === "movie" ? "Movie" : "Series"}</button>
         </div>
-        <p className="muted">Showing {filtered.length} of {(items ?? []).length}.</p>
       </div>
+      {showAdd && <AddMediaDialog kind={kind} profiles={profiles ?? []} onAdded={() => { setShowAdd(false); reload(); }} onClose={() => setShowAdd(false)} />}
+      <ErrorLine message={error ?? message} />
       {items && items.length === 0 && <p className="muted">Nothing here yet. Use Add {kind === "movie" ? "Movie" : "Series"} above to search TMDb.</p>}
       {items && items.length > 0 && filtered.length === 0 && <p className="muted">No titles match the current search and filter.</p>}
       {view === "grid" && filtered.length > 0 && (
-        <div className="poster-grid">
-          {filtered.map((item) => {
-            const status = primaryStatus(item, kind);
-            return (
-            <article key={item.id} className="poster-card">
-              <button className="poster-button" onClick={() => setDetailId(item.id)} aria-label={`Open ${item.title}`}>
-                <Poster item={item} />
-              </button>
-              <div className="poster-info">
-                <strong className="poster-title" title={item.title} onClick={() => setDetailId(item.id)} style={{ cursor: "pointer" }}>{item.title}</strong>
-                <div className="muted">{item.year ?? ""}</div>
-                <div className="row" style={{ marginTop: ".25rem" }}>
-                  <span className={status.badgeClass}>{status.badge}</span>
-                  {item.monitored && <span className="badge">Monitored</span>}
+        <div className={inspectorItem ? "cc-workspace open" : "cc-workspace"}>
+          <div className="cc-grid">
+            {filtered.map((item) => {
+              const status = primaryStatus(item, kind);
+              const menuOpen = menuId === item.id;
+              // Card status, refined Concept A: availability as an outlined mono
+              // stamp, monitoring as separate mono text beside it. Exactly one
+              // monitoring indicator per card (the note), and the profile is
+              // labelled as a profile — never presented as a file resolution.
+              // The stamp rule lives in common.availabilityStamp, shared with
+              // the dossier, so the two can never drift apart again.
+              const stamp = availabilityStamp(item, kind);
+              const stampText = stamp.text;
+              const stampCls = stamp.cls;
+              return (
+              <article key={item.id} className={inspectorId === item.id ? "cc-card selected" : "cc-card"}>
+                <div className="cc-poster-wrap">
+                  <button
+                    data-poster-button={item.id}
+                    className="cc-poster-button"
+                    onClick={(e) => openInspector(item, e.currentTarget)}
+                    aria-label={`Open ${item.title}`}
+                  >
+                    <Poster item={item} />
+                  </button>
                 </div>
-                {status.secondary && <div className="muted poster-meta">{status.secondary}</div>}
-                {item.monitored && kind === "series" && item.applicableEpisodes != null && item.applicableEpisodes > 0 && (
-                  <div className="muted poster-meta">{item.availableEpisodes ?? 0} / {item.applicableEpisodes} monitored aired episodes available</div>
-                )}
-                {item.monitored && kind === "series" && (item.applicableEpisodes == null || item.applicableEpisodes === 0) && (
-                  <div className="muted poster-meta">Episode data insufficient to classify</div>
-                )}
-                <div className="muted poster-meta">{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
-                <div className="row card-actions">
-                  <button className="small" onClick={() => toggle(item)}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
-                  <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
+                <div className="cc-card-info">
+                  <div className="cc-card-head">
+                    <button className="cc-title" title={item.title} onClick={() => openInspector(item, document.querySelector<HTMLButtonElement>(`[data-poster-button="${item.id}"]`))}>{item.title}</button>
+                    <button
+                      className="cc-card-menu"
+                      aria-label={`Actions for ${item.title}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      onClick={() => setMenuId(menuOpen ? null : item.id)}
+                    >···</button>
+                    {menuOpen && (
+                      <div className="cc-menu" role="menu">
+                        <button role="menuitem" onClick={() => { setMenuId(null); setDetailId(item.id); }}>Details</button>
+                        <button role="menuitem" onClick={() => { setMenuId(null); setFilesId(item.id); }}>Files</button>
+                        <button role="menuitem" onClick={() => { setMenuId(null); setInspectorId(null); setSearchId(item.id); }}>Search releases</button>
+                        <button role="menuitem" onClick={() => { setMenuId(null); toggle(item); }}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
+                        <button role="menuitem" className="danger" onClick={() => { setMenuId(null); setPendingRemove(item); }}>Remove…</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="muted cc-meta mono">{item.year ?? ""} · Profile {profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</div>
+                  <div className="cc-status-row"><span className={stampCls}>{stampText}</span><span className="cc-mon-note mono">{item.monitored ? "MONITORED" : "UNMONITORED"}</span></div>
+                  {item.monitored && kind === "series" && item.applicableEpisodes != null && item.applicableEpisodes > 0 && (
+                    <div className="muted cc-meta">{item.availableEpisodes ?? 0} / {item.applicableEpisodes} monitored aired episodes available</div>
+                  )}
+                  {item.monitored && kind === "series" && (item.applicableEpisodes == null || item.applicableEpisodes === 0) && (
+                    <div className="muted cc-meta">Episode data insufficient to classify</div>
+                  )}
+                  {!item.monitored && status.secondary && <div className="muted cc-meta">{status.secondary}</div>}
                 </div>
-              </div>
-            </article>
-            );
-          })}
+              </article>
+              );
+            })}
+          </div>
+          {inspectorItem && (
+            <InspectorPanel
+              item={inspectorItem}
+              kind={kind}
+              profiles={profiles ?? []}
+              onClose={closeInspector}
+              onStep={stepInspector}
+              canPrev={inspectorIndex > 0}
+              canNext={inspectorIndex >= 0 && inspectorIndex < filtered.length - 1}
+              onSearchReleases={(it) => { setInspectorId(null); setSearchId(it.id); }}
+              onShowFiles={(it) => { setInspectorId(null); setFilesId(it.id); }}
+              onShowDetail={(it) => { setInspectorId(null); setDetailId(it.id); }}
+              onRemoveRequest={(it) => setPendingRemove(it)}
+              onChanged={reload}
+            />
+          )}
         </div>
       )}
       {view === "list" && filtered.length > 0 && (
-        <div className="card table-wrap">
-          <table>
-            <thead><tr><th /><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>Status</th><th /></tr></thead>
-            <tbody>
-              {filtered.map((item) => {
-                const status = primaryStatus(item, kind);
-                return (
-                <tr key={item.id}>
-                  <td><Poster item={item} size="thumb" /></td>
-                  <td><button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(item.id)}>{item.title}</button></td>
-                  <td>{item.year ?? ""}</td>
-                  <td><button className="small" onClick={() => toggle(item)}>{item.monitored ? "Yes" : "No"}</button></td>
-                  <td>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</td>
-                  <td>{item.monitored
-                    ? (kind === "movie"
-                      ? (item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>)
-                      : (<span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}{item.applicableEpisodes != null && item.applicableEpisodes > 0 ? ` ${item.availableEpisodes ?? 0}/${item.applicableEpisodes}` : ""}</span>))
-                    : (<><span className="badge">Unmonitored</span>{status.secondary && <div className="muted">{status.secondary}</div>}</>)}
-                  </td>
-                  <td className="row">
-                    <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
-                    <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
-                    <button className="small danger" onClick={() => remove(item)}>Remove</button>
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        // The dossier renders beside the list too, so switching views never
+        // loses the selection: the same title stays selected and its dossier
+        // stays open in either view, and keyboard stepping follows the same
+        // filtered order in both. The list title still opens the detail page
+        // as before; Dossier is a separate action per row.
+        <div className={inspectorItem ? "cc-workspace open" : "cc-workspace"}>
+          <div className="card table-wrap">
+            <table>
+              <thead><tr><th /><th>Title</th><th>Year</th><th>Monitored</th><th>Profile</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {filtered.map((item) => {
+                  const status = primaryStatus(item, kind);
+                  return (
+                  <tr key={item.id} className={inspectorId === item.id ? "selected" : ""}>
+                    <td><Poster item={item} size="thumb" /></td>
+                    <td><button className="small" style={{ border: 0, padding: 0, fontWeight: 600 }} onClick={() => setDetailId(item.id)}>{item.title}</button></td>
+                    <td>{item.year ?? ""}</td>
+                    <td><button className="small" onClick={() => toggle(item)}>{item.monitored ? "Yes" : "No"}</button></td>
+                    <td>{profiles?.find((p) => p.id === item.qualityProfileId)?.name ?? item.qualityProfileId}</td>
+                    <td>{item.monitored
+                      ? (kind === "movie"
+                        ? (item.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>)
+                        : (<span className={availabilityClass(seriesAvailability(item))}>{seriesAvailability(item)}{item.applicableEpisodes != null && item.applicableEpisodes > 0 ? ` ${item.availableEpisodes ?? 0}/${item.applicableEpisodes}` : ""}</span>))
+                      : (<><span className="badge">Unmonitored</span>{status.secondary && <div className="muted">{status.secondary}</div>}</>)}
+                    </td>
+                    <td className="row">
+                      <button className="small" onClick={(e) => openInspector(item, e.currentTarget)}>Dossier</button>
+                      <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
+                      <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
+                      <button className="small danger" onClick={() => setPendingRemove(item)}>Remove</button>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {inspectorItem && (
+            <InspectorPanel
+              item={inspectorItem}
+              kind={kind}
+              profiles={profiles ?? []}
+              onClose={closeInspector}
+              onStep={stepInspector}
+              canPrev={inspectorIndex > 0}
+              canNext={inspectorIndex >= 0 && inspectorIndex < filtered.length - 1}
+              onSearchReleases={(it) => { setInspectorId(null); setSearchId(it.id); }}
+              onShowFiles={(it) => { setInspectorId(null); setFilesId(it.id); }}
+              onShowDetail={(it) => { setInspectorId(null); setDetailId(it.id); }}
+              onRemoveRequest={(it) => setPendingRemove(it)}
+              onChanged={reload}
+            />
+          )}
         </div>
       )}
       {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
+      {searchId !== null && <ReleasePanel mediaId={searchId} episodeId={null} onClose={() => setSearchId(null)} />}
+      {pendingRemove !== null && (
+        <ConfirmDialog
+          title="Remove title?"
+          body={`Remove "${pendingRemove.title}" from OneArr? Files and torrents are not touched.`}
+          confirmLabel="Remove"
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
     </>
   );
 }
@@ -842,12 +989,14 @@ function fileNameOf(path: string): string {
 // only ever shown when the client reported them; a dash means unknown, never an invented value.
 // Previewing an import never writes anything; applying one requires the preview id plus an
 // explicit confirmation, and a plan that changed since the preview is refused with a fresh one.
-export function Activity() {
+export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "problems" }) {
   const { data: queue, error, reload } = useLoad<QueueData>("/api/queue");
-  const { data: history, reload: reloadHistory } = useLoad<HistoryEntry[]>("/activity/history");
-  const { data: problems, reload: reloadProblems } = useLoad<Problem[]>("/activity/problems");
+  // Real routes live under /api (see ApiEndpoints MapGroup("/api")). The old
+  // /activity/* paths returned the SPA index.html, so History/Problems never loaded.
+  const { data: history, reload: reloadHistory } = useLoad<HistoryEntry[]>("/api/activity/history");
+  const { data: problems, reload: reloadProblems } = useLoad<Problem[]>("/api/activity/problems");
   const { data: imports } = useLoad<any[]>("/api/imports");
-  const [tab, setTab] = useState<"queue" | "history" | "problems">("queue");
+  const [tab, setTab] = useState<"queue" | "history" | "problems">(initialTab ?? "queue");
   const [message, setMessage] = useState<string | null>(null);
   const [previewJobId, setPreviewJobId] = useState<number | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);

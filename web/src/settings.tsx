@@ -58,9 +58,10 @@ function scrollToSubsection(id: string) {
   if (el && typeof (el as HTMLElement).scrollIntoView === "function") (el as HTMLElement).scrollIntoView();
 }
 
-export function Settings() {
-  const [section, setSection] = useState<SectionId>("overview");
-  const [expanded, setExpanded] = useState<Set<SectionId>>(new Set(["media"]));
+export function Settings({ initialSection }: { initialSection?: string }) {
+  const initial: SectionId = CATEGORIES.some((c) => c.id === initialSection) ? (initialSection as SectionId) : "overview";
+  const [section, setSection] = useState<SectionId>(initial);
+  const [expanded, setExpanded] = useState<Set<SectionId>>(new Set([initial === "overview" ? "media" : initial]));
   const [advanced, setAdvanced] = useState<boolean>(() => {
     try { return localStorage.getItem("onearr.advanced") !== "false"; } catch { return true; }
   });
