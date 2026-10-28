@@ -25,7 +25,7 @@ public static class ApiEndpoints
     public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
         string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
@@ -905,6 +905,9 @@ public static class ApiEndpoints
             {
                 tmdbConfigured = tmdbStored || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ONEARR_TMDB_API_KEY")),
                 dryRunImport = await settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct),
+                renameOnImport = await settings.GetBoolAsync(SettingKeys.RenameOnImport, false, ct),
+                movieNamingTemplate = await settings.GetAsync(SettingKeys.MovieNamingTemplate, ct) ?? MediaNaming.MovieTemplate,
+                seriesNamingTemplate = await settings.GetAsync(SettingKeys.SeriesNamingTemplate, ct) ?? MediaNaming.EpisodeTemplate,
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
                 automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
@@ -928,6 +931,25 @@ public static class ApiEndpoints
             var values = new Dictionary<string, string?>();
             if (body.TmdbApiKey is not null) values[SettingKeys.TmdbApiKey] = string.IsNullOrWhiteSpace(body.TmdbApiKey) ? null : body.TmdbApiKey.Trim();
             if (body.DryRunImport is bool dry) values[SettingKeys.DryRunImport] = dry.ToString();
+            if (body.RenameOnImport is bool rename) values[SettingKeys.RenameOnImport] = rename.ToString();
+            // Validate named examples before changing ANY setting. The import preview
+            // uses the very same renderer and fingerprints its destination.
+            if (body.MovieNamingTemplate is string movieTemplate)
+            {
+                try { _ = MediaNaming.Preview(new MediaNaming.Request("movie", movieTemplate,
+                    "Example Movie", "sample.mkv", Year: 2026, Quality: "1080p",
+                    ReleaseGroup: "GROUP")); }
+                catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+                values[SettingKeys.MovieNamingTemplate] = movieTemplate;
+            }
+            if (body.SeriesNamingTemplate is string episodeTemplate)
+            {
+                try { _ = MediaNaming.Preview(new MediaNaming.Request("series", episodeTemplate,
+                    "Example Series", "sample.mkv", Season: 1, Episode: 2,
+                    EpisodeTitle: "Example Episode", Quality: "1080p", ReleaseGroup: "GROUP")); }
+                catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+                values[SettingKeys.SeriesNamingTemplate] = episodeTemplate;
+            }
             if (body.TorrentRoot is not null) values[SettingKeys.TorrentRoot] = RequireAbsolute(body.TorrentRoot);
             if (body.MediaRoot is not null) values[SettingKeys.MediaRoot] = RequireAbsolute(body.MediaRoot);
             if (body.AutomaticGrabbing is bool auto) values[SettingKeys.AutomaticGrab] = auto.ToString();

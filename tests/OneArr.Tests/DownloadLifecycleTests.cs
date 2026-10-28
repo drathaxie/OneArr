@@ -371,6 +371,73 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
+    public async Task OptInRenameIsFingerprintedAndHardlinkPreservesSeedingSource()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        await world.Settings.SetAsync(SettingKeys.MovieNamingTemplate, "{Title} ({Year}) - {Quality}");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var source = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.BluRay-GROUP.mkv", "video-data");
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie, "Dune.2021.1080p.BluRay-GROUP",
+            DownloadStatus.Completed, 1, "a1", Path.GetDirectoryName(source));
+        var svc = PreviewService(world);
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        var plan = Assert.Single(preview.Plans);
+        Assert.Equal("hardlink", plan.PlannedAction);
+        Assert.Equal("Dune (2021) - 1080p.mkv", Path.GetFileName(plan.DestinationPath));
+        Assert.False(File.Exists(plan.DestinationPath));
+        await svc.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+        Assert.True(File.Exists(plan.DestinationPath));
+        Assert.True(File.Exists(source), "The seeding torrent source must not be renamed or deleted");
+        Assert.Equal("video-data", await File.ReadAllTextAsync(source));
+        Assert.Equal("video-data", await File.ReadAllTextAsync(plan.DestinationPath!));
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+    }
+
+    [Fact]
+    public async Task ChangedNamingTemplateMakesStoredPreviewStale()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var source = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "video-data");
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie,
+            "Dune.2021.1080p.BluRay", DownloadStatus.Completed, 1, "a2", Path.GetDirectoryName(source));
+        var svc = PreviewService(world);
+        var before = await svc.PreviewImportAsync(jobId, default);
+        await world.Settings.SetAsync(SettingKeys.MovieNamingTemplate, "{Title} - {Year}");
+        var fresh = await Assert.ThrowsAsync<StalePreviewException>(() => svc.ApplyPreviewAsync(
+            jobId, before.PreviewId, default));
+        Assert.NotEqual(before.Plans[0].DestinationPath, fresh.Fresh.Plans[0].DestinationPath);
+        Assert.False(File.Exists(before.Plans[0].DestinationPath!));
+        Assert.True(File.Exists(source));
+    }
+
+    [Fact]
+    public async Task CollidingRenamedSourcesAreRejectedBeforeAnyCopy()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        var id = await world.AddMovieAsync("Test Film", 2026);
+        var first = world.Dirs.WriteFile("torrents/Film/Disc1.1080p.mkv", "disc-one");
+        var second = world.Dirs.WriteFile("torrents/Film/Disc2.1080p.mkv", "disc-two");
+        AgeFile(first); AgeFile(second);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie, "Test.Film.2026.1080p.BluRay",
+            DownloadStatus.Completed, 1, "a3", Path.GetDirectoryName(first));
+        var svc = PreviewService(world);
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        Assert.Equal(2, preview.Plans.Count);
+        Assert.All(preview.Plans, p => {
+            Assert.Equal("reject", p.PlannedAction);
+            Assert.Contains("same destination", p.Reason);
+            Assert.True(p.DestinationConflict);
+        });
+        Assert.False(File.Exists(preview.Plans[0].DestinationPath!));
+    }
+
+    [Fact]
     public async Task Preview_DefersFreshFiles_AndStalePreviewIsRefused()
     {
         using var world = await WorldAsync();

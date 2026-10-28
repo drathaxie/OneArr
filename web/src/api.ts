@@ -73,6 +73,9 @@ export interface MediaItem {
 export interface SettingsData {
   tmdbConfigured: boolean;
   dryRunImport: boolean;
+  renameOnImport?: boolean;
+  movieNamingTemplate?: string;
+  seriesNamingTemplate?: string;
   torrentRoot: string | null;
   mediaRoot: string | null;
   automaticGrabbing: boolean;

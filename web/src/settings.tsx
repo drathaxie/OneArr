@@ -168,7 +168,7 @@ function MediaSection({ advanced }: { advanced: boolean }) {
           <div id="media-paths"><MediaPathsForm data={data} onSaved={reload} /></div>
         </>
       )}
-      <div id="media-naming"><NamingPreview /></div>
+      {data && <div id="media-naming"><NamingPreview data={data} onSaved={reload} /></div>}
       <div id="media-bulk" className="card">
         <h2>Bulk root folders</h2>
         <p className="muted">Change the root folder for many titles at once, per media type. Only where future downloads go changes; existing files are not moved.</p>
@@ -232,9 +232,15 @@ function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
   );
 }
 
-function NamingPreview() {
+function NamingPreview({ data, onSaved }: { data: SettingsData; onSaved: () => void }) {
   const [kind, setKind] = useState<"movie" | "series">("movie");
-  const [template, setTemplate] = useState("{Title} ({Year}) - {Quality}");
+  const [movieTemplate, setMovieTemplate] = useState(data.movieNamingTemplate ?? "{Title} ({Year}) - {Quality}");
+  const [seriesTemplate, setSeriesTemplate] = useState(data.seriesNamingTemplate ?? "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle} - {Quality}");
+  const [rename, setRename] = useState(data.renameOnImport ?? false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const template = kind === "movie" ? movieTemplate : seriesTemplate;
+  const setTemplate = (next: string) => kind === "movie" ? setMovieTemplate(next) : setSeriesTemplate(next);
   const [title, setTitle] = useState("Example Movie");
   const [year, setYear] = useState("2026");
   const [season, setSeason] = useState("1");
@@ -248,7 +254,7 @@ function NamingPreview() {
 
   function changeKind(next: "movie" | "series") {
     setKind(next);
-    setTemplate(next === "movie" ? "{Title} ({Year}) - {Quality}" : "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle} - {Quality}");
+    // Retain each media type’s edited template when toggling the preview.
     setTitle(next === "movie" ? "Example Movie" : "Example Series");
     setOriginal(next === "movie" ? "Example.Movie.2026.1080p.mkv" : "Example.Series.S01E02.1080p.mkv");
     setPreview(null); setError(null);
@@ -266,10 +272,22 @@ function NamingPreview() {
     finally { setBusy(false); }
   }
 
+  async function saveNaming() {
+    setSaveBusy(true); setSaveMessage(null);
+    try {
+      await api("PUT", "/api/settings", {
+        renameOnImport: rename, movieNamingTemplate: movieTemplate, seriesNamingTemplate: seriesTemplate,
+      });
+      setSaveMessage("Naming preferences saved. Only explicitly approved manual imports can use renaming.");
+      onSaved();
+    } catch (e) { setSaveMessage((e as Error).message); }
+    finally { setSaveBusy(false); }
+  }
+
   return (
     <form className="card" onSubmit={e => { e.preventDefault(); void run(); }}>
-      <h2>File naming preview</h2>
-      <p className="muted">Design a naming format without touching files. This is preview-only; importing still retains original release filenames until automatic naming is separately enabled and verified.</p>
+      <h2>Import file naming</h2>
+      <p className="muted">Preview the exact filename before saving a policy. Renaming applies only when you explicitly approve a completed download's import preview. It never renames a seeding torrent or existing library file. Automatic importing remains disabled.</p>
       <label>Media type
         <select aria-label="Naming media type" value={kind} onChange={e => changeKind(e.target.value as "movie" | "series")}>
           <option value="movie">Movie</option>
@@ -292,6 +310,11 @@ function NamingPreview() {
       <ErrorLine message={error} />
       {preview && <p aria-live="polite">Preview filename: <code>{preview}</code></p>}
       <button type="submit" disabled={busy}>{busy ? "Previewing…" : "Preview filename"}</button>
+      <div className="row">
+        <label className="inline"><input type="checkbox" checked={rename} onChange={e => setRename(e.target.checked)} /> Rename files in confirmed manual imports (off by default)</label>
+        <button type="button" disabled={saveBusy} onClick={() => void saveNaming()}>{saveBusy ? "Saving…" : "Save naming preferences"}</button>
+      </div>
+      {saveMessage && <p role="status">{saveMessage}</p>}
     </form>
   );
 }

@@ -79,7 +79,7 @@ describe("Read-only naming preview", () => {
     });
     await renderSettings();
     await openSection("Media Management", "Default root folders");
-    expect(screen.getByText(/preview-only; importing still retains original release filenames/i)).toBeTruthy();
+    expect(screen.getByText(/Renaming applies only when you explicitly approve/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Preview filename" }));
     await waitFor(() => expect(calls.some(x => x.method === "POST" && x.path === "/api/naming/preview")).toBe(true));
     const call = calls.find(x => x.path === "/api/naming/preview")!;
@@ -87,6 +87,22 @@ describe("Read-only naming preview", () => {
     expect(call.body!.template).toBe("{Title} ({Year}) - {Quality}");
     expect(await screen.findByText("Example Movie (2026) - 1080p WEB-DL.mkv")).toBeTruthy();
     expect(putCalls()).toHaveLength(0);
+  });
+});
+
+describe("Opt-in filename naming settings", () => {
+  it("saves renamed-import templates without changing grabbing or dry-run settings", async () => {
+    await renderSettings();
+    await openSection("Media Management", "Default root folders");
+    fireEvent.click(screen.getByLabelText(/Rename files in confirmed manual imports/));
+    fireEvent.click(screen.getByRole("button", { name: "Save naming preferences" }));
+    await waitFor(() => expect(putCalls().length).toBeGreaterThan(0));
+    const body = putCalls()[0].body!;
+    expect(body.renameOnImport).toBe(true);
+    expect(body.movieNamingTemplate).toBe("{Title} ({Year}) - {Quality}");
+    expect(body.seriesNamingTemplate).toContain("{Episode:00}");
+    expect(body).not.toHaveProperty("automaticGrabbing");
+    expect(body).not.toHaveProperty("dryRunImport");
   });
 });
 
