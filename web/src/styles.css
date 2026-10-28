@@ -410,3 +410,10 @@ tr.selected td { background: var(--panel2); }
   .tracker-catalog-detail { max-height: 44vh; }
   .tracker-catalog-dialog { max-height: 95vh; }
 }
+
+.tracker-catalog-controls { flex-wrap: wrap; }
+.tracker-catalog-controls > input { flex: 2 1 210px; }
+.tracker-catalog-controls > select { flex: 0 1 145px; min-width: 0; }
+@media (max-width: 750px) {
+  .tracker-catalog-controls > select { flex: 1 1 130px; }
+}
