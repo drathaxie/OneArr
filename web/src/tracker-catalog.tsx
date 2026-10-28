@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import bundled from "./tracker-catalog.json";
 
+type CatalogEntry = { path: string; name: string; privacy: string; language: string; movies: boolean; tv: boolean };
+const bundledEntries: CatalogEntry[] = bundled.entries;
+const metadata = new Map(bundledEntries.map(item => [item.path, item]));
 type TrackerField = { name: string; label: string; type: string; defaultValue?: string };
 type TrackerInfo = {
   name: string; id: string; description: string; language: string; privacy: string;
@@ -64,6 +67,9 @@ function titleFromPath(path: string): string {
 export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; onGeneric: (name: string, url?: string) => void }) {
   const [paths, setPaths] = useState<string[]>(bundled.definitionPaths);
   const [filter, setFilter] = useState("");
+  const [privacyFilter, setPrivacyFilter] = useState("all");
+  const [languageFilter, setLanguageFilter] = useState("all");
+  const [mediaFilter, setMediaFilter] = useState("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TrackerInfo | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -105,10 +111,17 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
     return () => { alive = false; controller.abort(); };
   }, [selected]);
 
+  const languages = useMemo(() => [...new Set(bundledEntries.map(item => item.language))].sort(), []);
   const results = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return paths.filter(path => !q || path.toLowerCase().includes(q) || titleFromPath(path).toLowerCase().includes(q));
-  }, [paths, filter]);
+    return paths.filter(path => {
+      const item = metadata.get(path);
+      return (!q || path.toLowerCase().includes(q) || (item?.name ?? titleFromPath(path)).toLowerCase().includes(q)) &&
+        (privacyFilter === "all" || item?.privacy === privacyFilter) &&
+        (languageFilter === "all" || item?.language === languageFilter) &&
+        (mediaFilter === "all" || (mediaFilter === "movies" ? item?.movies : item?.tv));
+    });
+  }, [paths, filter, privacyFilter, languageFilter, mediaFilter]);
   const visible = results.slice(0, more);
   const duplicateCount = paths.length - new Set(paths.map(p => p.split("/").pop())).size;
 
@@ -118,8 +131,17 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
         <div><h2>Tracker catalog</h2><p className="muted">Search the directory, inspect authentication requirements, and connect supported sources.</p></div>
         <button onClick={onClose} aria-label="Close tracker catalog">Close</button>
       </div>
-      <div className="row">
+      <div className="row tracker-catalog-controls">
         <input aria-label="Search tracker catalog" placeholder="Search trackers…" value={filter} onChange={e => { setFilter(e.target.value); setMore(75); }} />
+        <select aria-label="Tracker privacy" value={privacyFilter} onChange={e => { setPrivacyFilter(e.target.value); setMore(75); }}>
+          <option value="all">All privacy</option><option value="public">Public</option><option value="private">Private</option><option value="semi-private">Semi-private</option>
+        </select>
+        <select aria-label="Tracker language" value={languageFilter} onChange={e => { setLanguageFilter(e.target.value); setMore(75); }}>
+          <option value="all">All languages</option>{languages.map(language => <option key={language} value={language}>{language}</option>)}
+        </select>
+        <select aria-label="Tracker categories" value={mediaFilter} onChange={e => { setMediaFilter(e.target.value); setMore(75); }}>
+          <option value="all">All categories</option><option value="movies">Movies</option><option value="tv">TV</option>
+        </select>
         <button disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh catalog"}</button>
       </div>
       <p className="muted">{results.length} of {paths.length} definitions · {source} · {duplicateCount > 0 ? duplicateCount + " duplicate filenames" : "Site definitions, not verified connections"} · Source: Prowlarr/Indexers</p>
@@ -127,7 +149,8 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
       <div className="tracker-catalog-grid">
         <div className="tracker-catalog-results" aria-label="Tracker results">
           {visible.map(path => <button className={"tracker-catalog-result" + (selected === path ? " selected" : "")} key={path} onClick={() => setSelected(path)}>
-            <strong>{titleFromPath(path)}</strong><span className="muted">{path.split("/")[1]}</span>
+            <strong>{metadata.get(path)?.name ?? titleFromPath(path)}</strong>
+            <span className="muted">{metadata.get(path)?.privacy ?? "new"} · {metadata.get(path)?.language ?? "?"}</span>
           </button>)}
           {results.length > more && <button onClick={() => setMore(v => v + 75)}>Show more ({results.length - more} remaining)</button>}
           {results.length === 0 && <p className="muted">No matching trackers.</p>}
