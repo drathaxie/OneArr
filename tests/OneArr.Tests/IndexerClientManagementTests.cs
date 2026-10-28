@@ -142,6 +142,71 @@ public class IndexerClientManagementTests
     }
 
     [Fact]
+    public async Task Native_tracker_api_encrypts_credentials_tests_login_and_preserves_secret_on_edit()
+    {
+        var router = new RoutingHandler();
+        router.Route("www.torrentleech.org", request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/user/account/login/" && request.Method == HttpMethod.Get)
+            {
+                var r = FakeHandler.Text("<form name='login-form'></form>", contentType: "text/html");
+                r.Headers.Add("Set-Cookie", "PHPSESSID=initial; path=/");
+                return r;
+            }
+            if (path == "/user/account/login/" && request.Method == HttpMethod.Post)
+            {
+                var form = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                Assert.Contains("username=alice", form);
+                Assert.Contains("password=private-secret", form);
+                var r = FakeHandler.Text("", HttpStatusCode.Found);
+                r.Headers.Add("Set-Cookie", "PHPSESSID=authenticated; path=/");
+                return r;
+            }
+            if (path == "/" && request.Headers.TryGetValues("Cookie", out var cookies) &&
+                cookies.Any(c => c.Contains("PHPSESSID=authenticated")))
+                return FakeHandler.Text("<a href='/user/account/logout'>Logout</a>", contentType: "text/html");
+            return FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden);
+        });
+        using var factory = new StubApiFactory(router);
+        var client = await SignedInAsync(factory);
+        var created = await PostJsonAsync(client, "/api/indexers", new
+        {
+            name = "TorrentLeech", baseUrl = "https://www.torrentleech.org/",
+            apiKey = "", trackerId = "torrentleech",
+            trackerSettings = new { username = "alice", password = "private-secret" },
+            enabled = true, moviesEnabled = true, tvEnabled = true, priority = 0
+        });
+        var id = created.RootElement.GetProperty("id").GetInt32();
+        Assert.Equal("TorrentLeech", created.RootElement.GetProperty("protocol").GetString());
+        Assert.DoesNotContain("private-secret", created.RootElement.GetRawText());
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<OneArrDbContext>>();
+            await using var context = await db.CreateDbContextAsync();
+            var stored = await context.Indexers.SingleAsync();
+            Assert.StartsWith("native1:", stored.ApiKey);
+            Assert.DoesNotContain("private-secret", stored.ApiKey);
+        }
+        var tested = await PostJsonAsync(client, "/api/connections/test",
+            new { service = "native-tracker", indexerId = id });
+        Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());
+        var put = await client.PutAsJsonAsync($"/api/indexers/{id}", new
+        {
+            name = "TorrentLeech", baseUrl = "https://www.torrentleech.org/",
+            apiKey = "", trackerId = "torrentleech",
+            trackerSettings = new { username = "", password = "" },
+            enabled = true, moviesEnabled = true, tvEnabled = true, priority = 2
+        });
+        Assert.True(put.IsSuccessStatusCode, await put.Content.ReadAsStringAsync());
+        tested = await PostJsonAsync(client, "/api/connections/test",
+            new { service = "native-tracker", indexerId = id });
+        Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());
+        var listed = await GetJsonAsync(client, "/api/indexers");
+        Assert.DoesNotContain("private-secret", listed.RootElement.GetRawText());
+    }
+
+    [Fact]
     public async Task Client_crud_preserves_password_on_empty_put()
     {
         var expectedPassword = "pw-one";

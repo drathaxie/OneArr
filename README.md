@@ -16,13 +16,25 @@ This performs a read-only RSS test; searches use Nyaa's RSS query and do not
 require Prowlarr, Jackett, Docker or a site account. You can still configure
 existing Torznab/Newznab feeds manually, including their API keys.
 
-Other entries show the site's required configuration labels for reference.
-Their website username/password/cookie fields cannot yet be used in OneArr;
-**do not paste tracker site passwords into the generic Torznab API-key box**.
-Full native Cardigann login/search, cookie handling and authenticated torrent
-downloads are tracked in [issue #14](https://github.com/drathaxie/OneArr/issues/14).
-This limitation is intentional: OneArr never marks a catalog-only definition
-as connected or transmits private tracker credentials to GitHub.
+**TorrentLeech** has a native adapter. Select it from the catalog, choose
+**Add TorrentLeech (native)**, and enter the website username/password plus an
+optional *Alt 2FA Token* from your profile. Test signs in and verifies the
+account session; Save stores the credentials as encrypted data in OneArr's
+database. The `config/secret.key` file is required to decrypt them when
+reinstalling or restoring backups. Keep that file private and preserve it.
+
+Native TorrentLeech searches read its JSON torrent listings. Downloaded
+`.torrent` files are fetched by OneArr with the authenticated session and
+submitted directly to qBittorrent as multipart bytes; OneArr never gives
+qBittorrent the website session cookie. This is distinct from entering a
+private tracker login in the generic Torznab API-key box.
+
+Other entries still show their required configuration labels for reference
+and are **catalog-only** until their native adapters exist; no private
+credentials are collected for them. Full Cardigann engine coverage across
+the directory remains tracked in [issue #14](https://github.com/drathaxie/OneArr/issues/14).
+No website login is guaranteed to succeed when a tracker is down or enforces
+an anti-bot challenge.
 
 
 ## Windows (recommended)

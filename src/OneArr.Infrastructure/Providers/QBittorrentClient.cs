@@ -59,6 +59,119 @@ public sealed class QBittorrentClient : IDownloadClient
         throw new ExternalServiceException($"qBittorrent returned an unexpected torrent-add response (HTTP {(int)response.StatusCode}, {body.Length} bytes of body)");
     }
 
+    /// <summary>Upload private-tracker .torrent bytes without disclosing session cookies to qBittorrent.</summary>
+    public async Task<string> AddTorrentAsync(DownloadClientConfig client, byte[] torrent, string category, CancellationToken ct)
+    {
+        if (torrent.Length < 5 || torrent.Length > 16 * 1024 * 1024 || torrent[0] != (byte)'d')
+            throw new ExternalServiceException("Invalid or oversized authenticated torrent payload");
+        var infoHash = TorrentInfoHash(torrent);
+        using var response = await SendAsync(client, ct, () =>
+        {
+            var content = new MultipartFormDataContent();
+            var file = new ByteArrayContent(torrent);
+            file.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
+            content.Add(file, "torrents", "release.torrent");
+            content.Add(new StringContent(category), "category");
+            return content;
+        }, "api/v2/torrents/add", HttpMethod.Post);
+        var body = (await response.Content.ReadAsStringAsync(ct)).Trim();
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalServiceException($"qBittorrent rejected the uploaded torrent (HTTP {(int)response.StatusCode})");
+        if (body.Equals("Ok.", StringComparison.OrdinalIgnoreCase)) return infoHash;
+        if (body.StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.Object &&
+                    (ResultCount(root, "success_count") > 0 || ResultCount(root, "pending_count") > 0))
+                    return infoHash;
+            }
+            catch (JsonException) { /* fail closed below */ }
+        }
+        throw new ExternalServiceException("qBittorrent did not confirm the uploaded torrent");
+    }
+
+    /// <summary>Derive the BitTorrent v1 info hash from a validated bencoded .torrent.</summary>
+    public static string TorrentInfoHash(byte[] torrent)
+    {
+        if (torrent.Length < 5 || torrent.Length > 16 * 1024 * 1024)
+            throw new ExternalServiceException("Invalid torrent file");
+        var position = 0;
+        (int Start, int Length) ReadBytes()
+        {
+            var length = 0;
+            var seen = false;
+            while (position < torrent.Length && torrent[position] is >= (byte)'0' and <= (byte)'9')
+            {
+                seen = true;
+                var digit = torrent[position++] - (byte)'0';
+                if (length > (torrent.Length - digit) / 10)
+                    throw new ExternalServiceException("Invalid bencoded string length");
+                length = length * 10 + digit;
+            }
+            if (!seen || position >= torrent.Length || torrent[position++] != (byte)':' ||
+                length > torrent.Length - position)
+                throw new ExternalServiceException("Malformed bencoded string");
+            var start = position;
+            position += length;
+            return (start, length);
+        }
+        void Skip(int depth)
+        {
+            if (depth > 64 || position >= torrent.Length)
+                throw new ExternalServiceException("Invalid torrent nesting");
+            var type = torrent[position];
+            if (type == (byte)'d' || type == (byte)'l')
+            {
+                position++;
+                while (position < torrent.Length && torrent[position] != (byte)'e')
+                {
+                    if (type == (byte)'d') _ = ReadBytes();
+                    Skip(depth + 1);
+                }
+                if (position >= torrent.Length) throw new ExternalServiceException("Unterminated torrent dictionary");
+                position++;
+            }
+            else if (type == (byte)'i')
+            {
+                position++;
+                while (position < torrent.Length && torrent[position] != (byte)'e')
+                {
+                    if (torrent[position] is not (>= (byte)'0' and <= (byte)'9' or (byte)'-'))
+                        throw new ExternalServiceException("Malformed bencoded integer");
+                    position++;
+                }
+                if (position >= torrent.Length) throw new ExternalServiceException("Unterminated bencoded integer");
+                position++;
+            }
+            else _ = ReadBytes();
+        }
+        if (torrent[position++] != (byte)'d') throw new ExternalServiceException("Torrent root is not a dictionary");
+        int infoStart = -1, infoLength = 0;
+        while (position < torrent.Length && torrent[position] != (byte)'e')
+        {
+            var key = ReadBytes();
+            var isInfo = key.Length == 4 &&
+                torrent[key.Start] == (byte)'i' && torrent[key.Start + 1] == (byte)'n' &&
+                torrent[key.Start + 2] == (byte)'f' && torrent[key.Start + 3] == (byte)'o';
+            var start = position;
+            Skip(0);
+            if (isInfo)
+            {
+                if (infoStart >= 0) throw new ExternalServiceException("Duplicate torrent info dictionary");
+                if (torrent[start] != (byte)'d') throw new ExternalServiceException("Invalid torrent info dictionary");
+                infoStart = start;
+                infoLength = position - start;
+            }
+        }
+        if (position >= torrent.Length || ++position != torrent.Length || infoStart < 0)
+            throw new ExternalServiceException("Torrent file has no valid info dictionary");
+        return Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
+            torrent.AsSpan(infoStart, infoLength))).ToLowerInvariant();
+    }
+
     public async Task<IReadOnlyList<DownloadClientItem>> ListAsync(DownloadClientConfig client, string category, CancellationToken ct)
     {
         var response = await SendAsync(client, ct, null, $"api/v2/torrents/info?category={Uri.EscapeDataString(category)}", HttpMethod.Get);

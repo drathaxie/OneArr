@@ -1,6 +1,6 @@
 {
-  "source": "Prowlarr/Indexers",
-  "sourceMetadataHash": "1b799a245e229d90",
+  "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
+  "sourceMetadataHash": "19c7e680a7d7ba58",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -580,7 +580,63 @@
     "definitions/v11/zmpt.yml",
     "definitions/v11/zrpt.yml",
     "definitions/v11/ztracker.yml",
-    "definitions/v12/blueroms.yml"
+    "definitions/v12/blueroms.yml",
+    "native/AlphaRatio.cs",
+    "native/Anidex.cs",
+    "native/Anidub.cs",
+    "native/AnimeBytes.cs",
+    "native/AnimeZ.cs",
+    "native/Animedia.cs",
+    "native/AvistaZ.cs",
+    "native/BakaBT.cs",
+    "native/BeyondHD.cs",
+    "native/BinSearch.cs",
+    "native/BitHDTV.cs",
+    "native/BrokenStones.cs",
+    "native/CGPeers.cs",
+    "native/CinemaZ.cs",
+    "native/DICMusic.cs",
+    "native/DesiGaane.cs",
+    "native/ExoticaZ.cs",
+    "native/FunFile.cs",
+    "native/GazelleGames.cs",
+    "native/GreatPosterWall.cs",
+    "native/HDSpace.cs",
+    "native/HDTorrents.cs",
+    "native/IPTorrents.cs",
+    "native/ImmortalSeed.cs",
+    "native/Knaben.cs",
+    "native/Libble.cs",
+    "native/MTeamTp.cs",
+    "native/MyAnonamouse.cs",
+    "native/Nebulance.cs",
+    "native/NorBits.cs",
+    "native/NzbIndex.cs",
+    "native/Orpheus.cs",
+    "native/PixelHD.cs",
+    "native/PornoLab.cs",
+    "native/PreToMe.cs",
+    "native/PrivateHD.cs",
+    "native/Redacted.cs",
+    "native/RetroFlix.cs",
+    "native/RevolutionTT.cs",
+    "native/RuTracker.cs",
+    "native/SceneHD.cs",
+    "native/SceneTime.cs",
+    "native/SecretCinema.cs",
+    "native/Shazbat.cs",
+    "native/Shizaproject.cs",
+    "native/SpeedApp.cs",
+    "native/SpeedCD.cs",
+    "native/SubsPlease.cs",
+    "native/Toloka.cs",
+    "native/TorrentBytes.cs",
+    "native/TorrentDay.cs",
+    "native/TorrentSyndikat.cs",
+    "native/TorrentsCSV.cs",
+    "native/Uniotaku.cs",
+    "native/XSpeeds.cs",
+    "native/ZonaQ.cs"
   ],
   "entries": [
     {
@@ -5214,6 +5270,1188 @@
       "language": "en-US",
       "movies": false,
       "tv": false
+    },
+    {
+      "path": "native/AlphaRatio.cs",
+      "name": "AlphaRatio",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "AlphaRatio(AR) is a Private Torrent Tracker for 0DAY / GENERAL",
+      "links": [
+        "https://alpharatio.cc/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Anidex.cs",
+      "name": "Anidex",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": false,
+      "tv": true,
+      "description": "Anidex is a Public torrent tracker and indexer, primarily for English fansub groups of anime",
+      "links": [
+        "https://anidex.info/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Authorised Only",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Languages Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Anidub.cs",
+      "name": "Anidub",
+      "privacy": "semi-private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Anidub is RUSSIAN anime voiceover group and eponymous anime tracker.",
+      "links": [
+        "https://tr.anidub.com/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/AnimeBytes.cs",
+      "name": "AnimeBytes",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "AnimeBytes (AB) is the largest private torrent tracker that specialises in anime and anime-related content.",
+      "links": [
+        "https://animebytes.tv/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Username",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Passkey",
+          "type": "password"
+        },
+        {
+          "name": "field-2",
+          "label": "Freeleech Only",
+          "type": "text"
+        },
+        {
+          "name": "field-3",
+          "label": "Exclude RAW",
+          "type": "text"
+        },
+        {
+          "name": "field-4",
+          "label": "Exclude Hentai",
+          "type": "text"
+        },
+        {
+          "name": "field-5",
+          "label": "Search By Year",
+          "type": "text"
+        },
+        {
+          "name": "field-6",
+          "label": "Enable Sonarr Compatibility",
+          "type": "text"
+        },
+        {
+          "name": "field-7",
+          "label": "Use Filenames for Single Episodes",
+          "type": "text"
+        },
+        {
+          "name": "field-8",
+          "label": "Add Japanese title as a synonym",
+          "type": "text"
+        },
+        {
+          "name": "field-9",
+          "label": "Add Romaji title as a synonym",
+          "type": "text"
+        },
+        {
+          "name": "field-10",
+          "label": "Add alternative title as a synonym",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/AnimeZ.cs",
+      "name": "AnimeZ",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "AnimeZ (ex-AnimeTorrents) is a Private Torrent Tracker for ANIME / MANGA",
+      "links": [
+        "https://animez.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Animedia.cs",
+      "name": "Animedia",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Animedia is RUSSIAN anime voiceover group and eponymous anime tracker.",
+      "links": [
+        "https://tt.animedia.tv/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/AvistaZ.cs",
+      "name": "AvistaZ",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Aka AsiaTorrents",
+      "links": [
+        "https://avistaz.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/BakaBT.cs",
+      "name": "BakaBT",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Anime Community",
+      "links": [
+        "https://bakabt.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Add Romaji Title",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "Append Season",
+          "type": "text"
+        },
+        {
+          "name": "field-3",
+          "label": "Adult Content",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/BeyondHD.cs",
+      "name": "BeyondHD",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "BeyondHD (BHD) is a Private Torrent Tracker for HD MOVIES / TV",
+      "links": [
+        "https://beyond-hd.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "IndexerBeyondHDSettingsLimitedOnly",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "IndexerBeyondHDSettingsRefundOnly",
+          "type": "text"
+        },
+        {
+          "name": "field-3",
+          "label": "IndexerBeyondHDSettingsRewindOnly",
+          "type": "text"
+        },
+        {
+          "name": "field-4",
+          "label": "IndexerBeyondHDSettingsSearchTypes",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/BinSearch.cs",
+      "name": "BinSearch",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "The binary Usenet search engine",
+      "links": [
+        "https://binsearch.info/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Base Url",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/BitHDTV.cs",
+      "name": "BitHDTV",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "BIT-HDTV - Home of High Definition",
+      "links": [
+        "https://www.bit-hdtv.com/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/BrokenStones.cs",
+      "name": "BrokenStones",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "Broken Stones is a Private site for MacOS and iOS APPS / GAMES",
+      "links": [
+        "https://brokenstones.is/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/CGPeers.cs",
+      "name": "CGPeers",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "CGPeers is a Private Torrent Tracker for GRAPHICS SOFTWARE / TUTORIALS / ETC",
+      "links": [
+        "https://cgpeers.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/CinemaZ.cs",
+      "name": "CinemaZ",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "CinemaZ (EuTorrents) is a Private Torrent Tracker for FOREIGN NON-ASIAN MOVIES.",
+      "links": [
+        "https://cinemaz.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/DICMusic.cs",
+      "name": "DICMusic",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "DICMusic is a CHINESE Private Torrent Tracker for MUSIC",
+      "links": [
+        "https://dicmusic.com/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/DesiGaane.cs",
+      "name": "DesiGaane",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "DesiGaane is a Private Torrent Tracker for DESI MUSIC",
+      "links": [
+        "https://desigaane.rocks/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/ExoticaZ.cs",
+      "name": "ExoticaZ",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "ExoticaZ (YourExotic) is a Private Torrent Tracker for 3X",
+      "links": [
+        "https://exoticaz.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/FunFile.cs",
+      "name": "FunFile",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "FunFile is a general tracker",
+      "links": [
+        "https://www.funfile.org/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/GazelleGames.cs",
+      "name": "GazelleGames",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "GazelleGames (GGn) is a Private Torrent Tracker for GAMES",
+      "links": [
+        "https://gazellegames.net/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "IndexerGazelleGamesSettingsSearchGroupNames",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/GreatPosterWall.cs",
+      "name": "GreatPosterWall",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": false,
+      "description": "GreatPosterWall (GPW) is a CHINESE Private site for MOVIES",
+      "links": [
+        "https://greatposterwall.com/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/HDSpace.cs",
+      "name": "HD-Space",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "HD-Space (HDS) is a Private Torrent Tracker for HD MOVIES / TV",
+      "links": [
+        "https://hd-space.org/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/HDTorrents.cs",
+      "name": "HD-Torrents",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "HD-Torrents is a private torrent website with HD torrents and strict rules on their content.",
+      "links": [
+        "https://hdts.ru/",
+        "https://hd-torrents.org/",
+        "https://hd-torrents.net/",
+        "https://hd-torrents.me/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/IPTorrents.cs",
+      "name": "IPTorrents",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "IPTorrents (IPT) is a Private Torrent Tracker for 0DAY / GENERAL.",
+      "links": [
+        "https://iptorrents.com/",
+        "https://iptorrents.me/",
+        "https://nemo.iptorrents.com/",
+        "https://ipt.getcrazy.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "IndexerIPTorrentsSettingsCookieUserAgent",
+          "type": "password"
+        },
+        {
+          "name": "field-1",
+          "label": "IndexerIPTorrentsSettingsSearchSortBy",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/ImmortalSeed.cs",
+      "name": "ImmortalSeed",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "ImmortalSeed (iS) is a Private Torrent Tracker for MOVIES / TV / GENERAL",
+      "links": [
+        "https://immortalseed.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Knaben.cs",
+      "name": "Knaben",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Knaben is a Public torrent meta-search engine",
+      "links": [
+        "https://knaben.org/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Libble.cs",
+      "name": "Libble",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "Libble is a Private Torrent Tracker for MUSIC",
+      "links": [
+        "https://libble.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "2FA code",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/MTeamTp.cs",
+      "name": "M-Team - TP",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "M-Team TP (MTTP) is a CHINESE Private Torrent Tracker for HD MOVIES / TV / 3X",
+      "links": [
+        "https://kp.m-team.cc/",
+        "https://tp.m-team.cc/",
+        "https://pt.m-team.cc/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/MyAnonamouse.cs",
+      "name": "MyAnonamouse",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "MyAnonaMouse (MAM) is a large ebook and audiobook tracker.",
+      "links": [
+        "https://www.myanonamouse.net/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Mam Id",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Search Type",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "Search in description",
+          "type": "text"
+        },
+        {
+          "name": "field-3",
+          "label": "Search in series",
+          "type": "text"
+        },
+        {
+          "name": "field-4",
+          "label": "Search in filenames",
+          "type": "text"
+        },
+        {
+          "name": "field-5",
+          "label": "Search Languages",
+          "type": "text"
+        },
+        {
+          "name": "field-6",
+          "label": "Use Freeleech Wedges",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Nebulance.cs",
+      "name": "Nebulance",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": true,
+      "description": "Nebulance (NBL) is a ratioless Private Torrent Tracker for TV",
+      "links": [
+        "https://nebulance.io/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/NorBits.cs",
+      "name": "NorBits",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "NorBits is a Norwegian Private site for MOVIES / TV / GENERAL",
+      "links": [
+        "https://norbits.net/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "2FA code",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Use Full Search",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "FreeLeech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/NzbIndex.cs",
+      "name": "NZBIndex",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "A Usenet Indexer",
+      "links": [
+        "https://nzbindex.com/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Orpheus.cs",
+      "name": "Orpheus",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "Orpheus (APOLLO) is a Private Torrent Tracker for MUSIC",
+      "links": [
+        "https://orpheus.network/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Use Freeleech Tokens",
+          "type": "password"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/PixelHD.cs",
+      "name": "PiXELHD",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": false,
+      "description": "PixelHD (PxHD) is a ratioless Private Torrent Tracker for HD .MP4 MOVIES / TV",
+      "links": [
+        "https://pixelhd.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Cookie User-Agent",
+          "type": "password"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/PornoLab.cs",
+      "name": "PornoLab",
+      "privacy": "semi-private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "PornoLab is a Semi-Private Russian site for Adult content",
+      "links": [
+        "https://pornolab.net/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Strip Russian Letters",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/PreToMe.cs",
+      "name": "PreToMe",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "PreToMe is a ratioless 0Day/General tracker.",
+      "links": [
+        "https://pretome.info/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Pin",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/PrivateHD.cs",
+      "name": "PrivateHD",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "PrivateHD (PHD) is a Private Torrent Tracker for HD MOVIES / TV and the sister-site of AvistaZ, CinemaZ, ExoticaZ, and AnimeZ",
+      "links": [
+        "https://privatehd.to/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Redacted.cs",
+      "name": "Redacted",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": false,
+      "description": "REDActed (Aka.PassTheHeadPhones) is one of the most well-known music trackers.",
+      "links": [
+        "https://redacted.sh/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Use Freeleech Tokens",
+          "type": "password"
+        },
+        {
+          "name": "field-2",
+          "label": "Freeload Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/RetroFlix.cs",
+      "name": "RetroFlix",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "RetroFlix (RFX) is a Private Torrent Tracker for Classic Movies / TV / General Releases",
+      "links": [
+        "https://retroflix.club/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/RevolutionTT.cs",
+      "name": "RevolutionTT",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "The Revolution has begun",
+      "links": [
+        "https://revott.me/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/RuTracker.cs",
+      "name": "RuTracker.org",
+      "privacy": "semi-private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "RuTracker.org is a RUSSIAN Semi-Private site with a thriving file-sharing community",
+      "links": [
+        "https://rutracker.org/",
+        "https://rutracker.net/",
+        "https://rutracker.nl/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Strip Russian letters",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Use Magnet Links",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "Add RUS to titles",
+          "type": "text"
+        },
+        {
+          "name": "field-3",
+          "label": "Move first tags to end of release title",
+          "type": "text"
+        },
+        {
+          "name": "field-4",
+          "label": "Move all tags to end of release title",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SceneHD.cs",
+      "name": "SceneHD",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "SceneHD is Private site for HD TV / MOVIES",
+      "links": [
+        "https://scenehd.org/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Passkey",
+          "type": "password"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SceneTime.cs",
+      "name": "SceneTime",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Always on time",
+      "links": [
+        "https://www.scenetime.com/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "FreeLeech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SecretCinema.cs",
+      "name": "Secret Cinema",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": false,
+      "description": "Secret Cinema is a Private ratioless site for rare MOVIES.",
+      "links": [
+        "https://secret-cinema.pw/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Shazbat.cs",
+      "name": "Shazbat",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": false,
+      "tv": true,
+      "description": "Shazbat is a PRIVATE Torrent Tracker with highly curated TV content",
+      "links": [
+        "https://www.shazbat.tube/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Show Pages Fetch Limit",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Shizaproject.cs",
+      "name": "ShizaProject",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "ShizaProject Tracker is a Public RUSSIAN tracker and release group for ANIME",
+      "links": [
+        "https://shiza-project.com/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SpeedApp.cs",
+      "name": "SpeedApp.io",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "SpeedApp is a ROMANIAN Private Torrent Tracker for MOVIES / TV / GENERAL",
+      "links": [
+        "https://speedapp.io/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SpeedCD.cs",
+      "name": "SpeedCD",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Your home now!",
+      "links": [
+        "https://speed.cd/",
+        "https://speed.click/",
+        "https://speeders.me/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Exclude Archives",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/SubsPlease.cs",
+      "name": "SubsPlease",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "SubsPlease - A better HorribleSubs/Erai replacement",
+      "links": [
+        "https://subsplease.org/",
+        "https://subsplease.mrunblock.bond/",
+        "https://subsplease.nocensor.click/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Toloka.cs",
+      "name": "Toloka.to",
+      "privacy": "semi-private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Toloka.to is a Semi-Private Ukrainian torrent site with a thriving file-sharing community",
+      "links": [
+        "https://toloka.to/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Strip Cyrillic Letters",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/TorrentBytes.cs",
+      "name": "Torrent Bytes",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "A decade of TorrentBytes",
+      "links": [
+        "https://www.torrentbytes.net/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/TorrentDay.cs",
+      "name": "TorrentDay",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "TorrentDay (TD) is a Private site for TV / MOVIES / GENERAL",
+      "links": [
+        "https://tday.love/",
+        "https://torrentday.cool/",
+        "https://secure.torrentday.com/",
+        "https://classic.torrentday.com/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "FreeLeech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/TorrentSyndikat.cs",
+      "name": "TorrentSyndikat",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "A German general tracker",
+      "links": [
+        "https://torrent-syndikat.org/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "ApiKey",
+          "type": "text"
+        },
+        {
+          "name": "field-1",
+          "label": "Products Only",
+          "type": "text"
+        },
+        {
+          "name": "field-2",
+          "label": "Release Types",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/TorrentsCSV.cs",
+      "name": "TorrentsCSV",
+      "privacy": "public",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "Torrents.csv is a self-hostable open source torrent search engine and database",
+      "links": [
+        "https://torrents-csv.com/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/Uniotaku.cs",
+      "name": "UniOtaku",
+      "privacy": "semi-private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "UniOtaku is a BRAZILIAN Semi-Private Torrent Tracker for ANIME",
+      "links": [
+        "https://tracker.uniotaku.com/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/XSpeeds.cs",
+      "name": "XSpeeds",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "XSpeeds (XS) is a Private Torrent Tracker for MOVIES / TV / GENERAL",
+      "links": [
+        "https://www.xspeeds.eu/"
+      ],
+      "fields": [
+        {
+          "name": "field-0",
+          "label": "Freeleech Only",
+          "type": "text"
+        }
+      ],
+      "source": "Prowlarr/Prowlarr"
+    },
+    {
+      "path": "native/ZonaQ.cs",
+      "name": "ZonaQ",
+      "privacy": "private",
+      "language": "unknown",
+      "movies": true,
+      "tv": true,
+      "description": "ZonaQ is a SPANISH Private Torrent Tracker for MOVIES / TV",
+      "links": [
+        "https://www.zonaq.pw/"
+      ],
+      "fields": [],
+      "source": "Prowlarr/Prowlarr"
     }
   ]
 }

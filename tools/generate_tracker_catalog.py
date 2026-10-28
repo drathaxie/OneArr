@@ -14,9 +14,11 @@ import urllib.request
 from pathlib import Path
 
 UPSTREAM = "https://codeload.github.com/Prowlarr/Indexers/tar.gz/refs/heads/master"
+PROWLARR_NATIVE = "https://codeload.github.com/Prowlarr/Prowlarr/tar.gz/refs/heads/develop"
 HERE = Path(__file__).resolve().parents[1]
 TARGET = HERE / "web/src/tracker-catalog.json"
 PATH = re.compile(r"definitions/v\d+/[^/]+\.yml$")
+NATIVE_PATH = re.compile(r"src/NzbDrone\.Core/Indexers/Definitions/[^/]+\.cs$")
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_DEFINITION_BYTES = 512 * 1024
 
@@ -44,38 +46,81 @@ def entry(path: str, source: str) -> dict:
     }
 
 
-def main() -> None:
-    req = urllib.request.Request(UPSTREAM, headers={"User-Agent": "OneArr-Catalog-Generator/1.0"})
-    with urllib.request.urlopen(req, timeout=40) as response:
-        payload = response.read(MAX_ARCHIVE_BYTES + 1)
-    if len(payload) > MAX_ARCHIVE_BYTES:
-        raise RuntimeError("Upstream archive exceeds configured size limit")
-
-    entries: list[dict] = []
+def read_archive(url: str, maximum: int):
+    req = urllib.request.Request(url, headers={"User-Agent": "OneArr-Catalog-Generator/1.0"})
+    with urllib.request.urlopen(req, timeout=60) as response:
+        payload = response.read(maximum + 1)
+    if len(payload) > maximum:
+        raise RuntimeError("Upstream source archive is too large")
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
         for member in archive:
-            if not member.isfile():
+            if not member.isfile() or member.size > MAX_DEFINITION_BYTES:
                 continue
-            # Strip archive's top-level directory; never extract paths.
             rel = "/".join(member.name.split("/")[1:])
-            if not PATH.fullmatch(rel):
-                continue
-            if member.size > MAX_DEFINITION_BYTES:
+            if not (PATH.fullmatch(rel) or NATIVE_PATH.fullmatch(rel)):
                 continue
             handle = archive.extractfile(member)
             if handle is None:
                 continue
-            data = handle.read(MAX_DEFINITION_BYTES + 1)
-            if len(data) > MAX_DEFINITION_BYTES:
-                continue
-            entries.append(entry(rel, data.decode("utf-8-sig", errors="replace")))
+            source = handle.read(MAX_DEFINITION_BYTES + 1)
+            if len(source) <= MAX_DEFINITION_BYTES:
+                yield rel, source.decode("utf-8-sig", errors="replace")
 
-    entries.sort(key=lambda item: item["path"])
+
+def native_entry(path: str, source: str) -> dict | None:
+    # Native C# indexers are catalog entries, NOT executable native adapters in OneArr.
+    # Extract only explicit constant metadata; do not evaluate C# or run remote code.
+    def match(pattern: str, default: str = "") -> str:
+        found = re.search(pattern, source)
+        return found.group(1) if found else default
+
+    name = match(r'public\s+override\s+string\s+Name\s*=>\s*"([^"]+)"')
+    if not name:
+        return None
+    privacy = match(r"public\s+override\s+IndexerPrivacy\s+Privacy\s*=>\s*IndexerPrivacy\.(\w+)", "Unknown").lower()
+    if privacy == "semiprivate":
+        privacy = "semi-private"
+    desc = match(r'public\s+override\s+string\s+Description\s*=>\s*"([^"]*)"')
+    url_section = source.split("public override string[] IndexerUrls", 1)[-1].split("public override", 1)[0]
+    urls = re.findall(r'"(https://[^"\s]+)"', url_section)[:4]
+    # C# settings attributes are used for reference labels only.
+    labels = re.findall(r'\[FieldDefinition\([^)]*Label\s*=\s*"([^"]+)"', source, re.DOTALL)
+    readable = [label for label in dict.fromkeys(labels[:30])
+                if not label.startswith(("IndexerSettings", "IndexerAlpha", "IndexerZ"))]
+    fields = [{"name": f"field-{i}", "label": label,
+               "type": "password" if re.search("password|cookie|token|api.key|passkey", label, re.I) else "text"}
+              for i, label in enumerate(readable)]
+    return {
+        "path": "native/" + path.rsplit("/", 1)[-1],
+        "name": name,
+        "privacy": privacy,
+        "language": "unknown",
+        "movies": "MovieSearchParams" in source or "NewznabStandardCategory.Movies" in source,
+        "tv": "TvSearchParams" in source or "NewznabStandardCategory.TV" in source,
+        "description": desc,
+        "links": urls,
+        "fields": fields,
+        "source": "Prowlarr/Prowlarr",
+    }
+
+
+def main() -> None:
+    entries = [entry(path, source) for path, source in read_archive(UPSTREAM, MAX_ARCHIVE_BYTES)
+               if PATH.fullmatch(path)]
     if len(entries) < 500:
-        raise RuntimeError(f"Incomplete upstream source ({len(entries)} indexer definitions)")
+        raise RuntimeError(f"Incomplete YAML source ({len(entries)} definitions)")
+    native = [native_entry(path, source) for path, source in read_archive(PROWLARR_NATIVE, 72 * 1024 * 1024)
+              if NATIVE_PATH.fullmatch(path)]
+    native = [item for item in native if item is not None]
+    if len(native) < 40:
+        raise RuntimeError(f"Incomplete Prowlarr native definition source ({len(native)} entries)")
+    entries.extend(native)
+    entries.sort(key=lambda item: item["path"])
+    if len(entries) < 630:
+        raise RuntimeError(f"Incomplete combined upstream catalog ({len(entries)} indexer definitions)")
     checksum = hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()[:16]
     manifest = {
-        "source": "Prowlarr/Indexers",
+        "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
         "sourceMetadataHash": checksum,
         "definitionPaths": [e["path"] for e in entries],
         "entries": entries,

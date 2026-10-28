@@ -24,7 +24,8 @@ if (!OneArr.Api.InstanceLock.TryAcquire(configDir))
 try { File.Delete(Path.Combine(configDir, "stop.request")); } catch (IOException) { }
 builder.Services.AddHostedService(sp => new OneArr.Api.StopRequestWatcher(configDir, sp.GetRequiredService<IHostApplicationLifetime>()));
 var dbPath = Path.Combine(configDir, "onearr.db");
-var tokens = new TokenService(TokenService.LoadOrCreateKey(Path.Combine(configDir, "secret.key")));
+var persistentSecretKey = TokenService.LoadOrCreateKey(Path.Combine(configDir, "secret.key"));
+var tokens = new TokenService(persistentSecretKey);
 var port = Environment.GetEnvironmentVariable("ONEARR_PORT") ?? "8780";
 // Loopback unless told otherwise. The container image sets ONEARR_LISTEN_ADDRESS=0.0.0.0 and publishes via compose.
 var listenAddress = Environment.GetEnvironmentVariable("ONEARR_LISTEN_ADDRESS") ?? "127.0.0.1";
@@ -35,6 +36,7 @@ builder.Services.AddOneArrInfrastructure(dbPath, Environment.GetEnvironmentVaria
     string.IsNullOrWhiteSpace(tmdbBase) ? null : UrlGuard.RequireServiceUrl(tmdbBase));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(tokens);
+builder.Services.AddSingleton(new TrackerSecretBox(persistentSecretKey));
 builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 

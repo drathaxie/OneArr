@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import bundled from "./tracker-catalog.json";
 
-type CatalogEntry = { path: string; name: string; privacy: string; language: string; movies: boolean; tv: boolean };
+type CatalogEntry = { path: string; name: string; privacy: string; language: string; movies: boolean; tv: boolean;
+  description?: string; links?: string[]; fields?: TrackerField[]; source?: string };
 const bundledEntries: CatalogEntry[] = bundled.entries;
 const metadata = new Map(bundledEntries.map(item => [item.path, item]));
 type TrackerField = { name: string; label: string; type: string; defaultValue?: string };
@@ -64,7 +65,7 @@ function titleFromPath(path: string): string {
   return base.split("-").map(word => word === "api" ? "API" : word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
-export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; onGeneric: (name: string, url?: string) => void }) {
+export function TrackerCatalog({ onClose, onGeneric, onNative }: { onClose: () => void; onGeneric: (name: string, url?: string) => void; onNative?: (name: string, url: string, trackerId: string) => void }) {
   const [paths, setPaths] = useState<string[]>(bundled.definitionPaths);
   const [filter, setFilter] = useState("");
   const [privacyFilter, setPrivacyFilter] = useState("all");
@@ -88,7 +89,7 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
       const json = await response.json() as { tree?: { path: string; type: string }[]; truncated?: boolean };
       const latest = (json.tree ?? []).filter(x => x.type === "blob" && validPath.test(x.path)).map(x => x.path);
       if (json.truncated || latest.length < 100) throw Error("Catalog response is incomplete");
-      setPaths(latest.sort());
+      setPaths([...latest, ...bundledEntries.filter(item => item.path.startsWith("native/")).map(item => item.path)].sort());
       setSource("Updated from upstream");
       setError(null);
     } catch (err) {
@@ -102,6 +103,16 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
     setLoadingDetail(true);
     setDetail(null);
     setError(null);
+    if (selected.startsWith("native/")) {
+      const item = metadata.get(selected);
+      if (item) setDetail({
+        id: selected, name: item.name, description: item.description ?? "",
+        privacy: item.privacy, language: item.language, links: item.links ?? [],
+        fields: item.fields ?? [], supportsMovies: item.movies, supportsTv: item.tv,
+      });
+      setLoadingDetail(false);
+      return;
+    }
     const controller = new AbortController();
     fetch(UPSTREAM_RAW + selected, { signal: controller.signal })
       .then(res => { if (!res.ok) throw Error("Definition unavailable (HTTP " + res.status + ")"); return res.text(); })
@@ -144,7 +155,7 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
         </select>
         <button disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh catalog"}</button>
       </div>
-      <p className="muted">{results.length} of {paths.length} definitions · {source} · {duplicateCount > 0 ? duplicateCount + " duplicate filenames" : "Site definitions, not verified connections"} · Source: Prowlarr/Indexers</p>
+      <p className="muted">{results.length} of {paths.length} definitions · {source} · {duplicateCount > 0 ? duplicateCount + " duplicate filenames" : "Site definitions, not verified connections"} · Sources: Prowlarr Indexers + native definitions</p>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="tracker-catalog-grid">
         <div className="tracker-catalog-results" aria-label="Tracker results">
@@ -165,7 +176,10 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
             {detail.links.length > 0 && <p><a href={detail.links[0]} target="_blank" rel="noreferrer">Tracker website</a></p>}
             <h3>Configuration required</h3>
             {detail.fields.length ? <ul>{detail.fields.map(f => <li key={f.name}>{f.label} <span className="muted">({f.type})</span></li>)}</ul> : <p className="muted">No site credentials specified in this definition.</p>}
-            {selected?.endsWith("/nyaasi.yml") ? <>
+            {selected?.endsWith("/torrentleech.yml") && onNative ? <>
+              <p className="muted">Native account login, JSON searches and authenticated torrent downloads are supported for TorrentLeech. Credentials are encrypted in OneArr.</p>
+              <button onClick={() => onNative(detail.name, detail.links[0] ?? "https://www.torrentleech.org/", "torrentleech")}>Add TorrentLeech (native)</button>
+            </> : selected?.endsWith("/nyaasi.yml") ? <>
               <p className="muted">Native RSS search is supported for this public tracker, without login or Prowlarr.</p>
               <button onClick={() => onGeneric(detail.name, "https://nyaa.si/")}>Add Nyaa (native RSS)</button>
             </> : <>

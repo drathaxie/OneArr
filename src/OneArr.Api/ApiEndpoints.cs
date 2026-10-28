@@ -22,7 +22,8 @@ public static class ApiEndpoints
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null);
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
     // Priority: LOWER values are searched first; ties break by Id. Default 0 preserves Id order.
-    public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0);
+    public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
+        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
@@ -40,7 +41,8 @@ public static class ApiEndpoints
     // For a saved record pass IndexerId/ClientId. For unsaved form values pass BaseUrl (+ ApiKey for
     // torznab, + Username/Password/categories for qbittorrent) with no Id: the values are tested
     // without being saved, and no health row is written because there is nothing to attach it to.
-    public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null, string? Username = null, string? Password = null, string? MovieCategory = null, string? TvCategory = null);
+    public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null, string? Username = null, string? Password = null, string? MovieCategory = null, string? TvCategory = null,
+        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null);
     public sealed record ApplyPreviewBody(int PreviewId, bool Confirmed);
     public sealed record BulkImportBody(bool Confirmed, List<BulkApproval>? Approvals);
 
@@ -277,18 +279,21 @@ public static class ApiEndpoints
             return Results.Ok(indexers.Select(i => IndexerDto(i, health.GetValueOrDefault(i.Id))).ToList());
         });
 
-        api.MapPost("/indexers", async (IndexerBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        api.MapPost("/indexers", async (IndexerBody body, IDbContextFactory<OneArrDbContext> db, TrackerSecretBox secrets, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Indexer name is required");
             UrlGuard.RequireServiceUrl(body.BaseUrl);
             await using var c = await db.CreateDbContextAsync(ct);
-            var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = body.ApiKey ?? "", Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority };
+            var secret = body.TrackerId is not null
+                ? CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, null, body.BaseUrl)
+                : body.ApiKey ?? "";
+            var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = secret, Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority };
             c.Indexers.Add(row);
             await c.SaveChangesAsync(ct);
             return Results.Created($"/api/indexers/{row.Id}", IndexerDto(row, null));
         });
 
-        api.MapPut("/indexers/{id:int}", async (int id, IndexerBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        api.MapPut("/indexers/{id:int}", async (int id, IndexerBody body, IDbContextFactory<OneArrDbContext> db, TrackerSecretBox secrets, NativeTrackerClient native, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Indexer name is required");
             UrlGuard.RequireServiceUrl(body.BaseUrl);
@@ -297,8 +302,17 @@ public static class ApiEndpoints
             if (row is null) return Results.NotFound();
             row.Name = body.Name.Trim();
             row.BaseUrl = body.BaseUrl.Trim();
-            // An empty key on edit preserves the stored key; a non-empty key replaces it.
-            if (!string.IsNullOrEmpty(body.ApiKey)) row.ApiKey = body.ApiKey;
+            // Native credentials remain encrypted; blank edit fields preserve their existing secrets.
+            if (body.TrackerId is not null)
+                row.ApiKey = CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, row.ApiKey, body.BaseUrl);
+            else if (TrackerSecretBox.IsNative(row.ApiKey))
+            {
+                // A native indexer may be toggled/renamed, but may not silently
+                // become a plain Torznab indexer or move to an unsafe host.
+                _ = NativeTrackerClient.ValidateSiteUrl(body.BaseUrl);
+            }
+            else if (!string.IsNullOrEmpty(body.ApiKey)) row.ApiKey = body.ApiKey;
+            native.Invalidate(row.Id);
             row.Enabled = body.Enabled;
             row.MoviesEnabled = body.MoviesEnabled;
             row.TvEnabled = body.TvEnabled;
@@ -849,7 +863,7 @@ public static class ApiEndpoints
         // a body-supplied legacy key is used for this one test and is never stored.
         api.MapPost("/connections/test", async (ConnectionTestBody body, IDbContextFactory<OneArrDbContext> db,
             IMetadataProvider metadata, IDownloadClient downloadClient,
-            ILegacyArrReader legacyReader, IHttpClientFactory httpFactory, CancellationToken ct) =>
+            ILegacyArrReader legacyReader, IHttpClientFactory httpFactory, NativeTrackerClient native, TrackerSecretBox secrets, CancellationToken ct) =>
         {
             var service = (body.Service ?? "").Trim().ToLowerInvariant();
             try
@@ -921,6 +935,52 @@ public static class ApiEndpoints
                             categories = caps.Categories.Select(x => new { x.Id, x.Name }),
                             searchAvailable = caps.SearchAvailable, tvSearchAvailable = caps.TvSearchAvailable, movieSearchAvailable = caps.MovieSearchAvailable,
                         });
+                    }
+                    case "native-tracker":
+                    {
+                        IndexerConfig testIndexer;
+                        int? savedId = null;
+                        if (body.IndexerId is int indexerId)
+                        {
+                            var stored = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
+                            if (stored is null) return Results.NotFound();
+                            if (!TrackerSecretBox.IsNative(stored.ApiKey))
+                                return Results.BadRequest(new { error = "This indexer is not a native tracker" });
+                            var overrides = !string.IsNullOrWhiteSpace(body.BaseUrl) ||
+                                (body.TrackerSettings?.Any(v => !string.IsNullOrWhiteSpace(v.Value)) ?? false);
+                            if (!overrides)
+                            {
+                                if (!stored.Enabled) return Results.Ok(new { ok = false, service, detail = "Tracker is disabled." });
+                                testIndexer = stored;
+                                savedId = stored.Id;
+                            }
+                            else
+                            {
+                                var trackerId = secrets.Read(stored.ApiKey).TrackerId;
+                                testIndexer = new IndexerConfig { Id = 0, Name = stored.Name,
+                                    BaseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? stored.BaseUrl : body.BaseUrl,
+                                    ApiKey = CreateNativeSecret(trackerId, body.TrackerSettings, secrets, stored.ApiKey,
+                                        string.IsNullOrWhiteSpace(body.BaseUrl) ? stored.BaseUrl : body.BaseUrl) };
+                            }
+                        }
+                        else
+                        {
+                            if (string.IsNullOrWhiteSpace(body.BaseUrl) || body.TrackerId is null)
+                                return Results.BadRequest(new { error = "Native tracker ID and URL are required" });
+                            testIndexer = new IndexerConfig { Name = "Unsaved native tracker", BaseUrl = body.BaseUrl,
+                                ApiKey = CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, null, body.BaseUrl) };
+                        }
+                        try
+                        {
+                            var detail = await native.TestAsync(testIndexer, ct);
+                            if (savedId is int id) await UpsertIndexerHealthAsync(c, id, true, null, ct);
+                            return Results.Ok(new { ok = true, service, name = testIndexer.Name, detail });
+                        }
+                        catch (Exception ex) when (ex is ExternalServiceException or ArgumentException)
+                        {
+                            if (savedId is int id) await UpsertIndexerHealthAsync(c, id, false, OutboundHttp.Redact(ex.Message), ct);
+                            throw;
+                        }
                     }
                     case "qbittorrent":
                     {
@@ -1024,9 +1084,9 @@ public static class ApiEndpoints
         // outbound tests run at once, each capped at 30s, the whole batch at 120s, and one failure
         // never stops the others. Each result updates only its own health row. No polling, no
         // background work — the caller re-reads the lists when this returns.
-        api.MapPost("/connections/test-all", async (IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient, CancellationToken ct) =>
+        api.MapPost("/connections/test-all", async (IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient, NativeTrackerClient native, CancellationToken ct) =>
         {
-            var results = await TestAllCoreAsync(db, httpFactory, downloadClient, TimeSpan.FromSeconds(120), ct);
+            var results = await TestAllCoreAsync(db, httpFactory, downloadClient, TimeSpan.FromSeconds(120), ct, native);
             return Results.Ok(new
             {
                 results = results.Select(r => new { kind = r.Kind, id = r.Id, name = r.Name, ok = r.Ok, detail = r.Detail }),
@@ -1216,7 +1276,7 @@ public static class ApiEndpoints
     // per-item result into a fault.
     internal static async Task<(string Kind, int Id, string Name, bool Ok, string Detail)[]> TestAllCoreAsync(
         IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient,
-        TimeSpan batchTimeout, CancellationToken ct)
+        TimeSpan batchTimeout, CancellationToken ct, NativeTrackerClient? native = null)
     {
         await using var c = await db.CreateDbContextAsync(ct);
         var indexers = await c.Indexers.AsNoTracking().Where(i => i.Enabled).OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
@@ -1239,7 +1299,9 @@ public static class ApiEndpoints
                 using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
                 itemCts.CancelAfter(TimeSpan.FromSeconds(30));
                 itemToken = itemCts.Token;
-                var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name, indexer.BaseUrl, indexer.ApiKey, itemCts.Token);
+                var (ok, detail) = TrackerSecretBox.IsNative(indexer.ApiKey)
+                    ? (true, await (native ?? throw new ExternalServiceException("Native tracker engine unavailable")).TestAsync(indexer, itemCts.Token))
+                    : await TestPlainIndexerAsync(httpFactory, indexer, itemCts.Token);
                 // A fresh context per item: DbContext is not thread-safe across concurrent tests.
                 await using var hc = await db.CreateDbContextAsync(batchCt);
                 await UpsertIndexerHealthAsync(hc, indexer.Id, ok, ok ? null : detail, batchCt);
@@ -1316,11 +1378,29 @@ public static class ApiEndpoints
     // Secrets are never in these DTOs: only a hasKey/hasPassword flag. Health status is derived so a
     // disabled row always reads Disabled even if an old test result is stored, and a row with no
     // test row reads Not tested rather than a stale-looking value.
+    private static string CreateNativeSecret(string trackerId, Dictionary<string, string>? fields,
+        TrackerSecretBox secrets, string? existing, string baseUrl)
+    {
+        if (!NativeTrackerCredentials.IsSupported(trackerId))
+            throw new ArgumentException("This tracker does not have a native OneArr adapter yet");
+        _ = NativeTrackerClient.ValidateSiteUrl(baseUrl);
+        NativeTrackerCredentials? old = TrackerSecretBox.IsNative(existing) ? secrets.Read(existing!) : null;
+        if (old is not null && old.TrackerId != trackerId) old = null;
+        string Field(string name) => fields is not null && fields.TryGetValue(name, out var v) ? v.Trim() : "";
+        var username = Field("username");
+        var password = Field("password");
+        var altToken = Field("alt2fatoken");
+        if (username.Length == 0) username = old?.Username ?? "";
+        if (password.Length == 0) password = old?.Password ?? "";
+        if (altToken.Length == 0) altToken = old?.Alt2FaToken ?? "";
+        return secrets.Protect(new NativeTrackerCredentials(trackerId, username, password, altToken));
+    }
+
     private static object IndexerDto(IndexerConfig i, IndexerHealth? h) => new
     {
         i.Id, i.Name, i.BaseUrl,
         host = HostOf(i.BaseUrl),
-        protocol = "Torznab",
+        protocol = TrackerSecretBox.IsNative(i.ApiKey) ? "TorrentLeech" : "Torznab",
         i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
         hasKey = i.ApiKey.Length > 0,
         healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
@@ -1405,6 +1485,14 @@ public static class ApiEndpoints
         }
         var caps = TorznabClient.ParseCaps(await response.Content.ReadAsStringAsync(ct), name);
         return (true, $"Indexer '{name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.", caps);
+    }
+
+    private static async Task<(bool Ok, string Detail)> TestPlainIndexerAsync(
+        IHttpClientFactory httpFactory, IndexerConfig indexer, CancellationToken ct)
+    {
+        var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name,
+            indexer.BaseUrl, indexer.ApiKey, ct);
+        return (ok, detail);
     }
 
     // Read-only against the client: sign-in + category listing only. Never adds, pauses, resumes

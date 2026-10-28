@@ -1,0 +1,61 @@
+name: Windows snapshot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-snapshot:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build dashboard
+        working-directory: web
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+      - name: Publish native Windows binaries
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild src/OneArr.Api/OneArr.Api.csproj -getProperty:Version).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected version: $version" }
+          New-Item -ItemType Directory -Path build/stage/app -Force | Out-Null
+          dotnet publish src/OneArr.Api/OneArr.Api.csproj -c Release -r win-x64 --self-contained true -p:Version=$version -p:DebugType=None -p:DebugSymbols=false -o build/stage/app
+          $version | Set-Content -NoNewline -Encoding ascii build/stage/app/version.txt
+          dotnet publish src/OneArr.Tray/OneArr.Tray.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version=$version -p:DebugType=None -p:DebugSymbols=false -o build/stage
+          Copy-Item tools/windows/INSTALL.txt build/stage/INSTALL.txt
+          "ONEARR_BUILD_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Validate built folder on Windows
+        shell: pwsh
+        run: ./tools/windows/acceptance.ps1 -ReleaseDir build/stage -ExpectedVersion $env:ONEARR_BUILD_VERSION -OutFile build/measurements.json
+      - name: Package standalone snapshot
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("build/stage", "build/OneArr-win-x64.zip", [System.IO.Compression.CompressionLevel]::Optimal, $false)
+          (Get-FileHash -Algorithm SHA256 build/OneArr-win-x64.zip).Hash.ToLower() | Set-Content -Encoding ascii build/OneArr-win-x64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OneArr-win-x64-${{ github.sha }}
+          path: |
+            build/OneArr-win-x64.zip
+            build/OneArr-win-x64.zip.sha256
+            build/measurements.json
+          retention-days: 30
+          if-no-files-found: error
