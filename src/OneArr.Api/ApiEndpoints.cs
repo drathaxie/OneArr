@@ -106,13 +106,58 @@ public static class ApiEndpoints
 
         api.MapPost("/quality-profiles", async (ProfileBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
-            if (body.MinResolution is not (480 or 720 or 1080 or 2160) || body.CutoffResolution is not (480 or 720 or 1080 or 2160) || body.CutoffResolution < body.MinResolution)
-                return Results.BadRequest(new { error = "Resolutions must be 480, 720, 1080 or 2160, with cutoff >= minimum" });
+            var validation = ValidateProfileBody(body);
+            if (validation is not null) return Results.BadRequest(new { error = validation });
             await using var c = await db.CreateDbContextAsync(ct);
-            var profile = new QualityProfile { Name = body.Name.Trim(), MinResolution = body.MinResolution, CutoffResolution = body.CutoffResolution, AllowWebSources = body.AllowWebSources };
+            var profile = new QualityProfile
+            {
+                Name = body.Name.Trim(),
+                MinResolution = body.MinResolution,
+                CutoffResolution = body.CutoffResolution,
+                AllowWebSources = body.AllowWebSources
+            };
             c.QualityProfiles.Add(profile);
             await c.SaveChangesAsync(ct);
             return Results.Created($"/api/quality-profiles/{profile.Id}", profile);
+        });
+
+        api.MapPut("/quality-profiles/{id:int}", async (int id, ProfileBody body,
+            IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            var validation = ValidateProfileBody(body);
+            if (validation is not null) return Results.BadRequest(new { error = validation });
+            await using var c = await db.CreateDbContextAsync(ct);
+            var profile = await c.QualityProfiles.FindAsync([id], ct);
+            if (profile is null) return Results.NotFound();
+            profile.Name = body.Name.Trim();
+            profile.MinResolution = body.MinResolution;
+            profile.CutoffResolution = body.CutoffResolution;
+            profile.AllowWebSources = body.AllowWebSources;
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(profile);
+        });
+
+        api.MapDelete("/quality-profiles/{id:int}", async (int id,
+            IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            await using var tx = await c.Database.BeginTransactionAsync(ct);
+            var profile = await c.QualityProfiles.FindAsync([id], ct);
+            if (profile is null) return Results.NotFound();
+
+            if (await c.QualityProfiles.CountAsync(ct) <= 1)
+                return Results.Conflict(new { error = "Cannot delete the last quality profile." });
+            if (await c.MediaItems.AnyAsync(m => m.QualityProfileId == id, ct))
+                return Results.Conflict(new { error = "Profile is assigned to existing movies or series. Reassign them first." });
+            var key = id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (await c.Settings.AnyAsync(s => (s.Key == SettingKeys.DefaultMovieProfile ||
+                s.Key == SettingKeys.DefaultSeriesProfile) && s.Value == key, ct))
+                return Results.Conflict(new { error = "Profile is a default for new movies or series. Select a different default first." });
+
+            c.QualityProfiles.Remove(profile);
+            await c.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return Results.NoContent();
         });
 
         // Pure preview: never stores naming preferences and never touches the filesystem.
@@ -1559,6 +1604,17 @@ public static class ApiEndpoints
         }
         var caps = TorznabClient.ParseCaps(await response.Content.ReadAsStringAsync(ct), name);
         return (true, $"Indexer '{name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.", caps);
+    }
+
+    private static string? ValidateProfileBody(ProfileBody body)
+    {
+        if (string.IsNullOrWhiteSpace(body.Name) || body.Name.Trim().Length > 80)
+            return "Quality profile name must contain 1-80 characters.";
+        if (body.MinResolution is not (480 or 720 or 1080 or 2160) ||
+            body.CutoffResolution is not (480 or 720 or 1080 or 2160) ||
+            body.CutoffResolution < body.MinResolution)
+            return "Resolutions must be 480, 720, 1080 or 2160, with cutoff >= minimum.";
+        return null;
     }
 
     private static async Task<(bool Ok, string Detail)> TestPlainIndexerAsync(
