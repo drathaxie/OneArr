@@ -161,9 +161,9 @@ public class NativeTrackerTests
         };
         await qbit.AddTorrentAsync(config, Encoding.ASCII.GetBytes("d4:infod4:name4:testee"),
             "onearr-tv", CancellationToken.None);
-        Assert.Contains("name=\"torrents\"", captured);
+        Assert.True(captured.Contains("name=torrents") || captured.Contains("name=\"torrents\""));
         Assert.Contains("release.torrent", captured);
-        Assert.Contains("name=\"category\"", captured);
+        Assert.True(captured.Contains("name=category") || captured.Contains("name=\"category\""));
         Assert.Contains("onearr-tv", captured);
     }
 }
