@@ -205,7 +205,7 @@ public sealed class NativeTrackerClient
         var isolated = new IndexerConfig { Id = 0, Name = indexer.Name,
             BaseUrl = indexer.BaseUrl, ApiKey = indexer.ApiKey };
         _ = await GetSessionAsync(isolated, ct);
-        return "TorrentLeech accepted the account login and returned an authenticated page.";
+        return "TorrentLeech login succeeded (read-only account check). Search capability is checked separately when you search releases.";
     }
 
     private async Task<HttpResponseMessage> AuthGetAsync(IndexerConfig indexer, string path, CancellationToken ct)
@@ -226,18 +226,44 @@ public sealed class NativeTrackerClient
         return response;
     }
 
+    /// <summary>Build only the two upstream-supported TorrentLeech browse routes.
+    /// Some mirrors do not accept category-filtered searches; on 404 we retry
+    /// the same read-only query with no category filter. ReleaseRanker still
+    /// validates the actual title, season/episode and quality before grabbing.</summary>
+    public static string BuildSearchPath(MediaType type, string keywords, bool categoryFiltered)
+    {
+        var categories = categoryFiltered
+            ? type == MediaType.Movie ? "/categories/8,9,11,12,13,14,15,29,37,43,47"
+                                      : "/categories/26,27,32,34,35,44"
+            : "";
+        return "torrents/browse/list" + categories +
+            "/exact/1/query/" + Uri.EscapeDataString(keywords) + "/orderby/added/order/desc";
+    }
+
     public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
     {
         var keyword = search.Title;
         if (search.Type == MediaType.Series && search.Season is int season)
             keyword += search.Episode is int episode ? $" S{season:00}E{episode:00}" : $" S{season:00}";
-        var path = search.Type == MediaType.Movie
-            ? "torrents/browse/list/categories/8,9,11,12,13,14,15,29,37,43,47/exact/1/query/"
-            : "torrents/browse/list/categories/26,27,32,34,35/exact/1/query/";
-        path += Uri.EscapeDataString(keyword) + "/orderby/added/order/desc";
-        using var response = await AuthGetAsync(indexer, path, ct);
+        using var response = await AuthGetAsync(indexer, BuildSearchPath(search.Type, keyword, true), ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            // A site may reject a category list even though login was valid.
+            // Retry exactly once without the category filter, never silently
+            // return zero results on both failed requests.
+            using var fallback = await AuthGetAsync(indexer, BuildSearchPath(search.Type, keyword, false), ct);
+            return await ParseResponseAsync(indexer, fallback, ct, "unfiltered");
+        }
+        return await ParseResponseAsync(indexer, response, ct, "category-filtered");
+    }
+
+    private static async Task<IReadOnlyList<ReleaseCandidate>> ParseResponseAsync(
+        IndexerConfig indexer, HttpResponseMessage response, CancellationToken ct, string route)
+    {
         if (!response.IsSuccessStatusCode)
-            throw new ExternalServiceException($"TorrentLeech search returned HTTP {(int)response.StatusCode}");
+            throw new ExternalServiceException($"TorrentLeech {route} search returned HTTP {(int)response.StatusCode}; login success does not verify searching");
+        if (response.Content.Headers.ContentLength is long length && length > 8_000_000)
+            throw new ExternalServiceException("TorrentLeech search response too large");
         var data = await response.Content.ReadAsStringAsync(ct);
         if (data.Length > 8_000_000) throw new ExternalServiceException("TorrentLeech search response too large");
         var origin = ValidateBase(indexer.BaseUrl);

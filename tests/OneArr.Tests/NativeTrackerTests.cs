@@ -96,6 +96,66 @@ public class NativeTrackerTests
     }
 
     [Fact]
+    public async Task CategoryRoute404RetriesUnfilteredReadOnlySearchExactlyOnce()
+    {
+        var calls = new List<string>();
+        var handler = new FakeHandler(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            calls.Add(path);
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Get)
+                return Html("<form name='login-form'></form>");
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Post)
+            {
+                var posted = Html("", HttpStatusCode.Found);
+                posted.Headers.Add("Set-Cookie", "PHPSESSID=logged; path=/");
+                return posted;
+            }
+            if (path == "/") return Html("<a href='/user/account/logout'>Logout</a>");
+            if (path.StartsWith("/torrents/browse/list/categories/"))
+                return Html("Not Found", HttpStatusCode.NotFound);
+            if (path.StartsWith("/torrents/browse/list/exact/1/query/"))
+                return FakeHandler.Text("""
+                    {"torrentList":[{"fid":5678,"filename":"Film.2026.torrent","name":"Film 2026 1080p WEB-DL",
+                    "categoryID":37,"seeders":12,"size":1073741824}]}
+                    """);
+            return Html("Wrong route", HttpStatusCode.NotFound);
+        });
+        var native = new NativeTrackerClient(new FakeFactory(handler), Secrets);
+        var rows = await native.SearchAsync(Config(),
+            new ReleaseSearch(MediaType.Movie, "Film", 2026, null, null, "2000"), CancellationToken.None);
+        Assert.Single(rows);
+        Assert.Equal(2, calls.Count(x => x.StartsWith("/torrents/browse/list/")));
+        Assert.Single(calls, x => x.StartsWith("/torrents/browse/list/exact/1/query/"));
+        Assert.All(calls.Where(x => x.StartsWith("/torrents/browse/list/")),
+            path => Assert.Contains("/exact/1/query/Film/orderby/added/order/desc", path));
+    }
+
+    [Fact]
+    public async Task Two404sRemainVisibleFailureInsteadOfMasqueradingAsNoResults()
+    {
+        var handler = new FakeHandler(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Get)
+                return Html("<form name='login-form'></form>");
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Post)
+            {
+                var posted = Html("", HttpStatusCode.Found);
+                posted.Headers.Add("Set-Cookie", "PHPSESSID=logged; path=/");
+                return posted;
+            }
+            if (path == "/") return Html("<a href='/user/account/logout'>Logout</a>");
+            return Html("404", HttpStatusCode.NotFound);
+        });
+        var native = new NativeTrackerClient(new FakeFactory(handler), Secrets);
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => native.SearchAsync(Config(),
+            new ReleaseSearch(MediaType.Series, "Show", null, 1, 2, "5000"), CancellationToken.None));
+        Assert.Contains("unfiltered search returned HTTP 404", ex.Message);
+        Assert.DoesNotContain("my-password", ex.Message);
+    }
+
+    [Fact]
     public async Task IncorrectLoginIsNotTreatedAsAuthenticated()
     {
         var handler = new FakeHandler(request =>
