@@ -59,6 +59,39 @@ public sealed class QBittorrentClient : IDownloadClient
         throw new ExternalServiceException($"qBittorrent returned an unexpected torrent-add response (HTTP {(int)response.StatusCode}, {body.Length} bytes of body)");
     }
 
+    /// <summary>Upload private-tracker .torrent bytes without disclosing session cookies to qBittorrent.</summary>
+    public async Task<string> AddTorrentAsync(DownloadClientConfig client, byte[] torrent, string category, CancellationToken ct)
+    {
+        if (torrent.Length < 5 || torrent.Length > 16 * 1024 * 1024 || torrent[0] != (byte)'d')
+            throw new ExternalServiceException("Invalid or oversized authenticated torrent payload");
+        using var response = await SendAsync(client, ct, () =>
+        {
+            var content = new MultipartFormDataContent();
+            var file = new ByteArrayContent(torrent);
+            file.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
+            content.Add(file, "torrents", "release.torrent");
+            content.Add(new StringContent(category), "category");
+            return content;
+        }, "api/v2/torrents/add", HttpMethod.Post);
+        var body = (await response.Content.ReadAsStringAsync(ct)).Trim();
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalServiceException($"qBittorrent rejected the uploaded torrent (HTTP {(int)response.StatusCode})");
+        if (body.Equals("Ok.", StringComparison.OrdinalIgnoreCase)) return "";
+        if (body.StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.Object &&
+                    (ResultCount(root, "success_count") > 0 || ResultCount(root, "pending_count") > 0))
+                    return "";
+            }
+            catch (JsonException) { /* fail closed below */ }
+        }
+        throw new ExternalServiceException("qBittorrent did not confirm the uploaded torrent");
+    }
+
     public async Task<IReadOnlyList<DownloadClientItem>> ListAsync(DownloadClientConfig client, string category, CancellationToken ct)
     {
         var response = await SendAsync(client, ct, null, $"api/v2/torrents/info?category={Uri.EscapeDataString(category)}", HttpMethod.Get);
