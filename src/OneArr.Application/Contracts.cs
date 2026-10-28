@@ -28,6 +28,9 @@ public interface IIndexerClient
 public interface IDownloadClient
 {
     Task<string> AddAsync(DownloadClientConfig client, string link, string category, CancellationToken ct);
+    /// <summary>Submit previously authenticated .torrent bytes directly to the download client.</summary>
+    Task<string> AddTorrentAsync(DownloadClientConfig client, byte[] torrent, string category, CancellationToken ct) =>
+        throw new ExternalServiceException("This download client does not support authenticated torrent uploads");
     Task<IReadOnlyList<DownloadClientItem>> ListAsync(DownloadClientConfig client, string category, CancellationToken ct);
 }
 
