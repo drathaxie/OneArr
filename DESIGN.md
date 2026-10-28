@@ -9,7 +9,7 @@ third/fullpage screenshot as primary reference).
 Scope of this milestone: application shell, Movies/Series library, and the
 right-side inspector. Dashboard, Wanted, Activity, Settings, and Migration are
 NOT redesigned here (their components are untouched except where noted below).
-No merge, publish, tag, or release without Jesse's approval.
+No merge, publish, tag, or release without the user's approval.
 
 ## Language
 
@@ -179,7 +179,7 @@ change, no grabbing change, no merge/publish (local commit only).
 - Profile vs file resolution, kept strictly apart: identity lines read
   PROFILE <configured profile> and FILE <first file's resolution · size>
   (or FILE —). Verified with a deliberately mismatched throwaway case
-  (Dune: profile UHD-2160p, file 1080p) — the throwaway DB only; Jesse's
+  (Dune: profile UHD-2160p, file 1080p) — the throwaway DB only; the user's
   real library is untouched.
 - Synchronization: the dossier renders beside the list view too (a
   Dossier button per row; the list title still opens the detail page),
@@ -208,7 +208,7 @@ change, no grabbing change, no merge/publish (local commit only).
 
 ## Review refinements (2026-10-28, same branch, second commit)
 
-Five corrections from Jesse's review of the implementation screenshots,
+Five corrections from the user's review of the implementation screenshots,
 all in the app (the concept mockup is left as the historical proposal):
 
 1. Tagline removed. The Movies/Series masthead is now just the Fraunces
@@ -261,7 +261,7 @@ all in the app (the concept mockup is left as the historical proposal):
 
 - Remaining screens (Dashboard operational sections, Wanted, Activity,
   Settings, Migration) in this language — needs approval.
-- Jesse's real Windows PC check against his real library and qBittorrent
+- the user's real Windows PC check against his real library and qBittorrent
   (including a download client actually configured, which the throwaway
   DB cannot show as connected).
 - The separate qBittorrent 5.2+ work (local-only, uncommitted) — untouched.

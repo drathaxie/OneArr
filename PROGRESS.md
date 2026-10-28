@@ -326,7 +326,7 @@ reports, by import outcomes, or by explicit operator actions — never by anothe
 - Screenshots: still none from a running app in the sandbox (no live backend there); the PC-run
   screenshots from the PR #5 checklist remain the way to get them.
 
-## Windows acceptance checklist for Jesse's PC (NOT run in the sandbox — no Windows, no real library there)
+## Windows acceptance checklist for the user's PC (NOT run in the sandbox — no Windows, no real library there)
 
 Run these against a release-shaped build of the PR #5 head, with the real library, before merging.
 Safety rules for every step: do NOT press Apply on any monitoring sync, do NOT move/rename/delete
@@ -375,7 +375,7 @@ Automation must read off before and after).
 
 What CI already covers (so the PC run does not need to redo it): Linux + Windows backend tests
 (including the Windows filesystem regression suite), frontend vitest + build, a synthetic
-20,000-movie Windows library benchmark (timings, not Jesse's library), and the headless Windows
+20,000-movie Windows library benchmark (timings, not the user's library), and the headless Windows
 acceptance run (startup, health, sign-in, settings persistence across restart, single-instance
 refusal, graceful shutdown, idle CPU/memory gates) — all on throwaway configs, never a real library.
 
@@ -1055,7 +1055,7 @@ row below 860px), and the poster grid is fluid (`repeat(auto-fill, minmax(180px,
   table cells shrinks min-content to one character; changed to `break-word`.
   Poster art did not load in the sandbox (external image host unreachable there), so
   screenshots show poster frames with alt text; layout, aspect, and spacing are verified.
-  Jesse's real 205-series library on his PC remains the final visual check.
+  the user's real 205-series library on his PC remains the final visual check.
 
 ## Indexer Manager, Download Clients & Interactive Search (branch `feature/indexer-client-management`, PR open, NOT merged)
 
@@ -1122,7 +1122,7 @@ What this adds:
   connections is turned off"), so the app's loopback calls to the fake servers fail there
   while curl and the browser reach them fine. Success-path screenshots (caps test, manual
   search results) were therefore captured against public fixture URLs after the branch was
-  pushed; Jesse's PC run with real local services remains the final check.
+  pushed; the user's PC run with real local services remains the final check.
 - Known limitations: no live-service testing was done (no real indexer or qBittorrent was
   contacted); the qBittorrent connection-test success path is covered by tests, not by a
   live screenshot; priority is a plain number (no drag-to-reorder); Test All has no
@@ -1130,7 +1130,7 @@ What this adds:
 
 ## PR #10 review corrections (2026-10-27, PR unmerged, run #99 failed 279/281)
 
-Jesse's review found three defects; all fixed on the same branch, no merge/tag/release:
+the user's review found three defects; all fixed on the same branch, no merge/tag/release:
 - Fixture weekday: torznab_search.xml and two inline test feeds said "Wed, 01 Oct 2026";
   October 1, 2026 was a Thursday, and the parser (correctly) rejects the inconsistent
   date, so the two age-related tests failed. Fixed to "Thu" in all three places; the
@@ -1149,7 +1149,7 @@ Jesse's review found three defects; all fixed on the same branch, no merge/tag/r
   batch deadline reached", started tests report "timed out", and failure-path
   health writes are best-effort. Regression test drives the core with a 150 ms
   deadline against six slow indexers: 4 timed out, 2 skipped, all six reported.
-- PR #9 sequencing: PR #9 still needs Jesse's merge first; only then does PR #10
+- PR #9 sequencing: PR #9 still needs the user's merge first; only then does PR #10
   rebase onto new main (dropping the integrated aa1638b correction) so its final
   diff holds the features, not duplicate responsive-layout changes. Fresh fully
   green Linux + Windows CI is required before PR #10 merges.
