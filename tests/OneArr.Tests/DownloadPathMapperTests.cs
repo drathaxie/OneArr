@@ -13,6 +13,7 @@ public class DownloadPathMapperTests
         DownloadPathMapper.Validate(rule, dirs.Torrents);
         var path = DownloadPathMapper.Map(rule, "/downloads/Series/Show.S01E01.mkv", dirs.Torrents);
         Assert.Equal(Path.Combine(dirs.Torrents, "Series", "Show.S01E01.mkv"), path);
+        Assert.Equal(dirs.Torrents, DownloadPathMapper.Map(rule, "/downloads", dirs.Torrents));
     }
 
     [Theory]
