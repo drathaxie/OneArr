@@ -8,7 +8,7 @@ type TrackerInfo = {
 };
 const UPSTREAM_TREE = "https://api.github.com/repos/Prowlarr/Indexers/git/trees/master?recursive=1";
 const UPSTREAM_RAW = "https://raw.githubusercontent.com/Prowlarr/Indexers/master/";
-const validPath = /^definitions\/v\d+\/[a-z0-9-]+\.yml$/;
+const validPath = /^definitions\/v\d+\/[a-zA-Z0-9-]+\.yml$/;
 
 function clean(value: string): string {
   const trim = value.trim();
@@ -61,7 +61,7 @@ function titleFromPath(path: string): string {
   return base.split("-").map(word => word === "api" ? "API" : word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
-export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; onGeneric: (name: string) => void }) {
+export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; onGeneric: (name: string, url?: string) => void }) {
   const [paths, setPaths] = useState<string[]>(bundled.definitionPaths);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -115,7 +115,7 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
   return <div className="dialog-backdrop" role="presentation" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="dialog card tracker-catalog-dialog" role="dialog" aria-modal="true" aria-label="Browse tracker catalog">
       <div className="row spread">
-        <div><h2>Tracker catalog</h2><p className="muted">Browse site definitions. Site-specific login and search adapters are not yet installed.</p></div>
+        <div><h2>Tracker catalog</h2><p className="muted">Search the directory, inspect authentication requirements, and connect supported sources.</p></div>
         <button onClick={onClose} aria-label="Close tracker catalog">Close</button>
       </div>
       <div className="row">
@@ -142,8 +142,13 @@ export function TrackerCatalog({ onClose, onGeneric }: { onClose: () => void; on
             {detail.links.length > 0 && <p><a href={detail.links[0]} target="_blank" rel="noreferrer">Tracker website</a></p>}
             <h3>Configuration required</h3>
             {detail.fields.length ? <ul>{detail.fields.map(f => <li key={f.name}>{f.label} <span className="muted">({f.type})</span></li>)}</ul> : <p className="muted">No site credentials specified in this definition.</p>}
-            <p className="muted">This is a site definition, not a Torznab URL. OneArr cannot log in or search it until a compatible native adapter is implemented. Credentials are not collected or sent for unsupported trackers.</p>
-            <button onClick={() => onGeneric(detail.name)}>Configure an existing Torznab feed for {detail.name}</button>
+            {selected?.endsWith("/nyaasi.yml") ? <>
+              <p className="muted">Native RSS search is supported for this public tracker, without login or Prowlarr.</p>
+              <button onClick={() => onGeneric(detail.name, "https://nyaa.si/")}>Add Nyaa (native RSS)</button>
+            </> : <>
+              <p className="muted">This catalog entry is not yet a working OneArr native adapter. Tracker-specific credentials are shown for reference only and are not collected for unsupported sites.</p>
+              <button onClick={() => onGeneric(detail.name)}>Configure an existing Torznab feed</button>
+            </>}
           </div>}
         </div>
       </div>
