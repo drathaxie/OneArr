@@ -142,6 +142,57 @@ public class IndexerClientManagementTests
     }
 
     [Fact]
+    public async Task Public_rss_indexer_crud_tests_feed_and_preserves_protocol_without_api_key()
+    {
+        var routing = new RoutingHandler();
+        routing.Route("feed.example", req =>
+        {
+            Assert.Equal("/download.rss", req.RequestUri!.AbsolutePath);
+            Assert.DoesNotContain("apikey", req.RequestUri.Query);
+            return FakeHandler.Text("""
+                <rss><channel><item><title>Test.Show.S01E02.1080p.WEB-DL</title>
+                  <link>https://feed.example/file/77.torrent</link>
+                  <enclosure url="https://feed.example/file/77.torrent" length="1395864371"
+                    type="application/x-bittorrent"/>
+                </item></channel></rss>
+                """, contentType: "application/rss+xml");
+        });
+        using var factory = new StubApiFactory(routing);
+        var client = await SignedInAsync(factory);
+        var unsaved = await PostJsonAsync(client, "/api/connections/test", new
+        {
+            service = "torznab", baseUrl = "https://feed.example/download.rss", protocol = "rss"
+        });
+        Assert.True(unsaved.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("RSS", unsaved.RootElement.GetProperty("detail").GetString());
+        var created = await PostJsonAsync(client, "/api/indexers", new
+        {
+            name = "Custom RSS", baseUrl = "https://feed.example/download.rss",
+            protocol = "rss", apiKey = "", enabled = true, moviesEnabled = false, tvEnabled = true, priority = 0
+        });
+        var id = created.RootElement.GetProperty("id").GetInt32();
+        Assert.Equal("RSS", created.RootElement.GetProperty("protocol").GetString());
+        Assert.False(created.RootElement.GetProperty("hasKey").GetBoolean());
+        var checkedFeed = await PostJsonAsync(client, "/api/connections/test",
+            new { service = "torznab", indexerId = id });
+        Assert.True(checkedFeed.RootElement.GetProperty("ok").GetBoolean());
+        var put = await client.PutAsJsonAsync($"/api/indexers/{id}", new
+        {
+            name = "Custom RSS", baseUrl = "https://feed.example/download.rss",
+            protocol = "rss", apiKey = "", enabled = true,
+            moviesEnabled = false, tvEnabled = true, priority = 10
+        });
+        Assert.True(put.IsSuccessStatusCode, await put.Content.ReadAsStringAsync());
+        var list = await GetJsonAsync(client, "/api/indexers");
+        Assert.Equal("RSS", list.RootElement[0].GetProperty("protocol").GetString());
+        Assert.False(list.RootElement[0].GetProperty("hasKey").GetBoolean());
+        await using var scope = factory.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<IDbContextFactory<OneArrDbContext>>();
+        await using var db = await database.CreateDbContextAsync();
+        Assert.Equal(PublicRssClient.ProtocolMarker, (await db.Indexers.SingleAsync()).ApiKey);
+    }
+
+    [Fact]
     public async Task Native_tracker_api_encrypts_credentials_tests_login_and_preserves_secret_on_edit()
     {
         var router = new RoutingHandler();
