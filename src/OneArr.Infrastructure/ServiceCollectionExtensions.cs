@@ -31,10 +31,15 @@ public static class ServiceCollectionExtensions
         // button failed. Other named clients are unchanged.
         services.AddHttpClient(OutboundHttp.QbittorrentClient, c => c.Timeout = TimeSpan.FromSeconds(15))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false });
+        // Native tracker logins are never redirected automatically: credentials
+        // and session cookies may only reach the configured trusted origin.
+        services.AddHttpClient(NativeTrackerClient.ClientName, c => c.Timeout = TimeSpan.FromSeconds(25))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false });
         services.AddHttpClient(OutboundHttp.LegacyClient, c => c.Timeout = TimeSpan.FromSeconds(20));
 
         services.AddSingleton<IReleaseParser, ReleaseParser>();
         services.AddSingleton<IReleaseRanker, ReleaseRanker>();
+        services.AddSingleton<NativeTrackerClient>();
         services.AddSingleton<IIndexerClient, TorznabClient>();
         services.AddSingleton<IDownloadClient, QBittorrentClient>();
         services.AddSingleton<IImporter, SafeImporter>();
