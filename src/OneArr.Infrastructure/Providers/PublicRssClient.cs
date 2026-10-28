@@ -21,6 +21,8 @@ public sealed class PublicRssClient
     public const string ProtocolMarker = "rss:public:v1";
     private const int MaxFeedBytes = 4 * 1024 * 1024;
     private readonly IHttpClientFactory _factory;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset Expires, IReadOnlyList<ReleaseCandidate> Entries)> _cache = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _gates = new();
 
     public PublicRssClient(IHttpClientFactory factory) => _factory = factory;
 
@@ -28,11 +30,39 @@ public sealed class PublicRssClient
 
     public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
     {
-        var releases = await FetchAsync(indexer.BaseUrl, indexer.Name, search.Type, ct);
+        var releases = await CachedFeedAsync(indexer.BaseUrl, indexer.Name, search.Type, ct);
         // The feed contains only a recent window, unlike a searchable Torznab API.
         // Ranking still performs its normal title/season/episode/quality checks.
         var terms = search.Title.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return releases.Where(r => terms.All(term => r.Title.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    // OneArr may search many monitored episodes against the same latest-releases
+    // RSS feed. Cache only for two minutes so one library sweep does not send
+    // a network request for every movie/episode. Explicit Test bypasses cache.
+    private async Task<IReadOnlyList<ReleaseCandidate>> CachedFeedAsync(
+        string url, string name, MediaType type, CancellationToken ct)
+    {
+        var key = ((int)type).ToString(CultureInfo.InvariantCulture) + "|" + url;
+        if (_cache.TryGetValue(key, out var cached) && cached.Expires > DateTimeOffset.UtcNow)
+            return cached.Entries;
+        var gate = _gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (_cache.TryGetValue(key, out cached) && cached.Expires > DateTimeOffset.UtcNow)
+                return cached.Entries;
+            var result = await FetchAsync(url, name, type, ct);
+            if (_cache.Count > 128)
+            {
+                foreach (var stale in _cache.Where(x => x.Value.Expires <= DateTimeOffset.UtcNow))
+                    _cache.TryRemove(stale.Key, out _);
+                if (_cache.Count > 128) _cache.Clear();
+            }
+            _cache[key] = (DateTimeOffset.UtcNow.AddMinutes(2), result);
+            return result;
+        }
+        finally { gate.Release(); }
     }
 
     public async Task<IReadOnlyList<ReleaseCandidate>> FetchAsync(string url, string name, MediaType mediaType, CancellationToken ct)
