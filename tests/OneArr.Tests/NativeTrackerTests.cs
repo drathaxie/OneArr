@@ -90,7 +90,7 @@ public class NativeTrackerTests
         Assert.Equal(23, release.Seeders);
         var bytes = await native.DownloadTorrentAsync(idx, new Uri(release.Link), CancellationToken.None);
         Assert.StartsWith("d4:infod", Encoding.ASCII.GetString(bytes));
-        Assert.Single(calls.Where(c => c == "POST /user/account/login/"));
+        Assert.Single(calls, c => c == "POST /user/account/login/");
         Assert.Contains(calls, c => c.Contains("S01E02", StringComparison.Ordinal));
         Assert.Contains("GET /download/1234/Show.S01E02.torrent", calls);
     }
@@ -190,7 +190,7 @@ public class NativeTrackerTests
         var native = new NativeTrackerClient(factory, Secrets);
         var releases = new OneArr.Infrastructure.Services.ReleaseService(world.Db,
             new TorznabClient(factory, native),
-            new OneArr.Infrastructure.Services.ReleaseRanker(new OneArr.Infrastructure.Services.ReleaseParser()),
+            new ReleaseRanker(new ReleaseParser()),
             new QBittorrentClient(factory), world.Time, native);
         var job = await releases.GrabAsync(new OneArr.Infrastructure.Services.GrabRequest(
             movieId, null, "The.Matrix.1999.1080p.BluRay.x264-GRP",
