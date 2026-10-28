@@ -13,11 +13,13 @@ public sealed class TorznabClient : IIndexerClient
     private static readonly XNamespace Torznab = "http://torznab.com/schemas/2015/feed";
     private readonly IHttpClientFactory _factory;
     private readonly NativeTrackerClient? _native;
+    private readonly PublicRssClient _rss;
 
-    public TorznabClient(IHttpClientFactory factory, NativeTrackerClient? native = null)
+    public TorznabClient(IHttpClientFactory factory, NativeTrackerClient? native = null, PublicRssClient? rss = null)
     {
         _factory = factory;
         _native = native;
+        _rss = rss ?? new PublicRssClient(factory);
     }
 
     /// <summary>Nyaa's public RSS feed is a native indexer, not a Torznab API.</summary>
@@ -66,7 +68,7 @@ public sealed class TorznabClient : IIndexerClient
         if (IsDirectNyaa(baseUri))
             return await SearchNyaaAsync(indexer.Name, baseUri, search, ct);
         if (PublicRssClient.IsPublicRss(indexer.ApiKey))
-            return await new PublicRssClient(_factory).SearchAsync(indexer, search, ct);
+            return await _rss.SearchAsync(indexer, search, ct);
         var parameters = new List<string>
         {
             "t=" + (search.Type == MediaType.Series && search.Season is not null ? "tvsearch" : "search"),
