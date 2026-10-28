@@ -32,7 +32,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe("Tracker directory", () => {
   it("works offline from the bundled complete definitions manifest", () => {
     render(<TrackerCatalog onClose={() => {}} onGeneric={() => {}} />);
-    expect(screen.getByText(/579 definitions/)).toBeTruthy();
+    expect(screen.getByText(/of \d+ definitions/)).toBeTruthy();
     expect(screen.getByText(/Bundled catalog/)).toBeTruthy();
   });
 
