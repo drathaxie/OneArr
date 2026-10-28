@@ -137,6 +137,72 @@ public class NativeTrackerTests
     }
 
     [Fact]
+    public async Task ManualGrabFromPrivateTracker_UploadsBytesAndRecordsTorrentHash()
+    {
+        using var world = new TestWorld();
+        await world.ConfigureAsync(automaticGrab: false);
+        var movieId = await world.AddMovieAsync("The Matrix", 1999);
+        await using (var db = await world.Db.CreateDbContextAsync())
+        {
+            db.Indexers.Add(Config());
+            await db.SaveChangesAsync();
+        }
+        var uploads = 0;
+        world.Http.Route(TestWorld.QbitHost, request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var login = FakeHandler.Text("Ok.");
+                login.Headers.Add("Set-Cookie", "SID=qbit123; path=/");
+                return login;
+            }
+            if (request.RequestUri.AbsolutePath == "/api/v2/torrents/add")
+            {
+                var data = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                Assert.Contains("torrents", data);
+                Assert.Contains("onearr-movies", data);
+                uploads++;
+                return FakeHandler.Text("Ok.");
+            }
+            return FakeHandler.Text("Not Found", HttpStatusCode.NotFound);
+        });
+        world.Http.Route("www.torrentleech.org", req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Get)
+                return Html("<form name='login-form'></form>");
+            if (path == "/user/account/login/" && req.Method == HttpMethod.Post)
+            {
+                var logged = Html("", HttpStatusCode.Found);
+                logged.Headers.Add("Set-Cookie", "PHPSESSID=logged; path=/");
+                return logged;
+            }
+            if (!req.Headers.TryGetValues("Cookie", out var cookies) ||
+                !cookies.Any(x => x.Contains("PHPSESSID=logged")))
+                return Html("Forbidden", HttpStatusCode.Forbidden);
+            if (path == "/") return Html("<a href='/user/account/logout'>Logout</a>");
+            if (path.StartsWith("/download/", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content =
+                    new ByteArrayContent(Encoding.ASCII.GetBytes("d4:infod4:name4:testee")) };
+            return Html("Not Found", HttpStatusCode.NotFound);
+        });
+        var factory = new FakeFactory(world.Http);
+        var native = new NativeTrackerClient(factory, Secrets);
+        var releases = new OneArr.Infrastructure.Services.ReleaseService(world.Db,
+            new TorznabClient(factory, native),
+            new OneArr.Infrastructure.Services.ReleaseRanker(new OneArr.Infrastructure.Services.ReleaseParser()),
+            new QBittorrentClient(factory), world.Time, native);
+        var job = await releases.GrabAsync(new OneArr.Infrastructure.Services.GrabRequest(
+            movieId, null, "The.Matrix.1999.1080p.BluRay.x264-GRP",
+            "https://www.torrentleech.org/download/1234/The.Matrix.1999.1080p.BluRay.x264-GRP.torrent", null),
+            CancellationToken.None);
+        Assert.Equal(1, uploads);
+        Assert.Equal(QBittorrentClient.TorrentInfoHash(
+            Encoding.ASCII.GetBytes("d4:infod4:name4:testee")), job.Hash);
+        Assert.True(job.DownloadClientId.HasValue);
+    }
+
+    [Fact]
     public async Task MultipartUploadToQbittorrentSendsBytesAndCategory()
     {
         var captured = "";
