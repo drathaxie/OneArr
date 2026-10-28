@@ -221,6 +221,97 @@ public class QBittorrentClientTests
     }
 
     [Fact]
+    public async Task Modern204Login_UsesPortScopedCookieForReadOnlyList()
+    {
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var r = new HttpResponseMessage(HttpStatusCode.NoContent);
+                r.Headers.Add("Set-Cookie", "QBT_SID_8080=newsecret; HttpOnly; path=/");
+                return r;
+            }
+            var sent = req.Headers.TryGetValues("Cookie", out var values) && values.Contains("QBT_SID_8080=newsecret");
+            return sent ? FakeHandler.Text("[]") : FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden);
+        });
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        Assert.Empty(await client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Equal(2, handler.Requests.Count);
+        var info = handler.Requests.Last();
+        Assert.Contains("QBT_SID_8080=newsecret", info.Headers.GetValues("Cookie"));
+        Assert.DoesNotContain("SID=newsecret", info.Headers.GetValues("Cookie"));
+    }
+
+    [Fact]
+    public async Task Empty200Login_WithCookie_UsesCookieAndLists()
+    {
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var r = FakeHandler.Text("", contentType: "text/plain");
+                r.Headers.Add("Set-Cookie", "QBT_SID_8080=newsecret; path=/");
+                return r;
+            }
+            return req.Headers.TryGetValues("Cookie", out var cookies) && cookies.Contains("QBT_SID_8080=newsecret")
+                ? FakeHandler.Text("[]")
+                : FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden);
+        });
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        Assert.Empty(await client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Empty200Login_WithoutCookie_RequiresProtectedRead()
+    {
+        var handler = new FakeHandler(req =>
+            req.RequestUri!.AbsolutePath == "/api/v2/auth/login"
+                ? FakeHandler.Text("", contentType: "text/plain")
+                : FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("HTTP 403", ex.Message);
+        Assert.Contains("Authentication could not be verified", ex.Message);
+        Assert.Equal(4, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Modern401Login_IsReportedAsBadCredentials()
+    {
+        var handler = new FakeHandler(_ => FakeHandler.Text("", HttpStatusCode.Unauthorized));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("HTTP 401", ex.Message);
+        Assert.Contains("username and password", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("""{"success_count":1,"pending_count":0,"failure_count":0}""", HttpStatusCode.OK, true)]
+    [InlineData("""{"success_count":0,"pending_count":1,"failure_count":0}""", HttpStatusCode.Accepted, true)]
+    [InlineData("""{"success_count":0,"pending_count":0,"failure_count":1}""", HttpStatusCode.OK, false)]
+    public async Task ModernTorrentAddResponse_RequiresSuccessOrPending(string body, HttpStatusCode status, bool accepted)
+    {
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var r = new HttpResponseMessage(HttpStatusCode.NoContent);
+                r.Headers.Add("Set-Cookie", "QBT_SID_8080=modern; path=/");
+                return r;
+            }
+            Assert.Contains("QBT_SID_8080=modern", req.Headers.GetValues("Cookie"));
+            return FakeHandler.Text(body, status);
+        });
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        const string magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01";
+        if (accepted)
+            Assert.Equal("abcdef0123456789abcdef0123456789abcdef01", await client.AddAsync(Config, magnet, "onearr-movies", CancellationToken.None));
+        else
+            await Assert.ThrowsAsync<ExternalServiceException>(() => client.AddAsync(Config, magnet, "onearr-movies", CancellationToken.None));
+    }
+
+    [Fact]
     public void StateMappingAndMagnetHashParsing()
     {
         Assert.Equal(DownloadStatus.Downloading, QBittorrentClient.MapState("downloading", 0.4));
