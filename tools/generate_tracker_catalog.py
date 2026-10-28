@@ -17,8 +17,8 @@ UPSTREAM = "https://codeload.github.com/Prowlarr/Indexers/tar.gz/refs/heads/mast
 PROWLARR_NATIVE = "https://codeload.github.com/Prowlarr/Prowlarr/tar.gz/refs/heads/develop"
 HERE = Path(__file__).resolve().parents[1]
 TARGET = HERE / "web/src/tracker-catalog.json"
-PATH = re.compile(r"definitions/v\\d+/[^/]+\\.yml$")
-NATIVE_PATH = re.compile(r"src/NzbDrone\\.Core/Indexers/Definitions/[^/]+\\.cs$")
+PATH = re.compile(r"definitions/v\d+/[^/]+\.yml$")
+NATIVE_PATH = re.compile(r"src/NzbDrone\.Core/Indexers/Definitions/[^/]+\.cs$")
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_DEFINITION_BYTES = 512 * 1024
 
