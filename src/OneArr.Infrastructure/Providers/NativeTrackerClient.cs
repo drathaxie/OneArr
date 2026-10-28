@@ -163,7 +163,8 @@ public sealed class NativeTrackerClient
         CollectCookies(home, jar);
         var homeHtml = await home.Content.ReadAsStringAsync(ct);
         if (!home.IsSuccessStatusCode ||
-            !homeHtml.Contains("/user/account/logout", StringComparison.OrdinalIgnoreCase))
+            !Regex.IsMatch(homeHtml, @"<a\b[^>]*\bhref\s*=\s*[""']/user/account/logout[""'][^>]*>",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             throw new ExternalServiceException("TorrentLeech did not confirm the account login; check credentials, 2FA or site challenge");
         return new Session(CookieHeader(jar), DateTimeOffset.UtcNow.AddMinutes(20));
     }
