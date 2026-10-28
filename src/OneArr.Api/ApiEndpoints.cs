@@ -1207,8 +1207,11 @@ public static class ApiEndpoints
     // deadline. Every item always yields a result: the gate wait sits INSIDE the per-item
     // handler, so a batch-deadline expiry while tests are queued reports those tests as
     // skipped instead of faulting Task.WhenAll — and the gate is only released when it was
-    // actually acquired. Failure-path health writes are best-effort: a dead database must
-    // not turn a per-item result into a fault.
+    // actually acquired. Timeout classification uses the item deadline token, not the
+    // exception type or its casing, because the shared retry helper converts
+    // cancellation into ExternalServiceException("Timed out talking to ...").
+    // Failure-path health writes are best-effort: a dead database must not turn a
+    // per-item result into a fault.
     internal static async Task<(string Kind, int Id, string Name, bool Ok, string Detail)[]> TestAllCoreAsync(
         IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient,
         TimeSpan batchTimeout, CancellationToken ct)
@@ -1225,6 +1228,7 @@ public static class ApiEndpoints
         {
             var acquired = false;
             var started = false;
+            CancellationToken itemToken = default;
             try
             {
                 await gate.WaitAsync(batchCt);
@@ -1232,6 +1236,7 @@ public static class ApiEndpoints
                 started = true;
                 using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
                 itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                itemToken = itemCts.Token;
                 var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name, indexer.BaseUrl, indexer.ApiKey, itemCts.Token);
                 // A fresh context per item: DbContext is not thread-safe across concurrent tests.
                 await using var hc = await db.CreateDbContextAsync(batchCt);
@@ -1240,9 +1245,17 @@ public static class ApiEndpoints
             }
             catch (Exception ex)
             {
-                var detail = ex is OperationCanceledException
-                    ? started ? $"Indexer '{indexer.Name}' timed out." : $"Indexer '{indexer.Name}' skipped: batch deadline reached before the test started."
-                    : OutboundHttp.Redact(ex.Message);
+                // Timeout classification uses deadline state, not exception type or text:
+                // the shared retry helper converts cancellation into
+                // ExternalServiceException("Timed out talking to ..."), so checking for
+                // OperationCanceledException alone misses real timeouts. A started item
+                // whose deadline token fired timed out; a started item with a live token
+                // failed genuinely; a queued item never started and was skipped.
+                var detail = !started
+                    ? $"Indexer '{indexer.Name}' skipped: batch deadline reached before the test started."
+                    : itemToken.IsCancellationRequested
+                        ? $"Indexer '{indexer.Name}' timed out."
+                        : OutboundHttp.Redact(ex.Message);
                 try
                 {
                     await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
@@ -1258,6 +1271,7 @@ public static class ApiEndpoints
         {
             var acquired = false;
             var started = false;
+            CancellationToken itemToken = default;
             try
             {
                 await gate.WaitAsync(batchCt);
@@ -1265,6 +1279,7 @@ public static class ApiEndpoints
                 started = true;
                 using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
                 itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                itemToken = itemCts.Token;
                 var (ok, detail, _, _) = await TestQbitAsync(downloadClient, client, itemCts.Token);
                 // A fresh context per item: DbContext is not thread-safe across concurrent tests.
                 await using var hc = await db.CreateDbContextAsync(batchCt);
@@ -1273,9 +1288,14 @@ public static class ApiEndpoints
             }
             catch (Exception ex)
             {
-                var detail = ex is OperationCanceledException
-                    ? started ? $"Download client '{client.Name}' timed out." : $"Download client '{client.Name}' skipped: batch deadline reached before the test started."
-                    : OutboundHttp.Redact(ex.Message);
+                // Same deadline-state classification as indexers: the retry helper turns
+                // cancellation into ExternalServiceException, so the token — not the
+                // exception type or its casing — decides timeout vs genuine failure.
+                var detail = !started
+                    ? $"Download client '{client.Name}' skipped: batch deadline reached before the test started."
+                    : itemToken.IsCancellationRequested
+                        ? $"Download client '{client.Name}' timed out."
+                        : OutboundHttp.Redact(ex.Message);
                 try
                 {
                     await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
