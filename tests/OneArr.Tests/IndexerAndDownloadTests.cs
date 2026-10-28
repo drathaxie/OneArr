@@ -117,6 +117,109 @@ public class QBittorrentClientTests
         Assert.DoesNotContain(log, l => l.Contains("delete", StringComparison.OrdinalIgnoreCase));
     }
 
+    // Regression for a real Test-button failure: qBittorrent's Execution Log
+    // showed successful WebAPI logins, yet the Test button reported a login
+    // failure. The old LoginAsync collapsed every unexpected login shape
+    // into "check the username and password", and threw on "Ok." with no
+    // SID before ever trying torrents/info. These tests use ListAsync only
+    // (the read-only Test path); none of them adds, pauses, or deletes a
+    // torrent, and none asserts on a cookie value, a password, or a full
+    // response body, because those must never leak into an error message.
+    [Fact]
+    public async Task LoginOkWithoutSidAndInfoSucceeds_ListSucceeds()
+    {
+        // Bypass (localhost / whitelisted subnet) or a production HTTP
+        // handler that consumed Set-Cookie: login is "Ok.", no SID is
+        // visible, and the authenticated listing still succeeds. That
+        // listing, not the cookie alone, is the proof the connection works.
+        var handler = new FakeHandler(req =>
+            req.RequestUri!.AbsolutePath == "/api/v2/auth/login"
+                ? FakeHandler.Text("Ok.", contentType: "text/plain")
+                : FakeHandler.Text("[]"));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var items = await client.ListAsync(Config, "onearr-movies", CancellationToken.None);
+        Assert.Empty(items);
+        var info = handler.Requests.Single(r => r.RequestUri!.AbsolutePath == "/api/v2/torrents/info");
+        Assert.False(info.Headers.TryGetValues("Cookie", out var cookies) && cookies.Any(c => c.Contains("SID=")));
+    }
+
+    [Fact]
+    public async Task LoginOkWithoutSidAndInfoForbidden_ReportsPostLogin403NotCredentials()
+    {
+        var handler = new FakeHandler(req =>
+            req.RequestUri!.AbsolutePath == "/api/v2/auth/login"
+                ? FakeHandler.Text("Ok.", contentType: "text/plain")
+                : FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden, "text/plain"));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("HTTP 403", ex.Message);
+        Assert.Contains("no session cookie", ex.Message);
+        Assert.Contains("not a username/password failure", ex.Message);
+        Assert.DoesNotContain("Check the username and password in Settings.", ex.Message);
+        // The re-login retry is why the server log shows two successful
+        // logins for one failed Test: login, info 403, login, info 403.
+        Assert.Equal(4, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task SidLoginThenInfoForbidden_ReportsPostLogin403NotCredentials()
+    {
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v2/auth/login")
+            {
+                var r = FakeHandler.Text("Ok.", contentType: "text/plain");
+                r.Headers.Add("Set-Cookie", "SID=fakesid123; HttpOnly; path=/");
+                return r;
+            }
+            return FakeHandler.Text("Forbidden", HttpStatusCode.Forbidden, "text/plain");
+        });
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("HTTP 403 after re-login", ex.Message);
+        Assert.Contains("not a username/password failure", ex.Message);
+        Assert.Contains("host-header", ex.Message);
+        Assert.DoesNotContain("fakesid123", ex.Message);
+        Assert.DoesNotContain("Check the username and password in Settings.", ex.Message);
+    }
+
+    [Fact]
+    public async Task Login403_ReportsIpBanNotCredentials()
+    {
+        // Documented WebUI API shape: 403 on login is an IP ban after too
+        // many failed attempts, not a per-attempt credential verdict.
+        var handler = new FakeHandler(_ => FakeHandler.Text("Fails.", HttpStatusCode.Forbidden, "text/plain"));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("HTTP 403", ex.Message);
+        Assert.Contains("banned", ex.Message);
+        Assert.DoesNotContain("Check the username and password in Settings.", ex.Message);
+    }
+
+    [Fact]
+    public async Task Login200Fails_StillReportsCredentials()
+    {
+        // The one shape that really is a credential failure must keep its
+        // original message; distinguishing the others must not weaken this.
+        var handler = new FakeHandler(_ => FakeHandler.Text("Fails.", contentType: "text/plain"));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("Check the username and password in Settings.", ex.Message);
+    }
+
+    [Fact]
+    public async Task Login200UnexpectedBody_ReportsUnexpectedNotCredentialsAndDoesNotLeakBody()
+    {
+        const string body = "<html>not-qbittorrent</html>";
+        var handler = new FakeHandler(_ => FakeHandler.Text(body, contentType: "text/html"));
+        var client = new QBittorrentClient(new FakeFactory(handler));
+        var ex = await Assert.ThrowsAsync<ExternalServiceException>(() => client.ListAsync(Config, "onearr-movies", CancellationToken.None));
+        Assert.Contains("unexpected body", ex.Message);
+        Assert.Contains("not treated as a username/password failure", ex.Message);
+        Assert.DoesNotContain(body, ex.Message);
+        Assert.DoesNotContain("Check the username and password in Settings.", ex.Message);
+    }
+
     [Fact]
     public void StateMappingAndMagnetHashParsing()
     {
