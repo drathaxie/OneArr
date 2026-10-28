@@ -147,8 +147,9 @@ public sealed class NativeTrackerClient
             var fields = HiddenFields(html);
             fields["username"] = config.Username;
             fields["password"] = config.Password;
-            if (!string.IsNullOrWhiteSpace(config.Alt2FaToken))
-                fields["alt2FAToken"] = config.Alt2FaToken;
+            // TorrentLeech's form includes alt2FAToken even when account 2FA
+            // is disabled. The empty value is intentional.
+            fields["alt2FAToken"] = config.Alt2FaToken;
             using var form = new FormUrlEncodedContent(fields);
             using var posted = await RequestAsync(http, baseUri, "user/account/login/",
                 HttpMethod.Post, CookieHeader(jar), form, ct);
