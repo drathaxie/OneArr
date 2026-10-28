@@ -305,6 +305,7 @@ function IndexersSection() {
   const [suggestedName, setSuggestedName] = useState("");
   const [suggestedUrl, setSuggestedUrl] = useState("");
   const [suggestedNativeId, setSuggestedNativeId] = useState("");
+  const [suggestedProtocol, setSuggestedProtocol] = useState<"rss" | "torznab">("torznab");
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -357,10 +358,11 @@ function IndexersSection() {
       <h2>Indexers</h2>
       <div className="card" id="indexers-list">
         <div className="row spread">
-          <h2>Indexers (Torznab / Newznab)</h2>
+          <h2>Indexers (Torznab / RSS)</h2>
           <div className="row">
             <button onClick={() => setShowCatalog(true)}>Browse tracker catalog</button>
-            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setSuggestedNativeId(""); setEditing("new"); }}>Add indexer</button>
+            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setSuggestedNativeId(""); setSuggestedProtocol("rss"); setEditing("new"); }}>Add RSS feed</button>
+            <button onClick={() => { setSuggestedName(""); setSuggestedUrl(""); setSuggestedNativeId(""); setSuggestedProtocol("torznab"); setEditing("new"); }}>Add indexer</button>
             <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
           </div>
         </div>
@@ -387,7 +389,7 @@ function IndexersSection() {
             <div key={i.id} className="manage-row">
               <div>
                 <div className="manage-name">{i.name}</div>
-                <div className="muted">{i.host} · {i.protocol} · priority {i.priority} · {i.moviesEnabled ? "movies" : "no movies"} · {i.tvEnabled ? "TV" : "no TV"} · key {i.hasKey ? "configured" : "not set"}</div>
+                <div className="muted">{i.host} · {i.protocol} · priority {i.priority} · {i.moviesEnabled ? "movies" : "no movies"} · {i.tvEnabled ? "TV" : "no TV"} · {i.protocol === "RSS" || i.protocol === "Nyaa RSS" ? "no API key" : `key ${i.hasKey ? "configured" : "not set"}`}</div>
               </div>
               <div>
                 <span className={i.healthStatus === "Healthy" ? "badge ok" : i.healthStatus === "Failed" ? "badge bad" : "badge"}>{i.healthStatus}</span>
@@ -412,18 +414,20 @@ function IndexersSection() {
         </div>
       </div>
       {showCatalog && <TrackerCatalog onClose={() => setShowCatalog(false)}
-        onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setSuggestedNativeId(""); setShowCatalog(false); setEditing("new"); }}
-        onNative={(name, url, trackerId) => { setSuggestedName(name); setSuggestedUrl(url); setSuggestedNativeId(trackerId); setShowCatalog(false); setEditing("new"); }} />}
-      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} suggestedNativeId={suggestedNativeId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+        onGeneric={(name, url) => { setSuggestedName(name); setSuggestedUrl(url ?? ""); setSuggestedNativeId(""); setSuggestedProtocol("torznab"); setShowCatalog(false); setEditing("new"); }}
+        onNative={(name, url, trackerId) => { setSuggestedName(name); setSuggestedUrl(url); setSuggestedNativeId(trackerId); setSuggestedProtocol("torznab"); setShowCatalog(false); setEditing("new"); }} />}
+      {editing && <IndexerDialog initial={editing === "new" ? null : editing} suggestedName={suggestedName} suggestedUrl={suggestedUrl} suggestedNativeId={suggestedNativeId} suggestedProtocol={suggestedProtocol} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; suggestedUrl?: string; suggestedNativeId?: string; onClose: () => void; onSaved: () => void }) {
+function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId, suggestedProtocol, onClose, onSaved }: { initial: Indexer | null; suggestedName?: string; suggestedUrl?: string; suggestedNativeId?: string; suggestedProtocol?: "rss" | "torznab"; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initial?.name ?? suggestedName ?? "");
   const [url, setUrl] = useState(initial?.baseUrl ?? suggestedUrl ?? "");
   const [key, setKey] = useState("");
   const nativeId = initial?.protocol === "TorrentLeech" ? "torrentleech" : suggestedNativeId ?? "";
+  const [protocol, setProtocol] = useState<"rss" | "torznab">(
+    initial?.protocol === "RSS" ? "rss" : suggestedProtocol ?? "torznab");
   const [trackerUsername, setTrackerUsername] = useState("");
   const [trackerPassword, setTrackerPassword] = useState("");
   const [trackerAlt2fa, setTrackerAlt2fa] = useState("");
@@ -447,8 +451,8 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
         trackerId: nativeId, baseUrl: url,
         trackerSettings: { username: trackerUsername, password: trackerPassword, alt2fatoken: trackerAlt2fa },
       } : initial
-        ? { service: "torznab", indexerId: initial.id, baseUrl: url, apiKey: key }
-        : { service: "torznab", baseUrl: url, apiKey: key };
+        ? { service: "torznab", indexerId: initial.id, baseUrl: url, apiKey: protocol === "rss" ? "" : key, protocol }
+        : { service: "torznab", baseUrl: url, apiKey: protocol === "rss" ? "" : key, protocol };
       setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
     }
     catch (x) { setErr((x as Error).message); }
@@ -458,8 +462,9 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
   async function save() {
     setErr(null); setBusy(true);
     try {
-      const body = { name, baseUrl: url, apiKey: nativeId ? "" : key,
+      const body = { name, baseUrl: url, apiKey: nativeId || protocol === "rss" ? "" : key,
         enabled, moviesEnabled: movies, tvEnabled: tv, priority,
+        protocol: nativeId ? undefined : protocol,
         ...(nativeId ? { trackerId: nativeId,
           trackerSettings: { username: trackerUsername, password: trackerPassword, alt2fatoken: trackerAlt2fa } } : {}) };
       if (initial) await api("PUT", `/api/indexers/${initial.id}`, body);
@@ -475,13 +480,19 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
         <h2>{initial ? "Edit indexer" : "Add indexer"}</h2>
         <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
-          <label>URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://indexer.example/api" required /></label>
+          {!nativeId && <label>Protocol<select aria-label="Indexer protocol" value={protocol} onChange={e => setProtocol(e.target.value as "rss" | "torznab")}>
+            <option value="torznab">Torznab / Newznab (API)</option>
+            <option value="rss">Public RSS / Atom feed (no API key)</option>
+          </select></label>}
+          <label>{protocol === "rss" && !nativeId ? "RSS feed URL" : "URL"}<input value={url} onChange={(e) => setUrl(e.target.value)}
+            placeholder={protocol === "rss" && !nativeId ? "https://example.org/rss.xml" : "https://indexer.example/api"} required /></label>
           {nativeId === "torrentleech" ? <>
             <p className="muted">TorrentLeech native login. Fields are encrypted on the server and never returned to the browser.</p>
             <label>Username<input autoComplete="off" value={trackerUsername} onChange={e => setTrackerUsername(e.target.value)} placeholder={initial ? "Leave blank to preserve stored username" : "Account username"} required={!initial} /></label>
             <label>Password<input type="password" autoComplete="new-password" value={trackerPassword} onChange={e => setTrackerPassword(e.target.value)} placeholder={initial ? "Leave blank to preserve stored password" : "Account password"} required={!initial} /></label>
             <label>Alternate 2FA token (optional)<input type="password" autoComplete="off" value={trackerAlt2fa} onChange={e => setTrackerAlt2fa(e.target.value)} placeholder={initial ? "Leave blank to preserve stored value" : "From your tracker profile"} /></label>
-          </> : <label>API key<input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? "Leave blank to keep the stored key" : "API key"} /></label>}
+          </> : protocol === "rss" ? <p className="muted">RSS has no API key. OneArr reads recent releases from the feed and filters locally; historical search is not supported. Entries must contain torrent/magnet links and sizes to be eligible for grabbing.</p>
+          : <label>API key<input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? "Leave blank to keep the stored key" : "API key"} /></label>}
           <label className="inline"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> enabled</label>
           <label className="inline"><input type="checkbox" checked={movies} onChange={(e) => setMovies(e.target.checked)} /> movies</label>
           <label className="inline"><input type="checkbox" checked={tv} onChange={(e) => setTv(e.target.checked)} /> TV</label>
