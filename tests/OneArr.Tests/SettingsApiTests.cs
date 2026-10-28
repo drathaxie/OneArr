@@ -118,6 +118,35 @@ public class SettingsApiTests
     }
 
     [Fact]
+    public async Task RenamePolicyDefaultsOffAndInvalidTemplateIsRejectedAtomically()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(initial.GetProperty("renameOnImport").GetBoolean());
+        Assert.Contains("{Title}", initial.GetProperty("movieNamingTemplate").GetString());
+
+        var invalid = await client.PutAsJsonAsync("/api/settings", new {
+            renameOnImport = true, dryRunImport = false, movieNamingTemplate = "{Title}/../../evil"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var afterInvalid = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(afterInvalid.GetProperty("renameOnImport").GetBoolean());
+        Assert.True(afterInvalid.GetProperty("dryRunImport").GetBoolean());
+
+        var saved = await client.PutAsJsonAsync("/api/settings", new {
+            renameOnImport = true, movieNamingTemplate = "{Title} - {Year}",
+            seriesNamingTemplate = "{Title} - S{Season:00}E{Episode:00}"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.True(result.GetProperty("renameOnImport").GetBoolean());
+        Assert.Equal("{Title} - {Year}", result.GetProperty("movieNamingTemplate").GetString());
+        Assert.True(result.GetProperty("dryRunImport").GetBoolean(),
+            "Enabling naming must not enable automatic imports or disable dry-run.");
+    }
+
+    [Fact]
     public async Task TmdbKeyIsStoredButNeverReturned()
     {
         using var factory = new ApiFactory();
