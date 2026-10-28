@@ -30,6 +30,9 @@ public sealed class NativeTrackerClient
         _secrets = secrets;
     }
 
+    public static Uri ValidateSiteUrl(string url) => ValidateBase(url);
+    public void Invalidate(int id) => _sessions.TryRemove(id, out _);
+
     private static Uri ValidateBase(string url)
     {
         var uri = UrlGuard.RequireServiceUrl(url);
