@@ -25,6 +25,7 @@ public static class ApiEndpoints
     public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
         string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
+    public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
@@ -475,6 +476,51 @@ public static class ApiEndpoints
             var h = await c.DownloadClientHealth.FindAsync([id], ct);
             if (h is not null) c.DownloadClientHealth.Remove(h);
             await c.SaveChangesAsync(ct);
+            return Results.NoContent();
+        });
+
+        // Download-client remote path mappings are independent of legacy media-library
+        // migration mappings. One source/destination prefix per client for now.
+        api.MapGet("/download-clients/{id:int}/path-mapping", async (int id,
+            IDbContextFactory<OneArrDbContext> db, SettingsStore settings, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            if (!await c.DownloadClients.AnyAsync(d => d.Id == id, ct)) return Results.NotFound();
+            var json = await settings.GetAsync(DownloadPathMapper.SettingsKey(id), ct);
+            return Results.Ok(new { mapping = json is null ? null : DownloadPathMapper.Read(json) });
+        });
+
+        api.MapPut("/download-clients/{id:int}/path-mapping", async (int id,
+            DownloadPathMapping rule, IDbContextFactory<OneArrDbContext> db,
+            SettingsStore settings, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            if (!await c.DownloadClients.AnyAsync(d => d.Id == id, ct)) return Results.NotFound();
+            var torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct) ?? "";
+            DownloadPathMapper.Validate(rule, torrentRoot);
+            await settings.SetAsync(DownloadPathMapper.SettingsKey(id), DownloadPathMapper.Serialize(rule), ct);
+            return Results.Ok(rule);
+        });
+
+        api.MapPost("/download-clients/{id:int}/path-mapping/preview", async (int id,
+            DownloadPathPreviewBody body, IDbContextFactory<OneArrDbContext> db,
+            SettingsStore settings, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            if (!await c.DownloadClients.AnyAsync(d => d.Id == id, ct)) return Results.NotFound();
+            var torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct) ?? "";
+            var local = DownloadPathMapper.Map(new DownloadPathMapping(
+                body.RemotePrefix, body.LocalPrefix), body.ReportedPath, torrentRoot);
+            return Results.Ok(new { reportedPath = body.ReportedPath, localPath = local,
+                exists = File.Exists(local) || Directory.Exists(local), applied = false });
+        });
+
+        api.MapDelete("/download-clients/{id:int}/path-mapping", async (int id,
+            IDbContextFactory<OneArrDbContext> db, SettingsStore settings, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            if (!await c.DownloadClients.AnyAsync(d => d.Id == id, ct)) return Results.NotFound();
+            await settings.SetAsync(DownloadPathMapper.SettingsKey(id), null, ct);
             return Results.NoContent();
         });
 
