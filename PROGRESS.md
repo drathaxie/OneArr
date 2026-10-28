@@ -1154,6 +1154,22 @@ Jesse's review found three defects; all fixed on the same branch, no merge/tag/r
   diff holds the features, not duplicate responsive-layout changes. Fresh fully
   green Linux + Windows CI is required before PR #10 merges.
 
+## PR #10 sync onto merged main (2026-10-27, after PR #9 merged as 8d9e2e0)
+
+- Head 3042795 CI failed on both platforms in the backend test steps (failing test
+  names are not visible unauthenticated — job logs need repo access). Re-reading the
+  new deadline test found a real, deterministic bug in it: the slow fake used
+  Thread.Sleep, which blocks the enumerating thread during task startup, so only
+  one item ever started before the 150 ms deadline (actual outcome 1 timed out +
+  5 skipped, not the asserted 4 + 2). Fixed with an async delay handler that
+  yields, so all six items start, four acquire the gate and time out, two queue
+  and are skipped — the asserted outcome, deterministically.
+- Sync: branch rebuilt from new main 8d9e2e0 (tree-identical to aa1638b) by
+  cherry-picking the feature commit, the review-fixes commit, and the deadline-test
+  fix; the aa1638b correction commit is dropped. Final diff vs main verified to
+  hold only the indexer/client features (no settings-overview-grid or toolbar-cap
+  hunks from the correction).
+
 ## Next
 
 0. Library: check that the Windows CI job ran `LibraryWindowsTests`, then preview a real library folder before applying.

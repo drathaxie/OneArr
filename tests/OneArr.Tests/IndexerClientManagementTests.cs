@@ -32,9 +32,9 @@ public class IndexerClientManagementTests
     private sealed class StubApiFactory : WebApplicationFactory<Program>
     {
         public string ConfigDir { get; }
-        private readonly RoutingHandler _routing;
+        private readonly HttpMessageHandler _routing;
 
-        public StubApiFactory(RoutingHandler routing)
+        public StubApiFactory(HttpMessageHandler routing)
         {
             _routing = routing;
             ConfigDir = Path.Combine(Path.GetTempPath(), "onearr-mgmt-" + Guid.NewGuid().ToString("N"));
@@ -599,16 +599,23 @@ public class IndexerClientManagementTests
         Assert.Equal("Not tested", listed.RootElement[0].GetProperty("healthStatus").GetString());
     }
 
+    /// <summary>Slow caps handler that yields instead of blocking: a blocking handler
+    /// would serialize task startup on the enumerating thread, so only one item would
+    /// ever start before the batch deadline. The delay observes the request token, so
+    /// started items cancel promptly at the deadline either way.</summary>
+    private sealed class SlowCapsHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return FakeHandler.Text(CapsXml, contentType: "application/xml");
+        }
+    }
+
     [Fact]
     public async Task Test_all_batch_deadline_reports_skipped_and_timed_out_instead_of_failing()
     {
-        var routing = new RoutingHandler();
-        routing.Route("slow.test", req =>
-        {
-            System.Threading.Thread.Sleep(5000);
-            return FakeHandler.Text(CapsXml, contentType: "application/xml");
-        });
-        using var factory = new StubApiFactory(routing);
+        using var factory = new StubApiFactory(new SlowCapsHandler());
         await using (var db = factory.Services.GetRequiredService<IDbContextFactory<OneArrDbContext>>().CreateDbContext())
         {
             for (var i = 0; i < 6; i++)
