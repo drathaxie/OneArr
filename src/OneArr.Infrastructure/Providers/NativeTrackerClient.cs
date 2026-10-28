@@ -226,7 +226,10 @@ public sealed class NativeTrackerClient
             throw new ExternalServiceException($"TorrentLeech search returned HTTP {(int)response.StatusCode}");
         var data = await response.Content.ReadAsStringAsync(ct);
         if (data.Length > 8_000_000) throw new ExternalServiceException("TorrentLeech search response too large");
-        return ParseSearch(data, indexer.Name);
+        var origin = ValidateBase(indexer.BaseUrl);
+        return ParseSearch(data, indexer.Name)
+            .Select(item => item with { Link = new Uri(origin, item.Link).AbsoluteUri })
+            .ToList();
     }
 
     public static IReadOnlyList<ReleaseCandidate> ParseSearch(string data, string indexerName)
