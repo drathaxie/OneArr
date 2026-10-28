@@ -42,6 +42,14 @@ public static class DownloadPathMapper
             .Aggregate(local, (path, segment) => Path.Combine(path, segment));
         result = Path.GetFullPath(result);
         // Avoid reparse-point / junction traversal; SafeImporter also checks again at apply.
+        var configured = Path.GetFullPath(torrentRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (string.Equals(result.TrimEnd(Path.DirectorySeparatorChar), configured, comparison))
+        {
+            SafeImporter.RequireNoLinksBelow(torrentRoot, Path.Combine(result, "__onearr_path_check__"));
+            return configured;
+        }
         SafeImporter.RequireNoLinksBelow(torrentRoot, result);
         return SafeImporter.CanonicalUnder(torrentRoot, result);
     }
