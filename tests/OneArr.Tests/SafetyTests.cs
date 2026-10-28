@@ -55,6 +55,29 @@ public sealed class TempTree : IDisposable
     }
 }
 
+public class CopySpaceGuardTests
+{
+    [Fact]
+    public void UsesBoundedSafetyReserveAndNeverAcceptsTooLittleCapacity()
+    {
+        Assert.Equal(16L * 1024 * 1024, CopySpaceGuard.RequiredBytes(0));
+        Assert.Equal(16L * 1024 * 1024 + 1024, CopySpaceGuard.RequiredBytes(1024));
+        Assert.False(CopySpaceGuard.HasEnoughSpace(100, 1024));
+        Assert.True(CopySpaceGuard.HasEnoughSpace(CopySpaceGuard.RequiredBytes(1024), 1024));
+        Assert.Equal(long.MaxValue, CopySpaceGuard.RequiredBytes(long.MaxValue));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CopySpaceGuard.RequiredBytes(-1));
+    }
+
+    [Fact]
+    public void ReportsFreeSpaceOfExistingTempVolumeWithoutCreatingAnything()
+    {
+        using var tree = new TempTree();
+        var destination = Path.Combine(tree.Media, "New Movie", "movie.mkv");
+        Assert.Null(CopySpaceGuard.CopyProblem(destination, 1));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(destination)));
+    }
+}
+
 public class SafeImporterTests
 {
     private readonly SafeImporter _importer = new(TimeSpan.Zero);
