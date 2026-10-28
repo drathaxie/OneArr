@@ -69,7 +69,8 @@ public sealed record ReleaseCandidate(
     int Seeders,
     string? InfoHash,
     string Indexer,
-    IReadOnlyList<int> Categories);
+    IReadOnlyList<int> Categories,
+    DateTimeOffset? PublishDateUtc = null);
 
 public sealed record ParsedRelease(
     string Title,

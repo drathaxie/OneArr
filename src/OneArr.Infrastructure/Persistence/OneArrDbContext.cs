@@ -12,6 +12,7 @@ public class OneArrDbContext : DbContext
     public DbSet<Episode> Episodes => Set<Episode>();
     public DbSet<QualityProfile> QualityProfiles => Set<QualityProfile>();
     public DbSet<IndexerConfig> Indexers => Set<IndexerConfig>();
+    public DbSet<IndexerHealth> IndexerHealth => Set<IndexerHealth>();
     public DbSet<DownloadClientConfig> DownloadClients => Set<DownloadClientConfig>();
     public DbSet<DownloadJob> DownloadJobs => Set<DownloadJob>();
     public DbSet<DownloadClientHealth> DownloadClientHealth => Set<DownloadClientHealth>();
@@ -64,6 +65,11 @@ public class OneArrDbContext : DbContext
         b.Entity<DownloadClientHealth>(e =>
         {
             e.HasKey(x => x.DownloadClientId);
+        });
+
+        b.Entity<IndexerHealth>(e =>
+        {
+            e.HasKey(x => x.IndexerId);
         });
 
         b.Entity<ImportPreview>(e =>

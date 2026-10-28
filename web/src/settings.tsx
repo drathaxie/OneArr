@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type ConnectionTestResult, type QualityProfile, type SettingsData } from "./api";
+import { api, type ConnectionTestResult, type DownloadClient, type Indexer, type QualityProfile, type SettingsData } from "./api";
 import { ErrorLine, useLoad } from "./common";
 import { LibraryPanel, RootFolderTool } from "./library";
 import { Migration } from "./migration";
@@ -25,13 +25,11 @@ const CATEGORIES: Category[] = [
     { id: "profiles-list", label: "Quality profiles" },
     { id: "profiles-defaults", label: "Default profiles" },
   ] },
-  { id: "indexers", label: "Indexers", description: "Torznab / Newznab indexers and their connection tests.", subsections: [
+  { id: "indexers", label: "Indexers", description: "Torznab / Newznab indexers, their priorities and media types, and their connection tests.", subsections: [
     { id: "indexers-list", label: "Indexers" },
-    { id: "indexers-tests", label: "Connection tests", advanced: true },
   ] },
   { id: "clients", label: "Download Clients", description: "qBittorrent clients, their categories, and connection tests.", subsections: [
     { id: "clients-list", label: "Download clients" },
-    { id: "clients-tests", label: "Connection tests", advanced: true },
   ] },
   { id: "metadata", label: "Metadata", description: "TMDb configuration and its connection test.", subsections: [
     { id: "metadata-tmdb", label: "TMDb" },
@@ -101,14 +99,14 @@ export function Settings() {
           </div>
         ))}
         <button className="nav" aria-pressed={advanced} onClick={() => setAdvancedMode(!advanced)}>{advanced ? "Hide Advanced" : "Show Advanced"}</button>
-        {!advanced && <p className="muted">Advanced items (path mappings, connection tests) are hidden.</p>}
+        {!advanced && <p className="muted">Advanced items (path mappings, metadata connection tests) are hidden.</p>}
       </aside>
       <div className="settings-content">
         {section === "overview" && <Overview advanced={advanced} />}
         {section === "media" && <MediaSection advanced={advanced} />}
         {section === "profiles" && <ProfilesSection />}
-        {section === "indexers" && <IndexersSection advanced={advanced} />}
-        {section === "clients" && <ClientsSection advanced={advanced} />}
+        {section === "indexers" && <IndexersSection />}
+        {section === "clients" && <ClientsSection />}
         {section === "metadata" && <MetadataSection advanced={advanced} />}
         {section === "automation" && <AutomationSection />}
         {section === "migration" && <div id="migration-import"><Migration /></div>}
@@ -294,81 +292,369 @@ function ProfileForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function IndexersSection({ advanced }: { advanced: boolean }) {
-  const { data: indexers, reload: reloadIndexers } = useLoad<any[]>("/api/indexers");
+function IndexersSection() {
+  const { data: indexers, error, reload } = useLoad<Indexer[]>("/api/indexers");
+  const [query, setQuery] = useState("");
+  const [enabledFilter, setEnabledFilter] = useState("all");
+  const [healthFilter, setHealthFilter] = useState("all");
+  const [sort, setSort] = useState("priority");
+  const [editing, setEditing] = useState<Indexer | "new" | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const list = (indexers ?? []).filter((i) =>
+    (query === "" || i.name.toLowerCase().includes(query.toLowerCase()) || i.host.toLowerCase().includes(query.toLowerCase())) &&
+    (enabledFilter === "all" || (enabledFilter === "enabled" ? i.enabled : !i.enabled)) &&
+    (healthFilter === "all" || i.healthStatus === healthFilter));
+  list.sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : sort === "health" ? a.healthStatus.localeCompare(b.healthStatus) : (a.priority - b.priority) || (a.id - b.id));
+
+  async function testRow(i: Indexer) {
+    setBusy(`indexer-${i.id}`); setMessage(null);
+    try {
+      const res = await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "torznab", indexerId: i.id });
+      setTestResult(res.detail);
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function testAll() {
+    setBusy("all"); setMessage(null);
+    try {
+      const res = await api<{ results: { kind: string; name: string; ok: boolean; detail: string }[]; tested: number; passed: number }>("POST", "/api/connections/test-all");
+      setTestResult(`Tested ${res.tested}, passed ${res.passed}. ` + res.results.map((r) => `${r.name}: ${r.ok ? "ok" : r.detail}`).join(" · "));
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function toggleEnabled(i: Indexer) {
+    setBusy(`toggle-${i.id}`); setMessage(null);
+    try {
+      await api("PUT", `/api/indexers/${i.id}`, { name: i.name, baseUrl: i.baseUrl, apiKey: "", enabled: !i.enabled, moviesEnabled: i.moviesEnabled, tvEnabled: i.tvEnabled, priority: i.priority });
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function remove(i: Indexer) {
+    setBusy(`delete-${i.id}`); setMessage(null);
+    try { await api("DELETE", `/api/indexers/${i.id}`); setConfirmDelete(null); reload(); }
+    catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
   return (
     <>
       <h2>Indexers</h2>
       <div className="card" id="indexers-list">
-        <h2>Indexers (Torznab / Newznab)</h2>
-        <p className="muted">Keys are stored server-side and never shown again.</p>
-        <ul>{indexers?.map((i) => <li key={i.id} className="row spread">{i.name} <span className="muted">{i.baseUrl}</span> <button className="small danger" onClick={async () => { await api("DELETE", `/api/indexers/${i.id}`); reloadIndexers(); }}>Delete</button></li>)}</ul>
-        <IndexerForm onCreated={reloadIndexers} />
+        <div className="row spread">
+          <h2>Indexers (Torznab / Newznab)</h2>
+          <div className="row">
+            <button onClick={() => setEditing("new")}>Add indexer</button>
+            <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
+          </div>
+        </div>
+        <p className="muted">Keys are stored server-side and never shown again. Lower priority is searched first; equal priorities fall back to order added. Tests are read-only and update only that indexer's health.</p>
+        <div className="row">
+          <input aria-label="Filter indexers" placeholder="Filter by name or host" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select aria-label="Enabled filter" value={enabledFilter} onChange={(e) => setEnabledFilter(e.target.value)}>
+            <option value="all">All states</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option>
+          </select>
+          <select aria-label="Health filter" value={healthFilter} onChange={(e) => setHealthFilter(e.target.value)}>
+            <option value="all">All health</option><option value="Healthy">Healthy</option><option value="Failed">Failed</option><option value="Not tested">Not tested</option><option value="Disabled">Disabled</option>
+          </select>
+          <select aria-label="Sort indexers" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="priority">Sort: priority</option><option value="name">Sort: name</option><option value="health">Sort: health</option>
+          </select>
+        </div>
+        <ErrorLine message={error} />
+        <ErrorLine message={message} />
+        {testResult && <p className="muted">{testResult}</p>}
+        {indexers === null && <p className="muted">Loading…</p>}
+        {indexers !== null && list.length === 0 && <p className="muted">No indexers match. Add one to search it.</p>}
+        <div className="manage-list">
+          {list.map((i) => (
+            <div key={i.id} className="manage-row">
+              <div>
+                <div className="manage-name">{i.name}</div>
+                <div className="muted">{i.host} · {i.protocol} · priority {i.priority} · {i.moviesEnabled ? "movies" : "no movies"} · {i.tvEnabled ? "TV" : "no TV"} · key {i.hasKey ? "configured" : "not set"}</div>
+              </div>
+              <div>
+                <span className={i.healthStatus === "Healthy" ? "badge ok" : i.healthStatus === "Failed" ? "badge bad" : "badge"}>{i.healthStatus}</span>
+                <div className="muted">{i.lastTestedAt ? `tested ${new Date(i.lastTestedAt).toLocaleString()}` : "never tested"}</div>
+                {i.lastError && <div className="error">{i.lastError}</div>}
+              </div>
+              <div className="manage-actions">
+                <button className="small" disabled={busy !== null} onClick={() => testRow(i)}>{busy === `indexer-${i.id}` ? "Testing…" : "Test"}</button>
+                <button className="small" onClick={() => setEditing(i)}>Edit</button>
+                <button className="small" disabled={busy !== null} onClick={() => toggleEnabled(i)}>{i.enabled ? "Disable" : "Enable"}</button>
+                {confirmDelete === i.id ? (
+                  <>
+                    <button className="small danger" disabled={busy !== null} onClick={() => remove(i)}>Confirm delete</button>
+                    <button className="small" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                  </>
+                ) : (
+                  <button className="small danger" onClick={() => setConfirmDelete(i.id)}>Delete</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div id="indexers-tests">{advanced ? <ConnectionTests scope="indexers" indexers={indexers ?? []} clients={[]} /> : <p className="muted">Connection tests are an advanced item. Use Show Advanced in the sidebar to reveal them.</p>}</div>
+      {editing && <IndexerDialog initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function IndexerForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
+function IndexerDialog({ initial, onClose, onSaved }: { initial: Indexer | null; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [url, setUrl] = useState(initial?.baseUrl ?? "");
   const [key, setKey] = useState("");
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [movies, setMovies] = useState(initial?.moviesEnabled ?? true);
+  const [tv, setTv] = useState(initial?.tvEnabled ?? true);
+  const [priority, setPriority] = useState(initial?.priority ?? 0);
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  async function testUnsaved() {
+    setTesting(true); setErr(null);
+    try {
+      // Editing: pass the saved record's id so the server reuses the stored key
+      // when the field is blank, while still testing the form's unsaved URL.
+      // Override tests never rewrite health and never return the secret.
+      const body = initial
+        ? { service: "torznab", indexerId: initial.id, baseUrl: url, apiKey: key }
+        : { service: "torznab", baseUrl: url, apiKey: key };
+      setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
+    }
+    catch (x) { setErr((x as Error).message); }
+    finally { setTesting(false); }
+  }
+
+  async function save() {
+    setErr(null); setBusy(true);
+    try {
+      const body = { name, baseUrl: url, apiKey: key, enabled, moviesEnabled: movies, tvEnabled: tv, priority };
+      if (initial) await api("PUT", `/api/indexers/${initial.id}`, body);
+      else await api("POST", "/api/indexers", body);
+      onSaved();
+    } catch (x) { setErr((x as Error).message); }
+    finally { setBusy(false); }
+  }
+
   return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/indexers", { name, baseUrl: url, apiKey: key, enabled: true }); setName(""); setUrl(""); setKey(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Indexer name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <input aria-label="Indexer URL" placeholder="https://indexer.example/api/…torznab" value={url} onChange={(e) => setUrl(e.target.value)} required style={{ minWidth: 260 }} />
-      <input aria-label="Indexer API key" type="password" autoComplete="off" placeholder="API key" value={key} onChange={(e) => setKey(e.target.value)} />
-      <button type="submit">Add indexer</button>
-      <ErrorLine message={err} />
-    </form>
+    <div className="dialog-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog card" role="dialog" aria-modal="true" aria-label={initial ? "Edit indexer" : "Add indexer"}>
+        <h2>{initial ? "Edit indexer" : "Add indexer"}</h2>
+        <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+          <label>URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://indexer.example/api" required /></label>
+          <label>API key<input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? "Leave blank to keep the stored key" : "API key"} /></label>
+          <label className="inline"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> enabled</label>
+          <label className="inline"><input type="checkbox" checked={movies} onChange={(e) => setMovies(e.target.checked)} /> movies</label>
+          <label className="inline"><input type="checkbox" checked={tv} onChange={(e) => setTv(e.target.checked)} /> TV</label>
+          <label>Priority<input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
+          <p className="muted">{initial ? "Lower priority is searched first. Testing checks these values without saving; a blank key tests the stored key." : "Lower priority is searched first. Testing checks these exact values without saving."}</p>
+          <ErrorLine message={err} />
+          {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}</p>}
+          {testResult?.categories && testResult.categories.length > 0 && <p className="muted">Categories: {testResult.categories.slice(0, 20).map((c) => `${c.id} ${c.name}`).join(", ")} · search: {testResult.searchAvailable ? "yes" : "no"}, TV search: {testResult.tvSearchAvailable ? "yes" : "no"}, movie search: {testResult.movieSearchAvailable ? "yes" : "no"}</p>}
+          <div className="row">
+            <button type="button" disabled={testing || !url} onClick={testUnsaved}>{testing ? "Testing…" : "Test"}</button>
+            <button className="primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
-function ClientsSection({ advanced }: { advanced: boolean }) {
-  const { data: clients, reload: reloadClients } = useLoad<any[]>("/api/download-clients");
+function ClientsSection() {
+  const { data: clients, error, reload } = useLoad<DownloadClient[]>("/api/download-clients");
+  const [query, setQuery] = useState("");
+  const [enabledFilter, setEnabledFilter] = useState("all");
+  const [healthFilter, setHealthFilter] = useState("all");
+  const [sort, setSort] = useState("name");
+  const [editing, setEditing] = useState<DownloadClient | "new" | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const list = (clients ?? []).filter((c) =>
+    (query === "" || c.name.toLowerCase().includes(query.toLowerCase()) || c.host.toLowerCase().includes(query.toLowerCase())) &&
+    (enabledFilter === "all" || (enabledFilter === "enabled" ? c.enabled : !c.enabled)) &&
+    (healthFilter === "all" || c.healthStatus === healthFilter));
+  list.sort((a, b) => sort === "health" ? a.healthStatus.localeCompare(b.healthStatus) : a.name.localeCompare(b.name));
+
+  async function testRow(c: DownloadClient) {
+    setBusy(`client-${c.id}`); setMessage(null);
+    try {
+      const res = await api<ConnectionTestResult>("POST", "/api/connections/test", { service: "qbittorrent", clientId: c.id });
+      setTestResult(res.detail);
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function testAll() {
+    setBusy("all"); setMessage(null);
+    try {
+      const res = await api<{ results: { kind: string; name: string; ok: boolean; detail: string }[]; tested: number; passed: number }>("POST", "/api/connections/test-all");
+      setTestResult(`Tested ${res.tested}, passed ${res.passed}. ` + res.results.map((r) => `${r.name}: ${r.ok ? "ok" : r.detail}`).join(" · "));
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function toggleEnabled(c: DownloadClient) {
+    setBusy(`toggle-${c.id}`); setMessage(null);
+    try {
+      await api("PUT", `/api/download-clients/${c.id}`, { name: c.name, baseUrl: c.baseUrl, username: c.username, password: "", movieCategory: c.movieCategory, tvCategory: c.tvCategory, enabled: !c.enabled });
+      reload();
+    } catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function remove(c: DownloadClient) {
+    setBusy(`delete-${c.id}`); setMessage(null);
+    try { await api("DELETE", `/api/download-clients/${c.id}`); setConfirmDelete(null); reload(); }
+    catch (x) { setMessage((x as Error).message); }
+    finally { setBusy(null); }
+  }
+
   return (
     <>
       <h2>Download Clients</h2>
       <div className="card" id="clients-list">
-        <h2>Download clients (qBittorrent)</h2>
-        <p className="muted">Credentials are stored server-side and never returned to the browser.</p>
-        <ul>{clients?.map((c) => <li key={c.id} className="row spread">{c.name} <span className="muted">{c.baseUrl} · {c.movieCategory} / {c.tvCategory}</span> <button className="small danger" onClick={async () => { await api("DELETE", `/api/download-clients/${c.id}`); reloadClients(); }}>Delete</button></li>)}</ul>
-        <ClientForm onCreated={reloadClients} />
+        <div className="row spread">
+          <h2>Download clients (qBittorrent)</h2>
+          <div className="row">
+            <button onClick={() => setEditing("new")}>Add client</button>
+            <button disabled={busy !== null} onClick={testAll}>{busy === "all" ? "Testing…" : "Test all"}</button>
+          </div>
+        </div>
+        <p className="muted">Credentials are stored server-side and never returned to the browser. Disabling or deleting a client never reassigns its downloads or marks them missing. Tests only sign in and list categories — they never add, pause, or delete torrents.</p>
+        <div className="row">
+          <input aria-label="Filter clients" placeholder="Filter by name or host" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select aria-label="Enabled filter" value={enabledFilter} onChange={(e) => setEnabledFilter(e.target.value)}>
+            <option value="all">All states</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option>
+          </select>
+          <select aria-label="Health filter" value={healthFilter} onChange={(e) => setHealthFilter(e.target.value)}>
+            <option value="all">All health</option><option value="Connected">Connected</option><option value="Failed">Failed</option><option value="Not tested">Not tested</option><option value="Disabled">Disabled</option>
+          </select>
+          <select aria-label="Sort clients" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="name">Sort: name</option><option value="health">Sort: health</option>
+          </select>
+        </div>
+        <ErrorLine message={error} />
+        <ErrorLine message={message} />
+        {testResult && <p className="muted">{testResult}</p>}
+        {clients === null && <p className="muted">Loading…</p>}
+        {clients !== null && list.length === 0 && <p className="muted">No download clients match. Add one to grab releases.</p>}
+        <div className="manage-list">
+          {list.map((c) => (
+            <div key={c.id} className="manage-row">
+              <div>
+                <div className="manage-name">{c.name}</div>
+                <div className="muted">{c.host} · {c.type} · {c.movieCategory} / {c.tvCategory} · password {c.hasPassword ? "configured" : "not set"}</div>
+              </div>
+              <div>
+                <span className={c.healthStatus === "Connected" ? "badge ok" : c.healthStatus === "Failed" ? "badge bad" : "badge"}>{c.healthStatus}</span>
+                <div className="muted">{c.lastSeenAt ? `last contact ${new Date(c.lastSeenAt).toLocaleString()}` : c.lastCheckedAt ? `checked ${new Date(c.lastCheckedAt).toLocaleString()}` : "never tested"}</div>
+                {c.lastError && <div className="error">{c.lastError}</div>}
+              </div>
+              <div className="manage-actions">
+                <button className="small" disabled={busy !== null} onClick={() => testRow(c)}>{busy === `client-${c.id}` ? "Testing…" : "Test"}</button>
+                <button className="small" onClick={() => setEditing(c)}>Edit</button>
+                <button className="small" disabled={busy !== null} onClick={() => toggleEnabled(c)}>{c.enabled ? "Disable" : "Enable"}</button>
+                {confirmDelete === c.id ? (
+                  <>
+                    <button className="small danger" disabled={busy !== null} onClick={() => remove(c)}>Confirm delete</button>
+                    <button className="small" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                  </>
+                ) : (
+                  <button className="small danger" onClick={() => setConfirmDelete(c.id)}>Delete</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div id="clients-tests">{advanced ? <ConnectionTests scope="clients" indexers={[]} clients={clients ?? []} /> : <p className="muted">Connection tests are an advanced item. Use Show Advanced in the sidebar to reveal them.</p>}</div>
+      {editing && <ClientDialog initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </>
   );
 }
 
-function ClientForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("qBittorrent");
-  const [url, setUrl] = useState("");
-  const [user, setUser] = useState("");
+function ClientDialog({ initial, onClose, onSaved }: { initial: DownloadClient | null; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "qBittorrent");
+  const [url, setUrl] = useState(initial?.baseUrl ?? "");
+  const [user, setUser] = useState(initial?.username ?? "");
   const [pass, setPass] = useState("");
-  const [movie, setMovie] = useState("onearr-movies");
-  const [tv, setTv] = useState("onearr-tv");
+  const [movie, setMovie] = useState(initial?.movieCategory ?? "onearr-movies");
+  const [tv, setTv] = useState(initial?.tvCategory ?? "onearr-tv");
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  async function testUnsaved() {
+    setTesting(true); setErr(null);
+    try {
+      // Editing: pass the saved record's id so the server reuses the stored
+      // password when the field is blank, while still testing the form's
+      // unsaved values. Override tests never rewrite health.
+      const body = initial
+        ? { service: "qbittorrent", clientId: initial.id, baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv }
+        : { service: "qbittorrent", baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv };
+      setTestResult(await api<ConnectionTestResult>("POST", "/api/connections/test", body));
+    }
+    catch (x) { setErr((x as Error).message); }
+    finally { setTesting(false); }
+  }
+
+  async function save() {
+    setErr(null); setBusy(true);
+    try {
+      const body = { name, baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv, enabled };
+      if (initial) await api("PUT", `/api/download-clients/${initial.id}`, body);
+      else await api("POST", "/api/download-clients", body);
+      onSaved();
+    } catch (x) { setErr((x as Error).message); }
+    finally { setBusy(false); }
+  }
+
   return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/download-clients", { name, baseUrl: url, username: user, password: pass, movieCategory: movie, tvCategory: tv, enabled: true }); setPass(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Client name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <input aria-label="Client URL" placeholder="http://qbittorrent:8080" value={url} onChange={(e) => setUrl(e.target.value)} required style={{ minWidth: 220 }} />
-      <input aria-label="Client username" value={user} onChange={(e) => setUser(e.target.value)} />
-      <input aria-label="Client password" type="password" autoComplete="off" value={pass} onChange={(e) => setPass(e.target.value)} />
-      <input aria-label="Movie category" value={movie} onChange={(e) => setMovie(e.target.value)} />
-      <input aria-label="TV category" value={tv} onChange={(e) => setTv(e.target.value)} />
-      <button type="submit">Add client</button>
-      <ErrorLine message={err} />
-    </form>
+    <div className="dialog-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog card" role="dialog" aria-modal="true" aria-label={initial ? "Edit download client" : "Add download client"}>
+        <h2>{initial ? "Edit download client" : "Add download client"}</h2>
+        <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+          <label>URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://qbittorrent:8080" required /></label>
+          <label>Username<input value={user} onChange={(e) => setUser(e.target.value)} /></label>
+          <label>Password<input type="password" autoComplete="off" value={pass} onChange={(e) => setPass(e.target.value)} placeholder={initial?.hasPassword ? "Leave blank to keep the stored password" : "Password"} /></label>
+          <label>Movie category<input value={movie} onChange={(e) => setMovie(e.target.value)} /></label>
+          <label>TV category<input value={tv} onChange={(e) => setTv(e.target.value)} /></label>
+          <label className="inline"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> enabled</label>
+          <p className="muted">{initial ? "Testing signs in and lists these categories without saving, and never modifies torrents; a blank password tests the stored password." : "Testing signs in and lists these categories without saving, and never modifies torrents."}</p>
+          <ErrorLine message={err} />
+          {testResult && <p className={testResult.ok ? "ok" : "error"}>{testResult.detail}</p>}
+          {testResult?.states && <p className="muted">Torrent states: {testResult.states.map((s) => `${s.state}: ${s.count}`).join(", ")} · content paths reported: {testResult.anyContentPath ? "yes" : "no"}</p>}
+          <div className="row">
+            <button type="button" disabled={testing || !url} onClick={testUnsaved}>{testing ? "Testing…" : "Test"}</button>
+            <button className="primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

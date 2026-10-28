@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="OneArr.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\OneArr.Domain\OneArr.Domain.csproj" />
     <ProjectReference Include="..\OneArr.Application\OneArr.Application.csproj" />
     <ProjectReference Include="..\OneArr.Infrastructure\OneArr.Infrastructure.csproj" />

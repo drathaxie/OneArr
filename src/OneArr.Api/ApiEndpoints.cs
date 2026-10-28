@@ -19,9 +19,11 @@ public static class ApiEndpoints
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
     public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId);
-    public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash);
-    public sealed record IndexerBody(string Name, string BaseUrl, string ApiKey, bool Enabled);
-    public sealed record ClientBody(string Name, string BaseUrl, string Username, string Password, string? MovieCategory, string? TvCategory, bool Enabled);
+    public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null);
+    // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
+    // Priority: LOWER values are searched first; ties break by Id. Default 0 preserves Id order.
+    public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0);
+    public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
@@ -35,7 +37,10 @@ public static class ApiEndpoints
     public sealed record PathMappingBody(string Type, string SourcePrefix, string TargetPrefix);
     public sealed record ApplyBody(List<string>? ExcludePaths, bool? AcknowledgeUnmatched);
     public sealed record BulkRootBody(string MediaType, string? FromRootFolder, string ToRootFolder, List<int>? Ids);
-    public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null);
+    // For a saved record pass IndexerId/ClientId. For unsaved form values pass BaseUrl (+ ApiKey for
+    // torznab, + Username/Password/categories for qbittorrent) with no Id: the values are tested
+    // without being saved, and no health row is written because there is nothing to attach it to.
+    public sealed record ConnectionTestBody(string Service, int? IndexerId = null, int? ClientId = null, string? Kind = null, string? BaseUrl = null, string? ApiKey = null, string? Username = null, string? Password = null, string? MovieCategory = null, string? TvCategory = null);
     public sealed record ApplyPreviewBody(int PreviewId, bool Confirmed);
     public sealed record BulkImportBody(bool Confirmed, List<BulkApproval>? Approvals);
 
@@ -234,6 +239,10 @@ public static class ApiEndpoints
             return Results.Ok(new
             {
                 indexerErrors = result.IndexerErrors,
+                // Per-indexer transparency: which indexers returned results, returned none, failed,
+                // or were skipped (disabled / media type not enabled). A failed indexer never hides
+                // behind another's results, and a successful connection test is not a search.
+                indexers = result.IndexerOutcomes.Select(o => new { o.Id, o.Name, status = o.Status, resultCount = o.ResultCount, message = o.Message }),
                 results = result.Decisions.Select(d => new
                 {
                     title = d.Candidate.Title,
@@ -247,29 +256,56 @@ public static class ApiEndpoints
                     accepted = d.Accepted,
                     score = d.Score,
                     reasons = d.Reasons,
+                    publishDateUtc = d.Candidate.PublishDateUtc,
                 }),
             });
         });
 
         api.MapPost("/grab", async (GrabBody body, ReleaseService releases, CancellationToken ct) =>
         {
-            var job = await releases.GrabAsync(new GrabRequest(body.MediaItemId, body.EpisodeId, body.Title, body.Link, body.InfoHash), ct);
+            var job = await releases.GrabAsync(new GrabRequest(body.MediaItemId, body.EpisodeId, body.Title, body.Link, body.InfoHash, body.DownloadClientId), ct);
             return Results.Created($"/api/queue/{job.Id}", job);
         });
 
+        // Indexer responses NEVER include the API key — only whether one is stored. Edits keep the
+        // stored key when the body leaves it empty, so the UI never needs to round-trip a secret.
         api.MapGet("/indexers", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             await using var c = await db.CreateDbContextAsync(ct);
-            return Results.Ok(await c.Indexers.AsNoTracking().Select(i => new { i.Id, i.Name, i.BaseUrl, i.Enabled, hasKey = i.ApiKey.Length > 0 }).ToListAsync(ct));
+            var indexers = await c.Indexers.AsNoTracking().OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
+            var health = await c.IndexerHealth.AsNoTracking().ToDictionaryAsync(h => h.IndexerId, ct);
+            return Results.Ok(indexers.Select(i => IndexerDto(i, health.GetValueOrDefault(i.Id))).ToList());
         });
 
         api.MapPost("/indexers", async (IndexerBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Indexer name is required");
             UrlGuard.RequireServiceUrl(body.BaseUrl);
             await using var c = await db.CreateDbContextAsync(ct);
-            c.Indexers.Add(new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = body.ApiKey, Enabled = body.Enabled });
+            var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = body.ApiKey ?? "", Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority };
+            c.Indexers.Add(row);
             await c.SaveChangesAsync(ct);
-            return Results.Created("/api/indexers", new { body.Name, body.BaseUrl, body.Enabled });
+            return Results.Created($"/api/indexers/{row.Id}", IndexerDto(row, null));
+        });
+
+        api.MapPut("/indexers/{id:int}", async (int id, IndexerBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Indexer name is required");
+            UrlGuard.RequireServiceUrl(body.BaseUrl);
+            await using var c = await db.CreateDbContextAsync(ct);
+            var row = await c.Indexers.FindAsync([id], ct);
+            if (row is null) return Results.NotFound();
+            row.Name = body.Name.Trim();
+            row.BaseUrl = body.BaseUrl.Trim();
+            // An empty key on edit preserves the stored key; a non-empty key replaces it.
+            if (!string.IsNullOrEmpty(body.ApiKey)) row.ApiKey = body.ApiKey;
+            row.Enabled = body.Enabled;
+            row.MoviesEnabled = body.MoviesEnabled;
+            row.TvEnabled = body.TvEnabled;
+            row.Priority = body.Priority;
+            await c.SaveChangesAsync(ct);
+            var h = await c.IndexerHealth.AsNoTracking().FirstOrDefaultAsync(x => x.IndexerId == id, ct);
+            return Results.Ok(IndexerDto(row, h));
         });
 
         api.MapDelete("/indexers/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
@@ -278,32 +314,61 @@ public static class ApiEndpoints
             var row = await c.Indexers.FindAsync([id], ct);
             if (row is null) return Results.NotFound();
             c.Indexers.Remove(row);
+            var h = await c.IndexerHealth.FindAsync([id], ct);
+            if (h is not null) c.IndexerHealth.Remove(h);
             await c.SaveChangesAsync(ct);
             return Results.NoContent();
         });
 
+        // Client responses NEVER include the password — only whether one is stored. Edits keep the
+        // stored password when the body leaves it empty. Deleting a client never touches download
+        // jobs: they keep their owning-client id and queue sync never reassigns them.
         api.MapGet("/download-clients", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
             await using var c = await db.CreateDbContextAsync(ct);
-            return Results.Ok(await c.DownloadClients.AsNoTracking().Select(d => new { d.Id, d.Name, d.BaseUrl, d.Username, d.MovieCategory, d.TvCategory, d.Enabled, hasPassword = d.Password.Length > 0 }).ToListAsync(ct));
+            var clients = await c.DownloadClients.AsNoTracking().OrderBy(d => d.Id).ToListAsync(ct);
+            var health = await c.DownloadClientHealth.AsNoTracking().ToDictionaryAsync(h => h.DownloadClientId, ct);
+            return Results.Ok(clients.Select(d => ClientDto(d, health.GetValueOrDefault(d.Id))).ToList());
         });
 
         api.MapPost("/download-clients", async (ClientBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Client name is required");
             UrlGuard.RequireServiceUrl(body.BaseUrl);
             await using var c = await db.CreateDbContextAsync(ct);
-            c.DownloadClients.Add(new DownloadClientConfig
+            var row = new DownloadClientConfig
             {
                 Name = body.Name.Trim(),
                 BaseUrl = body.BaseUrl.Trim(),
                 Username = body.Username,
-                Password = body.Password,
+                Password = body.Password ?? "",
                 MovieCategory = string.IsNullOrWhiteSpace(body.MovieCategory) ? "onearr-movies" : body.MovieCategory.Trim(),
                 TvCategory = string.IsNullOrWhiteSpace(body.TvCategory) ? "onearr-tv" : body.TvCategory.Trim(),
                 Enabled = body.Enabled,
-            });
+            };
+            c.DownloadClients.Add(row);
             await c.SaveChangesAsync(ct);
-            return Results.Created("/api/download-clients", new { body.Name, body.BaseUrl, body.Enabled });
+            return Results.Created($"/api/download-clients/{row.Id}", ClientDto(row, null));
+        });
+
+        api.MapPut("/download-clients/{id:int}", async (int id, ClientBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Name)) throw new ArgumentException("Client name is required");
+            UrlGuard.RequireServiceUrl(body.BaseUrl);
+            await using var c = await db.CreateDbContextAsync(ct);
+            var row = await c.DownloadClients.FindAsync([id], ct);
+            if (row is null) return Results.NotFound();
+            row.Name = body.Name.Trim();
+            row.BaseUrl = body.BaseUrl.Trim();
+            row.Username = body.Username;
+            // An empty password on edit preserves the stored password; a non-empty one replaces it.
+            if (!string.IsNullOrEmpty(body.Password)) row.Password = body.Password;
+            row.MovieCategory = string.IsNullOrWhiteSpace(body.MovieCategory) ? "onearr-movies" : body.MovieCategory.Trim();
+            row.TvCategory = string.IsNullOrWhiteSpace(body.TvCategory) ? "onearr-tv" : body.TvCategory.Trim();
+            row.Enabled = body.Enabled;
+            await c.SaveChangesAsync(ct);
+            var h = await c.DownloadClientHealth.AsNoTracking().FirstOrDefaultAsync(x => x.DownloadClientId == id, ct);
+            return Results.Ok(ClientDto(row, h));
         });
 
         api.MapDelete("/download-clients/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
@@ -312,6 +377,8 @@ public static class ApiEndpoints
             var row = await c.DownloadClients.FindAsync([id], ct);
             if (row is null) return Results.NotFound();
             c.DownloadClients.Remove(row);
+            var h = await c.DownloadClientHealth.FindAsync([id], ct);
+            if (h is not null) c.DownloadClientHealth.Remove(h);
             await c.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -797,44 +864,135 @@ public static class ApiEndpoints
                     }
                     case "torznab":
                     {
-                        if (body.IndexerId is not int indexerId) return Results.BadRequest(new { error = "indexerId is required" });
-                        var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
-                        if (indexer is null) return Results.NotFound();
-                        if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
-                        var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
-                        var http = httpFactory.CreateClient(OutboundHttp.TorznabClient);
-                        http.BaseAddress = new Uri(baseUri, "/");
-                        using var response = await OutboundHttp.SendWithRetryAsync(http,
-                            () => new HttpRequestMessage(HttpMethod.Get, "api?t=caps&apikey=" + Uri.EscapeDataString(indexer.ApiKey)), ct);
-                        if (!response.IsSuccessStatusCode)
-                            return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' returned HTTP {(int)response.StatusCode}." });
-                        var caps = TorznabClient.ParseCaps(await response.Content.ReadAsStringAsync(ct), indexer.Name);
+                        // Saved record with no overrides (row Test): test its stored values
+                        // and record the diagnostic outcome. Saved record WITH form overrides
+                        // (edit-dialog Test): test the form's URL, falling back to the stored
+                        // key when the key field is blank — the dialog never sees the secret —
+                        // save nothing, and record no health, since the values tested are not
+                        // the saved ones. Unsaved form values (baseUrl, no indexerId): test
+                        // exactly what was typed, save nothing, record no health.
+                        string name, baseUrl, apiKey;
+                        int? savedId = null;
+                        if (body.IndexerId is int indexerId)
+                        {
+                            var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
+                            if (indexer is null) return Results.NotFound();
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.ApiKey);
+                            if (!hasOverrides)
+                            {
+                                if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
+                                (name, baseUrl, apiKey, savedId) = (indexer.Name, indexer.BaseUrl, indexer.ApiKey, indexer.Id);
+                            }
+                            else
+                            {
+                                name = indexer.Name;
+                                baseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? indexer.BaseUrl : body.BaseUrl;
+                                apiKey = string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
+                            }
+                        }
+                        else
+                        {
+                            if (string.IsNullOrWhiteSpace(body.BaseUrl)) return Results.BadRequest(new { error = "indexerId or baseUrl is required" });
+                            (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl, body.ApiKey ?? "");
+                        }
+                        TorznabCaps caps;
+                        try
+                        {
+                            var (ok, detail, parsed) = await TestTorznabAsync(httpFactory, name, baseUrl, apiKey, ct);
+                            if (!ok)
+                            {
+                                if (savedId is int failedId) await UpsertIndexerHealthAsync(c, failedId, false, detail, ct);
+                                return Results.Ok(new { ok = false, service, detail });
+                            }
+                            caps = parsed!;
+                            if (savedId is int passedId) await UpsertIndexerHealthAsync(c, passedId, true, null, ct);
+                        }
+                        catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or InvalidOperationException)
+                        {
+                            if (savedId is int errorId) await UpsertIndexerHealthAsync(c, errorId, false, OutboundHttp.Redact(ex.Message), ct);
+                            throw;
+                        }
                         return Results.Ok(new
                         {
-                            ok = true, service, name = indexer.Name,
-                            detail = $"Indexer '{indexer.Name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.",
+                            ok = true, service, name,
+                            detail = $"Indexer '{name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.",
                             categories = caps.Categories.Select(x => new { x.Id, x.Name }),
                             searchAvailable = caps.SearchAvailable, tvSearchAvailable = caps.TvSearchAvailable, movieSearchAvailable = caps.MovieSearchAvailable,
                         });
                     }
                     case "qbittorrent":
                     {
-                        if (body.ClientId is not int clientId) return Results.BadRequest(new { error = "clientId is required" });
-                        var client = await c.DownloadClients.AsNoTracking().FirstOrDefaultAsync(x => x.Id == clientId, ct);
-                        if (client is null) return Results.NotFound();
-                        if (!client.Enabled) return Results.Ok(new { ok = false, service, detail = $"Download client '{client.Name}' is disabled." });
-                        var movies = await downloadClient.ListAsync(client, client.MovieCategory, ct);
-                        var tv = await downloadClient.ListAsync(client, client.TvCategory, ct);
-                        var all = movies.Concat(tv).ToList();
-                        return Results.Ok(new
+                        // Saved record with no overrides (row Test): test its stored values
+                        // and record the diagnostic outcome. Saved record WITH form overrides
+                        // (edit-dialog Test): form values win, blank fields fall back to the
+                        // stored record — notably the password, which the dialog never sees —
+                        // save nothing, record no health. Unsaved form values (baseUrl, no
+                        // clientId): test exactly what was typed, save nothing, record no
+                        // health. Empty categories there fall back to the standard defaults,
+                        // matching what the form prefills on save.
+                        DownloadClientConfig client;
+                        int? savedId = null;
+                        if (body.ClientId is int clientId)
                         {
-                            ok = true, service, name = client.Name,
-                            detail = $"qBittorrent '{client.Name}' signed in and listed {movies.Count} torrent(s) in '{client.MovieCategory}' and {tv.Count} in '{client.TvCategory}'.",
-                            movieCategory = client.MovieCategory, movieCount = movies.Count,
-                            tvCategory = client.TvCategory, tvCount = tv.Count,
-                            states = all.GroupBy(t => t.State).Select(g => new { state = g.Key, count = g.Count() }),
-                            anyContentPath = all.Any(t => !string.IsNullOrEmpty(t.ContentPath)),
-                        });
+                            var saved = await c.DownloadClients.AsNoTracking().FirstOrDefaultAsync(x => x.Id == clientId, ct);
+                            if (saved is null) return Results.NotFound();
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.Username) || !string.IsNullOrWhiteSpace(body.Password) || !string.IsNullOrWhiteSpace(body.MovieCategory) || !string.IsNullOrWhiteSpace(body.TvCategory);
+                            if (!hasOverrides)
+                            {
+                                if (!saved.Enabled) return Results.Ok(new { ok = false, service, detail = $"Download client '{saved.Name}' is disabled." });
+                                client = saved;
+                                savedId = saved.Id;
+                            }
+                            else
+                            {
+                                client = new DownloadClientConfig
+                                {
+                                    Name = saved.Name,
+                                    BaseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? saved.BaseUrl : body.BaseUrl,
+                                    Username = string.IsNullOrWhiteSpace(body.Username) ? saved.Username : body.Username,
+                                    Password = string.IsNullOrWhiteSpace(body.Password) ? saved.Password : body.Password,
+                                    MovieCategory = string.IsNullOrWhiteSpace(body.MovieCategory) ? saved.MovieCategory : body.MovieCategory.Trim(),
+                                    TvCategory = string.IsNullOrWhiteSpace(body.TvCategory) ? saved.TvCategory : body.TvCategory.Trim(),
+                                };
+                            }
+                        }
+                        else
+                        {
+                            if (string.IsNullOrWhiteSpace(body.BaseUrl)) return Results.BadRequest(new { error = "clientId or baseUrl is required" });
+                            client = new DownloadClientConfig
+                            {
+                                Name = "Unsaved client",
+                                BaseUrl = body.BaseUrl,
+                                Username = body.Username ?? "",
+                                Password = body.Password ?? "",
+                                MovieCategory = string.IsNullOrWhiteSpace(body.MovieCategory) ? "onearr-movies" : body.MovieCategory.Trim(),
+                                TvCategory = string.IsNullOrWhiteSpace(body.TvCategory) ? "onearr-tv" : body.TvCategory.Trim(),
+                            };
+                        }
+                        try
+                        {
+                            var (ok, detail, movies, tv) = await TestQbitAsync(downloadClient, client, ct);
+                            if (!ok)
+                            {
+                                if (savedId is int failedId) await UpsertClientHealthAsync(c, failedId, false, detail, ct);
+                                return Results.Ok(new { ok = false, service, detail });
+                            }
+                            if (savedId is int passedId) await UpsertClientHealthAsync(c, passedId, true, null, ct);
+                            var all = movies.Concat(tv).ToList();
+                            return Results.Ok(new
+                            {
+                                ok = true, service, name = client.Name, detail,
+                                movieCategory = client.MovieCategory, movieCount = movies.Count,
+                                tvCategory = client.TvCategory, tvCount = tv.Count,
+                                states = all.GroupBy(t => t.State).Select(g => new { state = g.Key, count = g.Count() }),
+                                anyContentPath = all.Any(t => !string.IsNullOrEmpty(t.ContentPath)),
+                            });
+                        }
+                        catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or InvalidOperationException)
+                        {
+                            if (savedId is int errorId) await UpsertClientHealthAsync(c, errorId, false, OutboundHttp.Redact(ex.Message), ct);
+                            throw;
+                        }
                     }
                     case "legacy":
                     {
@@ -858,6 +1016,21 @@ public static class ApiEndpoints
             {
                 return Results.Ok(new { ok = false, service, detail = OutboundHttp.Redact(ex.Message) });
             }
+        });
+
+        // Tests every ENABLED indexer and download client once, in one call. Bounded: at most 4
+        // outbound tests run at once, each capped at 30s, the whole batch at 120s, and one failure
+        // never stops the others. Each result updates only its own health row. No polling, no
+        // background work — the caller re-reads the lists when this returns.
+        api.MapPost("/connections/test-all", async (IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient, CancellationToken ct) =>
+        {
+            var results = await TestAllCoreAsync(db, httpFactory, downloadClient, TimeSpan.FromSeconds(120), ct);
+            return Results.Ok(new
+            {
+                results = results.Select(r => new { kind = r.Kind, id = r.Id, name = r.Name, ok = r.Ok, detail = r.Detail }),
+                tested = results.Length,
+                passed = results.Count(r => r.Ok),
+            });
         });
 
         api.MapPost("/migration/preview", async (MigrationPreviewBody body, ILegacyArrReader reader, CancellationToken ct) =>
@@ -1028,5 +1201,206 @@ public static class ApiEndpoints
         await using var c = await db.CreateDbContextAsync(ct);
         if (!await c.QualityProfiles.AnyAsync(p => p.Id == profileId, ct)) throw new ArgumentException("Quality profile does not exist");
         return profileId;
+    }
+
+    // Batch test core, extracted from the endpoint so tests can drive it with a short
+    // deadline. Every item always yields a result: the gate wait sits INSIDE the per-item
+    // handler, so a batch-deadline expiry while tests are queued reports those tests as
+    // skipped instead of faulting Task.WhenAll — and the gate is only released when it was
+    // actually acquired. Timeout classification uses the item deadline token, not the
+    // exception type or its casing, because the shared retry helper converts
+    // cancellation into ExternalServiceException("Timed out talking to ...").
+    // Failure-path health writes are best-effort: a dead database must not turn a
+    // per-item result into a fault.
+    internal static async Task<(string Kind, int Id, string Name, bool Ok, string Detail)[]> TestAllCoreAsync(
+        IDbContextFactory<OneArrDbContext> db, IHttpClientFactory httpFactory, IDownloadClient downloadClient,
+        TimeSpan batchTimeout, CancellationToken ct)
+    {
+        await using var c = await db.CreateDbContextAsync(ct);
+        var indexers = await c.Indexers.AsNoTracking().Where(i => i.Enabled).OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
+        var clients = await c.DownloadClients.AsNoTracking().Where(x => x.Enabled).OrderBy(x => x.Id).ToListAsync(ct);
+        using var gate = new SemaphoreSlim(4);
+        using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        batchCts.CancelAfter(batchTimeout);
+        var batchCt = batchCts.Token;
+
+        async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneIndexerAsync(IndexerConfig indexer)
+        {
+            var acquired = false;
+            var started = false;
+            CancellationToken itemToken = default;
+            try
+            {
+                await gate.WaitAsync(batchCt);
+                acquired = true;
+                started = true;
+                using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
+                itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                itemToken = itemCts.Token;
+                var (ok, detail, _) = await TestTorznabAsync(httpFactory, indexer.Name, indexer.BaseUrl, indexer.ApiKey, itemCts.Token);
+                // A fresh context per item: DbContext is not thread-safe across concurrent tests.
+                await using var hc = await db.CreateDbContextAsync(batchCt);
+                await UpsertIndexerHealthAsync(hc, indexer.Id, ok, ok ? null : detail, batchCt);
+                return ("indexer", indexer.Id, indexer.Name, ok, detail);
+            }
+            catch (Exception ex)
+            {
+                // Timeout classification uses deadline state, not exception type or text:
+                // the shared retry helper converts cancellation into
+                // ExternalServiceException("Timed out talking to ..."), so checking for
+                // OperationCanceledException alone misses real timeouts. A started item
+                // whose deadline token fired timed out; a started item with a live token
+                // failed genuinely; a queued item never started and was skipped.
+                var detail = !started
+                    ? $"Indexer '{indexer.Name}' skipped: batch deadline reached before the test started."
+                    : itemToken.IsCancellationRequested
+                        ? $"Indexer '{indexer.Name}' timed out."
+                        : OutboundHttp.Redact(ex.Message);
+                try
+                {
+                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
+                    await UpsertIndexerHealthAsync(hc, indexer.Id, false, detail, CancellationToken.None);
+                }
+                catch { /* best-effort: the result below still reports the outcome */ }
+                return ("indexer", indexer.Id, indexer.Name, false, detail);
+            }
+            finally { if (acquired) gate.Release(); }
+        }
+
+        async Task<(string Kind, int Id, string Name, bool Ok, string Detail)> TestOneClientAsync(DownloadClientConfig client)
+        {
+            var acquired = false;
+            var started = false;
+            CancellationToken itemToken = default;
+            try
+            {
+                await gate.WaitAsync(batchCt);
+                acquired = true;
+                started = true;
+                using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(batchCt);
+                itemCts.CancelAfter(TimeSpan.FromSeconds(30));
+                itemToken = itemCts.Token;
+                var (ok, detail, _, _) = await TestQbitAsync(downloadClient, client, itemCts.Token);
+                // A fresh context per item: DbContext is not thread-safe across concurrent tests.
+                await using var hc = await db.CreateDbContextAsync(batchCt);
+                await UpsertClientHealthAsync(hc, client.Id, ok, ok ? null : detail, batchCt);
+                return ("client", client.Id, client.Name, ok, detail);
+            }
+            catch (Exception ex)
+            {
+                // Same deadline-state classification as indexers: the retry helper turns
+                // cancellation into ExternalServiceException, so the token — not the
+                // exception type or its casing — decides timeout vs genuine failure.
+                var detail = !started
+                    ? $"Download client '{client.Name}' skipped: batch deadline reached before the test started."
+                    : itemToken.IsCancellationRequested
+                        ? $"Download client '{client.Name}' timed out."
+                        : OutboundHttp.Redact(ex.Message);
+                try
+                {
+                    await using var hc = await db.CreateDbContextAsync(CancellationToken.None);
+                    await UpsertClientHealthAsync(hc, client.Id, false, detail, CancellationToken.None);
+                }
+                catch { /* best-effort: the result below still reports the outcome */ }
+                return ("client", client.Id, client.Name, false, detail);
+            }
+            finally { if (acquired) gate.Release(); }
+        }
+
+        var tasks = indexers.Select(TestOneIndexerAsync).Concat(clients.Select(TestOneClientAsync)).ToList();
+        return await Task.WhenAll(tasks);
+    }
+
+    // Secrets are never in these DTOs: only a hasKey/hasPassword flag. Health status is derived so a
+    // disabled row always reads Disabled even if an old test result is stored, and a row with no
+    // test row reads Not tested rather than a stale-looking value.
+    private static object IndexerDto(IndexerConfig i, IndexerHealth? h) => new
+    {
+        i.Id, i.Name, i.BaseUrl,
+        host = HostOf(i.BaseUrl),
+        protocol = "Torznab",
+        i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
+        hasKey = i.ApiKey.Length > 0,
+        healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
+        lastTestedAt = h?.LastTestedAt,
+        lastError = h?.LastError,
+    };
+
+    private static object ClientDto(DownloadClientConfig d, DownloadClientHealth? h) => new
+    {
+        d.Id, d.Name, d.BaseUrl,
+        host = HostOf(d.BaseUrl),
+        type = "qBittorrent",
+        d.Username, d.MovieCategory, d.TvCategory, d.Enabled,
+        hasPassword = d.Password.Length > 0,
+        healthStatus = !d.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastError is not null ? "Failed" : h.LastSeenAt is not null ? "Connected" : "Not tested",
+        lastSeenAt = h?.LastSeenAt,
+        lastCheckedAt = h?.UpdatedAt,
+        lastError = h?.LastError,
+    };
+
+    private static string HostOf(string baseUrl) =>
+        Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri) ? uri.Host : "";
+
+    // Health writes are best-effort diagnostics: a failed write must never change a test's outcome,
+    // and lastTestedAt on the read side makes any staleness visible instead of silent.
+    private static async Task UpsertIndexerHealthAsync(OneArrDbContext c, int indexerId, bool ok, string? error, CancellationToken ct)
+    {
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var h = await c.IndexerHealth.FindAsync([indexerId], ct);
+            if (h is null) { h = new IndexerHealth { IndexerId = indexerId }; c.IndexerHealth.Add(h); }
+            h.LastTestedAt = now;
+            h.LastStatus = ok ? "Healthy" : "Failed";
+            h.LastError = ok ? null : error;
+            h.UpdatedAt = now;
+            await c.SaveChangesAsync(ct);
+        }
+        catch { /* diagnostic only; the test result itself stands */ }
+    }
+
+    private static async Task UpsertClientHealthAsync(OneArrDbContext c, int clientId, bool ok, string? error, CancellationToken ct)
+    {
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var h = await c.DownloadClientHealth.FindAsync([clientId], ct);
+            if (h is null) { h = new DownloadClientHealth { DownloadClientId = clientId }; c.DownloadClientHealth.Add(h); }
+            if (ok) h.LastSeenAt = now;
+            h.LastError = ok ? null : error;
+            h.UpdatedAt = now;
+            await c.SaveChangesAsync(ct);
+        }
+        catch { /* diagnostic only; the test result itself stands */ }
+    }
+
+    // Shared by /connections/test and /connections/test-all so a single test and a batch test
+    // cannot drift apart. Throws ExternalServiceException (already redacted) on failure.
+    private static async Task<(bool Ok, string Detail, TorznabCaps? Caps)> TestTorznabAsync(IHttpClientFactory httpFactory, string name, string baseUrl, string apiKey, CancellationToken ct)
+    {
+        var baseUri = UrlGuard.RequireServiceUrl(baseUrl);
+        var http = httpFactory.CreateClient(OutboundHttp.TorznabClient);
+        http.BaseAddress = new Uri(baseUri, "/");
+        using var response = await OutboundHttp.SendWithRetryAsync(http,
+            () => new HttpRequestMessage(HttpMethod.Get, "api?t=caps&apikey=" + Uri.EscapeDataString(apiKey)), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
+                ? $"Indexer '{name}' rejected the API key (HTTP {(int)response.StatusCode}). Check the key."
+                : $"Indexer '{name}' returned HTTP {(int)response.StatusCode}.";
+            return (false, detail, null);
+        }
+        var caps = TorznabClient.ParseCaps(await response.Content.ReadAsStringAsync(ct), name);
+        return (true, $"Indexer '{name}' answered caps with {caps.Categories.Count} categor{(caps.Categories.Count == 1 ? "y" : "ies")}.", caps);
+    }
+
+    // Read-only against the client: sign-in + category listing only. Never adds, pauses, resumes
+    // or deletes torrents, and an empty category is not by itself a failure.
+    private static async Task<(bool Ok, string Detail, IReadOnlyList<DownloadClientItem> Movies, IReadOnlyList<DownloadClientItem> Tv)> TestQbitAsync(IDownloadClient downloadClient, DownloadClientConfig client, CancellationToken ct)
+    {
+        var movies = await downloadClient.ListAsync(client, client.MovieCategory, ct);
+        var tv = await downloadClient.ListAsync(client, client.TvCategory, ct);
+        return (true, $"qBittorrent '{client.Name}' signed in and listed {movies.Count} torrent(s) in '{client.MovieCategory}' and {tv.Count} in '{client.TvCategory}'.", movies, tv);
     }
 }

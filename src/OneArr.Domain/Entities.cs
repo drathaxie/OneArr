@@ -77,6 +77,25 @@ public class IndexerConfig
     /// <summary>Server-side only. Never returned by the API.</summary>
     public string ApiKey { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    /// <summary>Whether this indexer is used for movie searches. Default true.</summary>
+    public bool MoviesEnabled { get; set; } = true;
+    /// <summary>Whether this indexer is used for TV searches. Default true.</summary>
+    public bool TvEnabled { get; set; } = true;
+    /// <summary>Search order: LOWER values are tried first; ties break by Id. Default 0 preserves Id order.</summary>
+    public int Priority { get; set; } = 0;
+}
+
+/// <summary>Diagnostic status from the last connection test of one indexer. Written only by
+/// connection tests, never by searches, so a failed search cannot masquerade as a failed test.</summary>
+public class IndexerHealth
+{
+    public int IndexerId { get; set; }
+    public DateTimeOffset? LastTestedAt { get; set; }
+    /// <summary>Healthy or Failed from the last test; null when never tested. Disabled is derived at read time.</summary>
+    public string? LastStatus { get; set; }
+    /// <summary>Sanitized failure reason from the last failed test; null when the last test passed.</summary>
+    public string? LastError { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class DownloadClientConfig

@@ -176,15 +176,16 @@ describe("Indexer settings", () => {
     routes["POST /api/indexers"] = () => ({ status: 201, body: {} });
     routes["GET /api/indexers"] = () => ({
       body: calls.some((c) => c.method === "POST" && c.path === "/api/indexers")
-        ? [{ id: 7, name: "fixture", baseUrl: "http://127.0.0.1:9002/", enabled: true, hasKey: true }]
+        ? [{ id: 7, name: "fixture", baseUrl: "http://127.0.0.1:9002/", host: "127.0.0.1", protocol: "Torznab", enabled: true, moviesEnabled: true, tvEnabled: true, priority: 0, hasKey: true, healthStatus: "Not tested", lastTestedAt: null, lastError: null }]
         : [],
     });
     await renderSettings();
     await openSection("Indexers", "Indexers (Torznab / Newznab)");
-    fireEvent.change(screen.getByLabelText("Indexer name"), { target: { value: "fixture" } });
-    fireEvent.change(screen.getByLabelText("Indexer URL"), { target: { value: "http://127.0.0.1:9002/" } });
-    fireEvent.change(screen.getByLabelText("Indexer API key"), { target: { value: secret } });
     fireEvent.click(screen.getByRole("button", { name: "Add indexer" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "fixture" } });
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://127.0.0.1:9002/" } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("fixture")).toBeTruthy();
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/indexers")!;

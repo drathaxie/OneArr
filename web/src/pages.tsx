@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, formatBytes, posterUrl, type HistoryEntry, type ImportPreview, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type Problem, type QualityProfile, type QueueData, type ReleaseResult, type SettingsData } from "./api";
+import { api, ApiError, formatBytes, posterUrl, type DownloadClient, type HistoryEntry, type ImportPreview, type IndexerSearchOutcome, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type Problem, type QualityProfile, type QueueData, type ReleaseResult, type SettingsData } from "./api";
 import { ErrorLine, useLoad } from "./common";
 
 export { Settings } from "./settings";
@@ -565,19 +565,45 @@ function FileList({ mediaId, onClose }: { mediaId: number; onClose: () => void }
   );
 }
 
+function formatAge(publishDateUtc: string | null): string {
+  if (!publishDateUtc) return "—";
+  const ms = Date.now() - Date.parse(publishDateUtc);
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const hours = ms / 3_600_000;
+  if (hours < 1) return "<1h";
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function ageMs(publishDateUtc: string | null): number {
+  if (!publishDateUtc) return Number.POSITIVE_INFINITY;
+  const ms = Date.now() - Date.parse(publishDateUtc);
+  return Number.isFinite(ms) && ms >= 0 ? ms : Number.POSITIVE_INFINITY;
+}
+
 export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number; episodeId: number | null; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
-  const [errors, setErrors] = useState<{ indexer: string; message: string }[]>([]);
+  const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const { data: clients } = useLoad<DownloadClient[]>("/api/download-clients");
+  const enabledClients = (clients ?? []).filter((c) => c.enabled);
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [indexerFilter, setIndexerFilter] = useState("all");
+  const [decisionFilter, setDecisionFilter] = useState("all");
+  const [minSeeders, setMinSeeders] = useState("");
+  const [sort, setSort] = useState("best");
+  // Default: the first enabled client. An explicit choice overrides it, and the chosen id is
+  // sent with the grab so the server can validate it instead of silently picking one.
+  const selectedClient = clientId ?? enabledClients[0]?.id ?? null;
 
   async function search() {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await api<{ results: ReleaseResult[]; indexerErrors: { indexer: string; message: string }[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId });
+      const res = await api<{ results: ReleaseResult[]; indexers: IndexerSearchOutcome[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId });
       setResults(res.results);
-      setErrors(res.indexerErrors);
+      setOutcomes(res.indexers ?? []);
     } catch (e) {
       setMessage((e as Error).message);
     } finally {
@@ -587,12 +613,29 @@ export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number;
 
   async function grab(r: ReleaseResult) {
     try {
-      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash });
+      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient });
       setMessage(`Sent to qBittorrent: ${r.title}`);
     } catch (e) {
       setMessage((e as Error).message);
     }
   }
+
+  const indexerNames = [...new Set((results ?? []).map((r) => r.indexer))].sort();
+  // Client-side sorting and filtering only. The server re-validates every grab, so a rejected
+  // release can never pass because of a frontend change.
+  const visible = (results ?? []).filter((r) =>
+    (indexerFilter === "all" || r.indexer === indexerFilter) &&
+    (decisionFilter === "all" || (decisionFilter === "accepted") === r.accepted) &&
+    (minSeeders === "" || r.seeders >= Number(minSeeders)));
+  visible.sort((a, b) => {
+    switch (sort) {
+      case "quality": return (b.resolution ?? 0) - (a.resolution ?? 0);
+      case "size": return b.size - a.size;
+      case "seeders": return b.seeders - a.seeders;
+      case "age": return ageMs(a.publishDateUtc) - ageMs(b.publishDateUtc);
+      default: return 0;
+    }
+  });
 
   return (
     <div className="card" style={{ marginTop: "1rem" }}>
@@ -605,29 +648,65 @@ export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number;
       </div>
       <p className="muted">Automatic grabbing is off. Only releases you choose here are sent to qBittorrent.</p>
       <ErrorLine message={message} />
-      {errors.map((e, i) => <div key={i} className="error">Indexer “{e.indexer}”: {e.message}</div>)}
+      {outcomes.length > 0 && (
+        <div>
+          <h3>Indexers in this search</h3>
+          <ul>{outcomes.map((o) => (
+            <li key={o.id}>{o.name}: {o.status === "results" ? `${o.resultCount} release(s)` : o.status === "no-results" ? "no releases" : o.status === "failed" ? `failed — ${o.message}` : `skipped — ${o.message}`}</li>
+          ))}</ul>
+          <p className="muted">A successful connection test is not a successful search: these are the results of this search.</p>
+        </div>
+      )}
       {results && results.length === 0 && <p className="muted">No releases returned.</p>}
       {results && results.length > 0 && (
-        <div className="table-wrap"><table>
-          <thead><tr><th>Release</th><th>Indexer</th><th>Res</th><th>Src</th><th>Seeds</th><th>Size</th><th>Decision</th><th /></tr></thead>
-          <tbody>
-            {results.map((r, i) => (
-              <tr key={i}>
-                <td>{r.title}</td>
-                <td>{r.indexer}</td>
-                <td>{r.resolution ?? "?"}p</td>
-                <td>{r.source}</td>
-                <td>{r.seeders}</td>
-                <td>{(r.size / 1_073_741_824).toFixed(2)} GiB</td>
-                <td>
-                  <span className={r.accepted ? "badge ok" : "badge bad"}>{r.accepted ? `accepted (${r.score})` : "rejected"}</span>
-                  {r.reasons.length > 0 && <ul className="reasons">{r.reasons.map((x, j) => <li key={j}>{x}</li>)}</ul>}
-                </td>
-                <td><button className="small" disabled={!r.accepted} onClick={() => grab(r)}>Grab</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+        <>
+          <div className="row">
+            <select aria-label="Filter by indexer" value={indexerFilter} onChange={(e) => setIndexerFilter(e.target.value)}>
+              <option value="all">All indexers</option>
+              {indexerNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <select aria-label="Filter by decision" value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value)}>
+              <option value="all">Accepted + rejected</option><option value="accepted">Accepted only</option><option value="rejected">Rejected only</option>
+            </select>
+            <input aria-label="Minimum seeders" type="number" min={0} placeholder="Min seeders" value={minSeeders} onChange={(e) => setMinSeeders(e.target.value)} />
+            <select aria-label="Sort releases" value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="best">Sort: best match</option><option value="quality">Sort: quality</option><option value="size">Sort: size</option><option value="seeders">Sort: seeders</option><option value="age">Sort: newest</option>
+            </select>
+          </div>
+          {enabledClients.length > 0 ? (
+            <label className="inline">Download client
+              <select aria-label="Download client" value={selectedClient ?? ""} onChange={(e) => setClientId(Number(e.target.value))}>
+                {enabledClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          ) : (
+            <p className="muted">No enabled download client — add one in Settings → Download Clients before grabbing.</p>
+          )}
+          {visible.length === 0 && <p className="muted">No releases match the current filters.</p>}
+          {visible.length > 0 && (
+            <div className="table-wrap"><table>
+              <thead><tr><th>Release</th><th>Indexer</th><th>Res</th><th>Src</th><th>Seeds</th><th>Size</th><th>Age</th><th>Decision</th><th /></tr></thead>
+              <tbody>
+                {visible.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.title}</td>
+                    <td>{r.indexer}</td>
+                    <td>{r.resolution ?? "?"}p</td>
+                    <td>{r.source}</td>
+                    <td>{r.seeders}</td>
+                    <td>{(r.size / 1_073_741_824).toFixed(2)} GiB</td>
+                    <td>{formatAge(r.publishDateUtc)}</td>
+                    <td>
+                      <span className={r.accepted ? "badge ok" : "badge bad"}>{r.accepted ? `accepted (${r.score})` : "rejected"}</span>
+                      {r.reasons.length > 0 && <ul className="reasons">{r.reasons.map((x, j) => <li key={j}>{x}</li>)}</ul>}
+                    </td>
+                    <td><button className="small" disabled={!r.accepted} onClick={() => grab(r)}>Grab</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          )}
+        </>
       )}
     </div>
   );

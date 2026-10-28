@@ -94,7 +94,13 @@ public sealed class TorznabClient : IIndexerClient
             if (!UrlGuard.IsAllowedDownloadLink(link)) link = "";
 
             var hash = attrs.GetValueOrDefault("infohash");
-            results.Add(new ReleaseCandidate(title, link, size, seeders, string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(), indexerName, categories));
+            // Age comes from the feed's pubDate when present; naive dates are read as UTC so age
+            // never depends on the server's local timezone. Absent or unparsable means unknown.
+            DateTimeOffset? published = null;
+            var pubDate = item.Element("pubDate")?.Value?.Trim();
+            if (!string.IsNullOrEmpty(pubDate) && DateTimeOffset.TryParse(pubDate, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+                published = parsed.ToUniversalTime();
+            results.Add(new ReleaseCandidate(title, link, size, seeders, string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(), indexerName, categories, published));
         }
         return results;
     }

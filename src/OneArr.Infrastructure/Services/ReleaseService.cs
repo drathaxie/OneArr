@@ -10,9 +10,14 @@ namespace OneArr.Infrastructure.Services;
 
 public sealed record IndexerSearchError(string Indexer, string Message);
 
-public sealed record ReleaseSearchResult(IReadOnlyList<ReleaseDecision> Decisions, IReadOnlyList<IndexerSearchError> IndexerErrors);
+/// <summary>Per-indexer transparency for one manual search. Status is results, no-results, failed,
+/// or skipped (disabled, or movies/TV not enabled for this media type). Never hides one indexer's
+/// failure behind another's results.</summary>
+public sealed record IndexerSearchOutcome(int Id, string Name, string Status, int ResultCount, string? Message);
 
-public sealed record GrabRequest(int MediaItemId, int? EpisodeId, string ReleaseTitle, string Link, string? InfoHash);
+public sealed record ReleaseSearchResult(IReadOnlyList<ReleaseDecision> Decisions, IReadOnlyList<IndexerSearchError> IndexerErrors, IReadOnlyList<IndexerSearchOutcome> IndexerOutcomes);
+
+public sealed record GrabRequest(int MediaItemId, int? EpisodeId, string ReleaseTitle, string Link, string? InfoHash, int? DownloadClientId = null);
 
 /// <summary>Manual release search and manual grab. Automated grabbing is gated by the automation setting and off by default.</summary>
 public sealed class ReleaseService
@@ -36,18 +41,23 @@ public sealed class ReleaseService
     public async Task<ReleaseSearchResult> SearchAsync(int mediaItemId, int? episodeId, CancellationToken ct)
     {
         var (target, search, indexers) = await BuildTargetAsync(mediaItemId, episodeId, ct);
-        var errors = new List<IndexerSearchError>();
+        var outcomes = new List<IndexerSearchOutcome>();
         var found = new List<ReleaseCandidate>();
 
         foreach (var indexer in indexers)
         {
+            if (!indexer.Enabled) { outcomes.Add(new IndexerSearchOutcome(indexer.Id, indexer.Name, "skipped", 0, "Disabled")); continue; }
+            if (target.Type == MediaType.Movie && !indexer.MoviesEnabled) { outcomes.Add(new IndexerSearchOutcome(indexer.Id, indexer.Name, "skipped", 0, "Movies not enabled")); continue; }
+            if (target.Type == MediaType.Series && !indexer.TvEnabled) { outcomes.Add(new IndexerSearchOutcome(indexer.Id, indexer.Name, "skipped", 0, "TV not enabled")); continue; }
             try
             {
-                found.AddRange(await _indexer.SearchAsync(indexer, search, ct));
+                var results = await _indexer.SearchAsync(indexer, search, ct);
+                found.AddRange(results);
+                outcomes.Add(new IndexerSearchOutcome(indexer.Id, indexer.Name, results.Count > 0 ? "results" : "no-results", results.Count, null));
             }
             catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or UriFormatException or ProviderNotConfiguredException)
             {
-                errors.Add(new IndexerSearchError(indexer.Name, OutboundHttp.Redact(ex.Message)));
+                outcomes.Add(new IndexerSearchOutcome(indexer.Id, indexer.Name, "failed", 0, OutboundHttp.Redact(ex.Message)));
             }
         }
 
@@ -58,7 +68,9 @@ public sealed class ReleaseService
             .ThenByDescending(d => d.Score)
             .ThenByDescending(d => d.Candidate.Seeders)
             .ToList();
-        return new ReleaseSearchResult(decisions, errors);
+        // IndexerErrors stays populated for backward compatibility; IndexerOutcomes is authoritative.
+        var errors = outcomes.Where(o => o.Status == "failed").Select(o => new IndexerSearchError(o.Name, o.Message ?? "")).ToList();
+        return new ReleaseSearchResult(decisions, errors, outcomes);
     }
 
     public async Task<DownloadJob> GrabAsync(GrabRequest request, CancellationToken ct)
@@ -85,7 +97,11 @@ public sealed class ReleaseService
 
         var item = await db.MediaItems.AsNoTracking().FirstAsync(m => m.Id == request.MediaItemId, ct);
         var clients = await db.DownloadClients.AsNoTracking().Where(c => c.Enabled).OrderBy(c => c.Id).ToListAsync(ct);
-        var client = clients.FirstOrDefault() ?? throw new ArgumentException("No enabled download client is configured");
+        // An explicitly selected client must exist and be enabled; otherwise the first enabled
+        // client is the default, exactly as before. The chosen client's id is recorded on the job.
+        var client = request.DownloadClientId is int wantedId
+            ? clients.FirstOrDefault(x => x.Id == wantedId) ?? throw new ArgumentException("Selected download client does not exist or is disabled")
+            : clients.FirstOrDefault() ?? throw new ArgumentException("No enabled download client is configured");
         var category = item.MediaType == MediaType.Movie ? client.MovieCategory : client.TvCategory;
 
         var hash = request.InfoHash?.ToLowerInvariant();
@@ -143,7 +159,9 @@ public sealed class ReleaseService
 
         var category = item.MediaType == MediaType.Movie ? "2000" : "5000";
         var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category);
-        var indexers = await db.Indexers.AsNoTracking().Where(i => i.Enabled).OrderBy(i => i.Id).ToListAsync(ct);
+        // All indexers, in search order (lower Priority first, ties by Id): SearchAsync reports
+        // skipped ones instead of silently omitting them, so the UI can show what was not tried.
+        var indexers = await db.Indexers.AsNoTracking().OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);
         return (target, search, indexers);
     }
 }
