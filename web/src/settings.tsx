@@ -233,13 +233,54 @@ function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
 function ProfilesSection() {
   const { data: profiles, reload: reloadProfiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
   const { data: settings, reload: reloadSettings } = useLoad<SettingsData>("/api/settings");
+  const [editing, setEditing] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function removeProfile(id: number) {
+    setBusy(id); setError(null);
+    try {
+      await api("DELETE", `/api/quality-profiles/${id}`);
+      setConfirmDelete(null);
+      reloadProfiles();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <>
       <h2>Profiles</h2>
       <div className="card" id="profiles-list">
         <h2>Quality profiles</h2>
-        <ul>{profiles?.map((p) => <li key={p.id}>{p.name}: minimum {p.minResolution}p, cutoff {p.cutoffResolution}p {p.allowWebSources ? "" : "(no web sources)"}</li>)}</ul>
-        <ProfileForm onCreated={reloadProfiles} />
+        <p className="muted">Edit quality limits without changing media files. Profiles in use or set as defaults cannot be deleted until they are reassigned.</p>
+        <ErrorLine message={error} />
+        <ul>{profiles?.map(p => (
+          <li key={p.id}>
+            <div className="row">
+              <span>{p.name}: minimum {p.minResolution}p, cutoff {p.cutoffResolution}p {p.allowWebSources ? "" : "(no web sources)"}</span>
+              <button type="button" aria-label={`Edit profile ${p.name}`} disabled={busy !== null}
+                onClick={() => { setEditing(p.id); setConfirmDelete(null); setError(null); }}>Edit</button>
+              <button type="button" aria-label={`Delete profile ${p.name}`} disabled={busy !== null}
+                onClick={() => { setConfirmDelete(p.id); setEditing(null); setError(null); }}>Delete</button>
+            </div>
+            {confirmDelete === p.id && <div className="row">
+              <span>Delete quality profile "{p.name}"? This cannot be undone.</span>
+              <button type="button" disabled={busy !== null} onClick={() => void removeProfile(p.id)}>
+                {busy === p.id ? "Deleting…" : "Confirm delete"}
+              </button>
+              <button type="button" onClick={() => setConfirmDelete(null)} disabled={busy !== null}>Cancel</button>
+            </div>}
+            {editing === p.id && <ProfileForm key={p.id} initial={p} onSaved={() => {
+              setEditing(null); reloadProfiles();
+            }} onCancel={() => setEditing(null)} />}
+          </li>
+        ))}</ul>
+        <h3>Add quality profile</h3>
+        <ProfileForm onSaved={reloadProfiles} />
       </div>
       {settings && profiles && (
         <div id="profiles-defaults"><DefaultProfilesForm data={settings} profiles={profiles} onSaved={reloadSettings} /></div>
@@ -255,7 +296,7 @@ function DefaultProfilesForm({ data, profiles, onSaved }: { data: SettingsData; 
   return (
     <form className="card" onSubmit={(e) => { e.preventDefault(); void saveSettings({ defaultMovieProfileId: movieProfile, defaultSeriesProfileId: seriesProfile }, setMessage, onSaved); }}>
       <h2>Default profiles</h2>
-      <p className="muted">The Add dialogs start from these profiles, separately for movies and series. Changing a default never rewrites any title already in OneArr.</p>
+      <p className="muted">The Add dialogs start from these profiles, separately per media type. Changing a default never rewrites a title already in OneArr.</p>
       <label>Default movie profile
         <select aria-label="Default movie profile" value={movieProfile} onChange={(e) => setMovieProfile(Number(e.target.value))}>
           {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -272,23 +313,39 @@ function DefaultProfilesForm({ data, profiles, onSaved }: { data: SettingsData; 
   );
 }
 
-function ProfileForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [min, setMin] = useState(720);
-  const [cutoff, setCutoff] = useState(1080);
-  const [web, setWeb] = useState(true);
+function ProfileForm({ initial, onSaved, onCancel }: { initial?: QualityProfile; onSaved: () => void; onCancel?: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [min, setMin] = useState(initial?.minResolution ?? 720);
+  const [cutoff, setCutoff] = useState(initial?.cutoffResolution ?? 1080);
+  const [web, setWeb] = useState(initial?.allowWebSources ?? true);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   return (
-    <form className="row" onSubmit={async (e) => {
-      e.preventDefault(); setErr(null);
-      try { await api("POST", "/api/quality-profiles", { name, minResolution: min, cutoffResolution: cutoff, allowWebSources: web }); setName(""); onCreated(); }
-      catch (x) { setErr((x as Error).message); }
-    }}>
-      <input aria-label="Profile name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-      <select aria-label="Minimum resolution" value={min} onChange={(e) => setMin(Number(e.target.value))}>{[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>min {r}p</option>)}</select>
-      <select aria-label="Cutoff resolution" value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))}>{[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>cutoff {r}p</option>)}</select>
+    <form className="row" aria-label={initial ? `Edit ${initial.name}` : "Add quality profile"}
+      onSubmit={async (e) => {
+        e.preventDefault(); setErr(null);
+        if (cutoff < min) { setErr("Cutoff cannot be lower than the minimum resolution."); return; }
+        setBusy(true);
+        try {
+          await api(initial ? "PUT" : "POST",
+            initial ? `/api/quality-profiles/${initial.id}` : "/api/quality-profiles",
+            { name, minResolution: min, cutoffResolution: cutoff, allowWebSources: web });
+          if (!initial) setName("");
+          onSaved();
+        } catch (x) { setErr((x as Error).message); }
+        finally { setBusy(false); }
+      }}>
+      <input aria-label={initial ? "Edit profile name" : "Profile name"} placeholder="Name" value={name} maxLength={80}
+        onChange={(e) => setName(e.target.value)} required />
+      <select aria-label="Minimum resolution" value={min} onChange={(e) => setMin(Number(e.target.value))}>
+        {[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>min {r}p</option>)}
+      </select>
+      <select aria-label="Cutoff resolution" value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))}>
+        {[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>cutoff {r}p</option>)}
+      </select>
       <label className="inline"><input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /> allow web sources</label>
-      <button type="submit">Add profile</button>
+      <button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save profile" : "Add profile"}</button>
+      {initial && <button type="button" disabled={busy} onClick={onCancel}>Cancel edit</button>}
       <ErrorLine message={err} />
     </form>
   );
