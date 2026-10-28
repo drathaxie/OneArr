@@ -908,7 +908,8 @@ public static class ApiEndpoints
                         {
                             var indexer = await c.Indexers.AsNoTracking().FirstOrDefaultAsync(i => i.Id == indexerId, ct);
                             if (indexer is null) return Results.NotFound();
-                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) || !string.IsNullOrWhiteSpace(body.ApiKey);
+                            var hasOverrides = !string.IsNullOrWhiteSpace(body.BaseUrl) ||
+                                !string.IsNullOrWhiteSpace(body.ApiKey) || body.Protocol is not null;
                             if (!hasOverrides)
                             {
                                 if (!indexer.Enabled) return Results.Ok(new { ok = false, service, detail = $"Indexer '{indexer.Name}' is disabled." });
@@ -918,13 +919,16 @@ public static class ApiEndpoints
                             {
                                 name = indexer.Name;
                                 baseUrl = string.IsNullOrWhiteSpace(body.BaseUrl) ? indexer.BaseUrl : body.BaseUrl;
-                                apiKey = string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
+                                apiKey = body.Protocol == "rss" ? PublicRssClient.ProtocolMarker :
+                                    body.Protocol == "torznab" && PublicRssClient.IsPublicRss(indexer.ApiKey) ? body.ApiKey ?? "" :
+                                    string.IsNullOrWhiteSpace(body.ApiKey) ? indexer.ApiKey : body.ApiKey;
                             }
                         }
                         else
                         {
                             if (string.IsNullOrWhiteSpace(body.BaseUrl)) return Results.BadRequest(new { error = "indexerId or baseUrl is required" });
-                            (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl, body.ApiKey ?? "");
+                            (name, baseUrl, apiKey) = ("Unsaved indexer", body.BaseUrl,
+                                body.Protocol == "rss" ? PublicRssClient.ProtocolMarker : body.ApiKey ?? "");
                         }
                         TorznabCaps caps;
                         string verifiedDetail = "";
