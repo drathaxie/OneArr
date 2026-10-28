@@ -21,10 +21,41 @@ public sealed class TorznabClient : IIndexerClient
     }
 
     /// <summary>Nyaa's public RSS feed is a native indexer, not a Torznab API.</summary>
-    public static bool IsDirectNyaa(Uri uri) =>
-        uri.Scheme == Uri.UriSchemeHttps &&
-        uri.Host.Equals("nyaa.si", StringComparison.OrdinalIgnoreCase) &&
-        (uri.AbsolutePath is "/" or "");
+    public static bool IsDirectNyaa(Uri uri)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps || uri.Host != "nyaa.si" || uri.Port != 443 ||
+            uri.AbsolutePath != "/" || uri.Fragment.Length > 0 || uri.UserInfo.Length > 0)
+            return false;
+        if (uri.Query.Length == 0) return true;
+        var query = NyaaParameters(uri);
+        return query is not null && query.TryGetValue("page", out var page) && page == "rss";
+    }
+
+    private static Dictionary<string, string>? NyaaParameters(Uri uri)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (uri.Query.Length > 512) return null;
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0]);
+            if (key is not ("page" or "q" or "c" or "f") || !parameters.TryAdd(key,
+                parts.Length == 2 ? Uri.UnescapeDataString(parts[1]) : "")) return null;
+        }
+        return parameters;
+    }
+
+    /// <summary>Nyaa's RSS supports live queries and optional category/trust filters.</summary>
+    public static string NyaaSearchPath(Uri configured, string title)
+    {
+        if (!IsDirectNyaa(configured)) throw new ExternalServiceException("Invalid Nyaa RSS address");
+        var parameters = NyaaParameters(configured);
+        var url = "?page=rss&q=" + Uri.EscapeDataString(title);
+        foreach (var key in new[] { "c", "f" })
+            if (parameters?.TryGetValue(key, out var value) == true && value.Length > 0)
+                url += "&" + key + "=" + Uri.EscapeDataString(value);
+        return url;
+    }
 
     public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
     {
@@ -33,7 +64,9 @@ public sealed class TorznabClient : IIndexerClient
             return await (_native ?? throw new ExternalServiceException("Native tracker engine not configured"))
                 .SearchAsync(indexer, search, ct);
         if (IsDirectNyaa(baseUri))
-            return await SearchNyaaAsync(indexer.Name, search, ct);
+            return await SearchNyaaAsync(indexer.Name, baseUri, search, ct);
+        if (PublicRssClient.IsPublicRss(indexer.ApiKey))
+            return await new PublicRssClient(_factory).SearchAsync(indexer, search, ct);
         var parameters = new List<string>
         {
             "t=" + (search.Type == MediaType.Series && search.Season is not null ? "tvsearch" : "search"),
@@ -59,11 +92,11 @@ public sealed class TorznabClient : IIndexerClient
         return Parse(body, indexer.Name);
     }
 
-    private async Task<IReadOnlyList<ReleaseCandidate>> SearchNyaaAsync(string name, ReleaseSearch search, CancellationToken ct)
+    private async Task<IReadOnlyList<ReleaseCandidate>> SearchNyaaAsync(string name, Uri configured, ReleaseSearch search, CancellationToken ct)
     {
         var client = _factory.CreateClient(OutboundHttp.TorznabClient);
         client.BaseAddress = new Uri("https://nyaa.si/");
-        var url = "?page=rss&q=" + Uri.EscapeDataString(search.Title);
+        var url = NyaaSearchPath(configured, search.Title);
         using var response = await OutboundHttp.SendWithRetryAsync(client,
             () => new HttpRequestMessage(HttpMethod.Get, url), ct);
         if (!response.IsSuccessStatusCode)
