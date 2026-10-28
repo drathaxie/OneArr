@@ -41,7 +41,7 @@ describe("Tracker directory", () => {
     render(<TrackerCatalog onClose={() => {}} onGeneric={onGeneric} />);
     fireEvent.change(screen.getByLabelText("Search tracker catalog"), { target: { value: "nyaasi" } });
     expect(screen.queryByText("Torrentleech")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Nyaasi v11/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Nyaasi v11$/i }));
     expect(await screen.findByRole("heading", { name: "Nyaa.si" })).toBeTruthy();
     expect(screen.getByText(/Prefer magnet links/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add Nyaa (native RSS)" }));
