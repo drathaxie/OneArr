@@ -1425,7 +1425,7 @@ public static class ApiEndpoints
             PublicRssClient.IsPublicRss(i.ApiKey) ? "RSS" :
             Uri.TryCreate(i.BaseUrl, UriKind.Absolute, out var nyaaUrl) && TorznabClient.IsDirectNyaa(nyaaUrl) ? "Nyaa RSS" : "Torznab",
         i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
-        hasKey = i.ApiKey.Length > 0,
+        hasKey = i.ApiKey.Length > 0 && !PublicRssClient.IsPublicRss(i.ApiKey),
         healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
         lastTestedAt = h?.LastTestedAt,
         lastError = h?.LastError,
