@@ -1423,7 +1423,7 @@ public static class ApiEndpoints
         host = HostOf(i.BaseUrl),
         protocol = TrackerSecretBox.IsNative(i.ApiKey) ? "TorrentLeech" :
             PublicRssClient.IsPublicRss(i.ApiKey) ? "RSS" :
-            TorznabClient.IsDirectNyaa(UrlGuard.RequireServiceUrl(i.BaseUrl)) ? "Nyaa RSS" : "Torznab",
+            Uri.TryCreate(i.BaseUrl, UriKind.Absolute, out var nyaaUrl) && TorznabClient.IsDirectNyaa(nyaaUrl) ? "Nyaa RSS" : "Torznab",
         i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
         hasKey = i.ApiKey.Length > 0,
         healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
