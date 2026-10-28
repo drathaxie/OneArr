@@ -577,7 +577,13 @@ public sealed class DownloadService
             ImportOutcome outcome;
             try
             {
-                outcome = await _importer.ImportAsync(new ImportRequest(plan.SourcePath, destRoot, relFolder, torrentRoot, DryRun: false, job.Id), ct);
+                if (string.IsNullOrWhiteSpace(plan.DestinationPath))
+                    throw new ArgumentException("The approved import plan has no destination");
+                outcome = await _importer.ImportAsync(new ImportRequest(plan.SourcePath, destRoot, relFolder,
+                    torrentRoot, DryRun: false, job.Id, Path.GetFileName(plan.DestinationPath)), ct);
+                if (!string.Equals(outcome.DestinationPath, plan.DestinationPath,
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    throw new ArgumentException("Importer destination no longer matches the approved preview");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -663,16 +669,37 @@ public sealed class DownloadService
         var episodes = media.MediaType == MediaType.Series
             ? await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == media.Id).ToListAsync(ct)
             : new List<Episode>();
+        var rename = await _settings.GetBoolAsync(SettingKeys.RenameOnImport, false, ct);
+        var template = rename
+            ? await _settings.GetAsync(media.MediaType == MediaType.Movie
+                ? SettingKeys.MovieNamingTemplate : SettingKeys.SeriesNamingTemplate, ct)
+            : null;
+        template ??= media.MediaType == MediaType.Movie ? MediaNaming.MovieTemplate : MediaNaming.EpisodeTemplate;
         foreach (var file in files)
         {
-            plans.Add(await PlanFileAsync(file, destRoot, relFolder, torrentRoot, media, job, episodes, ct));
+            plans.Add(await PlanFileAsync(file, destRoot, relFolder, torrentRoot,
+                media, job, episodes, rename, template, ct));
         }
+        // Two distinct source files must never target one filename, even when
+        // the destination did not exist during preview.
+        var conflicts = plans.Where(p => p.DestinationPath is not null)
+            .GroupBy(p => p.DestinationPath!, OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .Where(g => g.Count() > 1).SelectMany(g => g).Select(p => p.SourcePath).ToHashSet();
+        if (conflicts.Count > 0)
+            plans = plans.Select(p => conflicts.Contains(p.SourcePath)
+                ? Reject(p.SourcePath, p.DestinationPath, p.SizeBytes, p.LastWriteUtcTicks,
+                    p.MatchedEpisodeIds, p.MatchedEpisodeLabels,
+                    "Multiple source files would resolve to the same destination; change the naming template", conflict: true)
+                : p).ToList();
         if (plans.Count == 0)
             throw new ArgumentException("No media files found in the completed download; nothing to preview");
         return (job, plans);
     }
 
-    private async Task<ImportPlanDto> PlanFileAsync(string file, string destRoot, string relFolder, string torrentRoot, MediaItem media, DownloadJob job, List<Episode> episodes, CancellationToken ct)
+    private async Task<ImportPlanDto> PlanFileAsync(string file, string destRoot, string relFolder,
+        string torrentRoot, MediaItem media, DownloadJob job, List<Episode> episodes,
+        bool rename, string template, CancellationToken ct)
     {
         var labels = new List<int>();
         var labelTexts = new List<string>();
@@ -701,7 +728,21 @@ public sealed class DownloadService
         {
             var source = SafeImporter.CanonicalUnder(torrentRoot, file);
             SafeImporter.RequireNoLinksBelow(torrentRoot, source);
-            dest = SafeImporter.PlanDestination(destRoot, relFolder, Path.GetFileName(source));
+            var fileName = Path.GetFileName(source);
+            if (rename)
+            {
+                if (media.MediaType == MediaType.Series && labels.Count != 1)
+                    throw new ArgumentException("Episode naming requires exactly one matched episode; review this pack manually");
+                var episode = media.MediaType == MediaType.Series
+                    ? episodes.Single(e => e.Id == labels[0]) : null;
+                var parsed = new ReleaseParser().Parse(job.ReleaseTitle);
+                var quality = parsed.Resolution is int resolution ? $"{resolution}p" : null;
+                fileName = MediaNaming.Preview(new MediaNaming.Request(
+                    media.MediaType == MediaType.Movie ? "movie" : "series",
+                    template, media.Title, fileName, media.Year,
+                    episode?.SeasonNumber, episode?.EpisodeNumber, episode?.Title, quality));
+            }
+            dest = SafeImporter.PlanDestination(destRoot, relFolder, fileName);
             SafeImporter.RequireNoLinksBelow(destRoot, dest);
             var info = new FileInfo(source);
             if (!info.Exists) return Reject(file, dest, 0, 0, labels, labelTexts, "Source file does not exist");
