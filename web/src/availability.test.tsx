@@ -47,7 +47,7 @@ describe("series availability badges", () => {
     expect(screen.queryByText("Available", { selector: "span" })).toBeNull();
     expect(screen.getByText("126 / 180 monitored aired episodes available")).toBeTruthy();
     expect(screen.getByText("Episode data insufficient to classify")).toBeTruthy();
-    // Monitored stays a separate indicator alongside availability.
-    expect(screen.getAllByText("Monitored").length).toBeGreaterThan(1);
+    // Monitored stays a separate indicator alongside availability (mono note).
+    expect(screen.getAllByText("MONITORED").length).toBeGreaterThan(1);
   });
 });
