@@ -245,7 +245,15 @@ public sealed class DownloadService
         }
 
         var relFolder = RelativeFolder(media, job, db);
-        var files = ListFiles(job.ContentPath!, torrentRoot);
+        List<string> files;
+        try
+        {
+            files = ListFiles(await ResolveContentPathAsync(job, torrentRoot, ct), torrentRoot);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException)
+        {
+            return await FailJobOrReportAsync(db, job, "Download path mapping: " + ex.Message, dryRun, ct);
+        }
         if (files.Count == 0) return await FailJobOrReportAsync(db, job, "No media files found in the completed download", dryRun, ct);
 
         int considered = 0, imported = 0, failed = 0, planned = 0;
@@ -658,7 +666,7 @@ public sealed class DownloadService
             throw new ArgumentException("Root folder is outside the configured media root");
         }
         var relFolder = RelativeFolder(media, job, db);
-        var files = ListFiles(job.ContentPath!, torrentRoot);
+        var files = ListFiles(await ResolveContentPathAsync(job, torrentRoot, ct), torrentRoot);
         var plans = new List<ImportPlanDto>();
         var episodes = media.MediaType == MediaType.Series
             ? await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == media.Id).ToListAsync(ct)
@@ -744,6 +752,18 @@ public sealed class DownloadService
             ? db.Episodes.AsNoTracking().Where(e => e.Id == eid).Select(e => e.SeasonNumber).FirstOrDefault()
             : new ReleaseParser().Parse(job.ReleaseTitle).Season ?? 1;
         return Path.Combine(title, $"Season {season:00}");
+    }
+
+    private async Task<string> ResolveContentPathAsync(DownloadJob job, string torrentRoot, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(job.ContentPath))
+            throw new ArgumentException("Download content path is empty");
+        if (job.DownloadClientId is not int clientId)
+            return job.ContentPath;
+        var json = await _settings.GetAsync(DownloadPathMapper.SettingsKey(clientId), ct);
+        return string.IsNullOrWhiteSpace(json)
+            ? job.ContentPath
+            : DownloadPathMapper.Map(DownloadPathMapper.Read(json), job.ContentPath, torrentRoot);
     }
 
     private static List<string> ListFiles(string contentPath, string torrentRoot)
