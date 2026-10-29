@@ -244,11 +244,21 @@ public sealed class DownloadService
                     ? await planDb.DownloadClients.AsNoTracking()
                         .FirstOrDefaultAsync(c => c.Id == ownerId, ct)
                     : null;
+                // Queue synchronization ran before this pass. A client that
+                // just became unreachable is NOT trusted even when its job
+                // has a recently cached completed state.
+                var health = job.DownloadClientId is int healthId
+                    ? await planDb.DownloadClientHealth.AsNoTracking()
+                        .FirstOrDefaultAsync(h => h.DownloadClientId == healthId, ct)
+                    : null;
                 Episode? target = job.EpisodeId is int epId
                     ? await planDb.Episodes.AsNoTracking().FirstOrDefaultAsync(e => e.Id == epId, ct)
                     : null;
                 considered++;
-                var why = AutoImportReviewReason(job, media, owner, plans, now, target);
+                var why = health is null || health.LastError is not null ||
+                        health.LastSeenAt is null || now - health.LastSeenAt > TimeSpan.FromMinutes(3)
+                    ? "Download client is unreachable or has not reported a recent healthy state"
+                    : AutoImportReviewReason(job, media, owner, plans, now, target);
                 if (why is not null) { deferred++; if (considered >= 5) break; continue; }
 
                 // Store exactly the verified plans. Apply recomputes and
@@ -325,6 +335,10 @@ public sealed class DownloadService
                 return "Existing movie file, ambiguous movie, or multiple video files";
             if (release.Year is int year && media.Year is int wantedYear && Math.Abs(year - wantedYear) > 1)
                 return "Movie year does not match";
+            var videoName = new ReleaseParser().Parse(Path.GetFileNameWithoutExtension(plans[0].SourcePath));
+            if (!string.Equals(ReleaseParser.NormalizeTitle(videoName.Title),
+                ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+                return "Movie filename does not match the media item";
             return null;
         }
 
@@ -342,6 +356,10 @@ public sealed class DownloadService
         {
             var matched = LibraryMatcher.ParseEpisodes(Path.GetFileName(plan.SourcePath));
             if (matched.Count != 1) return "Episode filename is ambiguous";
+            var videoName = new ReleaseParser().Parse(Path.GetFileNameWithoutExtension(plan.SourcePath));
+            if (!string.Equals(ReleaseParser.NormalizeTitle(videoName.Title),
+                ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+                return "Episode filename belongs to a different series";
             if (job.EpisodeId is int episodeId)
             {
                 if (episode is null || matched[0].Season != episode.SeasonNumber ||
