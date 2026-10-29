@@ -177,7 +177,9 @@ describe("command center inspector", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Manual release search" });
     expect(within(dialog).getByText("Manual release search")).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "Dossier for Dune" })).toBeTruthy();
+    // Background dossier remains mounted, but a modal may hide it from the
+    // accessibility tree while open (which is correct modal behavior).
+    expect(document.querySelector('[aria-label="Dossier for Dune"]')).not.toBeNull();
     await waitFor(() => expect(calls.some(c => c.method === "POST" && c.path === "/api/search" &&
       (c.body as { mediaItemId?: number } | undefined)?.mediaItemId === 1)).toBe(true));
     // A failed tracker search must remain visible, not vanish below the poster grid.
@@ -208,7 +210,7 @@ describe("command center inspector", () => {
     fireEvent.click(within(screen.getByRole("complementary", { name: "Dossier for Dune" }))
       .getByRole("button", { name: "Search releases" }));
     expect(await screen.findByRole("dialog", { name: "Manual release search" })).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "Dossier for Dune" })).toBeTruthy();
+    expect(document.querySelector('[aria-label="Dossier for Dune"]')).not.toBeNull();
   });
 
   it("toggles monitoring from the inspector switch", async () => {
