@@ -37,9 +37,10 @@ const CATEGORIES: Category[] = [
     { id: "metadata-tmdb", label: "TMDb" },
     { id: "metadata-tests", label: "Connection tests", advanced: true },
   ] },
-  { id: "automation", label: "Automation", description: "Automatic grabbing toggle and the library safety gate that must pass before any automatic search runs.", subsections: [
+  { id: "automation", label: "Automation", description: "Independent automatic grabbing and completed-download importing controls.", subsections: [
     { id: "automation-status", label: "Automation status" },
     { id: "automation-toggle", label: "Automatic grabbing" },
+    { id: "automation-import", label: "Completed-download importing" },
   ] },
   { id: "migration", label: "Migration", description: "Sonarr/Radarr import previews and monitoring synchronisation, with the preview-required Apply safety mechanism.", subsections: [
     { id: "migration-import", label: "Import preview" },
@@ -955,7 +956,10 @@ function AutomationSection() {
       <ErrorLine message={error} />
       <div id="automation-status"><AutomationStatus /></div>
       {data && (
-        <div id="automation-toggle"><AutomationForm data={data} onSaved={reload} /></div>
+        <>
+          <div id="automation-toggle"><AutomationForm data={data} onSaved={reload} /></div>
+          <div id="automation-import"><AutomaticImportForm data={data} onSaved={reload} /></div>
+        </>
       )}
     </>
   );
@@ -994,6 +998,33 @@ function AutomationForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
       <p className="muted">Turning this on does not bypass the library check: automatic searches only run when the library is reconciled, every folder is reachable, and no download is already active for an item. Until then, all grabs are manual. Keep it off during testing unless you have applied a complete library scan.</p>
       <ErrorLine message={message} />
       <button className="primary" type="submit">Save automation</button>
+    </form>
+  );
+}
+
+function AutomaticImportForm({ data, onSaved }: { data: SettingsData; onSaved: () => void }) {
+  const [enabled, setEnabled] = useState<boolean>(data.automaticImport ?? false);
+  const [message, setMessage] = useState<string | null>(null);
+  const dryRun = data.dryRunImport;
+  return (
+    <form className="card" onSubmit={(e) => { e.preventDefault(); void saveSettings({ automaticImport: enabled }, setMessage, onSaved); }}>
+      <h2>Completed-download importing</h2>
+      <label className="inline"><input aria-label="Automatic completed-download importing" type="checkbox"
+        checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        Automatically import confidently matched completed downloads (off by default)
+      </label>
+      <p className="muted">Separate from automatic grabbing. Every five minutes, OneArr reviews completed qBittorrent jobs.
+        Only recently verified downloads with unambiguous movie or episode matches can be imported.
+        Files are hardlinked where possible or copied and verified; the torrent source is never moved or deleted.
+        Conflicts, existing movies, multi-episode files, uncertain matches and incomplete torrents still require manual review.</p>
+      <p className={dryRun ? "error" : "muted"}>
+        {dryRun
+          ? "Dry-run is currently ON under Media Management → Import paths. This blocks automatic physical imports even when this checkbox is enabled."
+          : "Dry-run is OFF. If you enable automatic imports, the scheduler may begin creating files in your library. You can turn this off at any time."}
+      </p>
+      <p className="muted">Media Management → Naming controls whether imported files are renamed. Existing media files are never overwritten by automatic imports.</p>
+      <ErrorLine message={message} />
+      <button type="submit" className="primary">Save completed-download handling</button>
     </form>
   );
 }
