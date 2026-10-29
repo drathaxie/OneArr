@@ -669,6 +669,7 @@ public class DownloadLifecycleTests
         await using var db = world.Db.CreateDbContext();
         var job = await db.DownloadJobs.FirstAsync(j => j.Id == jobId);
         job.Status = DownloadStatus.Completed;
+        job.ClientState = "stalledUP";
         job.Progress = 1;
         job.CompletedAt = world.Time.GetUtcNow().AddMinutes(-2);
         job.LastSeenAt = world.Time.GetUtcNow();
