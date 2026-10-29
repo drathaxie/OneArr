@@ -127,7 +127,6 @@ public sealed class DownloadService
             var match = FindMatch(job, candidates);
             if (match is not null)
             {
-                var wasCompleted = job.Status == DownloadStatus.Completed;
                 job.Hash ??= match.Hash;
                 job.Status = QBittorrentClient.MapState(match.State, match.Progress);
                 job.Progress = match.Progress;
@@ -137,7 +136,7 @@ public sealed class DownloadService
                 job.EtaSeconds = match.EtaSeconds;
                 job.LastSeenAt = now;
                 job.Error = null;
-                if (job.Status == DownloadStatus.Completed && !wasCompleted && job.CompletedAt is null)
+                if (job.Status == DownloadStatus.Completed && job.CompletedAt is null)
                     job.CompletedAt = now;
                 job.UpdatedAt = now;
                 updated++;
