@@ -46,6 +46,10 @@ public sealed class ReleaseService
     {
         if (seasonPackOnly && episodeId is null) throw new ArgumentException("Season-pack search requires an episode in the target season");
         var (target, search, indexers) = await BuildTargetAsync(mediaItemId, episodeId, ct);
+        // Query the entire Sxx pack rather than an individual SxxExx title.
+        // The episode still identifies the correct season for validation.
+        if (seasonPackOnly)
+            search = new ReleaseSearch(target.Type, target.Title, target.Year, target.Season, null, "5000");
         var outcomes = new List<IndexerSearchOutcome>();
         var found = new List<ReleaseCandidate>();
 
