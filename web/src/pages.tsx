@@ -224,7 +224,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
   }, [menuId]);
 
   if (detailId !== null) {
-    return <MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} />;
+    return <div className="dialog-backdrop series-workspace-backdrop"><section role="dialog" aria-modal="true" aria-label="Media manager" className="series-workspace-dialog"><MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} /></section></div>;
   }
 
   return (
@@ -422,6 +422,8 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   const [showReleases, setShowReleases] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [managerTab, setManagerTab] = useState<"seasons" | "files" | "settings">("seasons");
+  const [releaseLabel, setReleaseLabel] = useState<string | null>(null);
 
   async function patch(body: Record<string, unknown>, after?: () => void) {
     setMessage(null);
@@ -455,7 +457,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
 
   return (
     <>
-      <button onClick={onBack}>← Back to {isSeries ? "Series" : "Movies"}</button>
+      <div className="row spread series-manager-toolbar"><span className="mono">ONEARR / {isSeries ? "SERIES" : "MOVIE"} MANAGER</span><button onClick={onBack} aria-label="Close media manager">✕ Close</button></div>
       <ErrorLine message={error ?? message} />
       <div className="card detail-head">
         {posterUrl(data.posterPath)
@@ -498,9 +500,11 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
         </div>
       </div>
       {showReleases && !isSeries && <ReleasePanel mediaId={mediaId} episodeId={null} onClose={() => setShowReleases(false)} />}
-      {isSeries && data.seasons.map((s) => {
+      {isSeries && <div className="series-manager-tabs" role="tablist" aria-label="Manager sections"><button role="tab" aria-selected={managerTab === "seasons"} className={managerTab === "seasons" ? "active" : ""} onClick={() => setManagerTab("seasons")}>Seasons & episodes</button><button role="tab" aria-selected={managerTab === "files"} className={managerTab === "files" ? "active" : ""} onClick={() => setManagerTab("files")}>Linked files ({data.files.length})</button><button role="tab" aria-selected={managerTab === "settings"} className={managerTab === "settings" ? "active" : ""} onClick={() => setManagerTab("settings")}>Settings</button></div>}
+      {isSeries && managerTab === "seasons" && <div className="row spread series-season-heading"><h2>Seasons</h2><div className="row"><button className="small" onClick={() => setCollapsed(new Set(data.seasons.map(s => s.seasonNumber)))}>Expand all</button><button className="small" onClick={() => setCollapsed(new Set())}>Collapse all</button></div></div>}
+      {isSeries && managerTab === "seasons" && data.seasons.map((s) => {
         const eps = data.episodes.filter((e) => e.seasonNumber === s.seasonNumber);
-        const isCollapsed = collapsed.has(s.seasonNumber);
+        const isCollapsed = !collapsed.has(s.seasonNumber);
         return (
           <div key={s.seasonNumber} className="card">
             <div className="row spread">
@@ -524,19 +528,17 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
                       <td><button className="small" onClick={() => toggleEpisode(e.id, !e.monitored)}>{e.monitored ? "Yes" : "No"}</button></td>
                       <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
                       <td>{e.resolution ? `${e.resolution}p` : "—"}</td>
-                      <td><button className="small" onClick={() => setReleaseEpisode(releaseEpisode === e.id ? null : e.id)}>Releases</button></td>
+                      <td><button className="small" aria-label={`Search releases for S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`} onClick={() => { setReleaseLabel(`S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")} — ${e.title}`); setReleaseEpisode(e.id); }}>Search episode</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table></div>
             )}
-            {releaseEpisode !== null && eps.some((e) => e.id === releaseEpisode) && (
-              <ReleasePanel mediaId={mediaId} episodeId={releaseEpisode} onClose={() => setReleaseEpisode(null)} />
-            )}
+
           </div>
         );
       })}
-      <div className="card">
+      {(!isSeries || managerTab === "files") && <div className="card">
         <h2>Linked files ({data.files.length})</h2>
         {data.files.length === 0 ? <p className="muted">No linked files yet. Run a library scan in Settings, or import a download, and they will appear here.</p> : (
           <div className="table-wrap"><table>
@@ -552,7 +554,8 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
             ))}</tbody>
           </table></div>
         )}
-      </div>
+      </div>}
+      {releaseEpisode !== null && <div className="dialog-backdrop release-search-backdrop"><div role="dialog" aria-modal="true" aria-label={`Episode releases: ${releaseLabel ?? ""}`} className="dialog release-search-dialog"><p className="mono">{releaseLabel}</p><ReleasePanel mediaId={mediaId} episodeId={releaseEpisode} onClose={() => { setReleaseEpisode(null); setReleaseLabel(null); }} autoSearch /></div></div>}
     </>
   );
 }
