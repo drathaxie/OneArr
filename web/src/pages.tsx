@@ -223,10 +223,6 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
     return () => document.removeEventListener("click", onClick);
   }, [menuId]);
 
-  if (detailId !== null) {
-    return <div className="dialog-backdrop series-workspace-backdrop"><section role="dialog" aria-modal="true" aria-label="Media manager" className="series-workspace-dialog"><MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} /></section></div>;
-  }
-
   return (
     <>
       <div className="cc-page-head">
@@ -286,15 +282,15 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
                   <button
                     data-poster-button={item.id}
                     className="cc-poster-button"
-                    onClick={(e) => openInspector(item, e.currentTarget)}
-                    aria-label={`Open ${item.title}`}
+                    onClick={() => { setInspectorId(null); setDetailId(item.id); }}
+                    aria-label={`Manage ${item.title}`}
                   >
                     <Poster item={item} />
                   </button>
                 </div>
                 <div className="cc-card-info">
                   <div className="cc-card-head">
-                    <button className="cc-title" title={item.title} onClick={() => openInspector(item, document.querySelector<HTMLButtonElement>(`[data-poster-button="${item.id}"]`))}>{item.title}</button>
+                    <button className="cc-title" title={item.title} onClick={() => { setInspectorId(null); setDetailId(item.id); }}>{item.title}</button>
                     <button
                       className="cc-card-menu"
                       aria-label={`Actions for ${item.title}`}
@@ -400,6 +396,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
           )}
         </div>
       )}
+      {detailId !== null && <div className="dialog-backdrop series-workspace-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) { setDetailId(null); reload(); } }}><section role="dialog" aria-modal="true" aria-label="Media manager" className="series-workspace-dialog"><MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} /></section></div>}
       {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
       {searchId !== null && <ReleaseSearchDialog mediaId={searchId} onClose={closeReleaseSearch} />}
       {pendingRemove !== null && (
@@ -510,13 +507,13 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
         return (
           <div key={s.seasonNumber} className="card">
             <div className="row spread">
-              <h2 style={{ margin: 0 }}>Season {s.seasonNumber}</h2>
+              <button className="series-season-toggle" aria-expanded={!isCollapsed} onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "▸" : "▾"} Season {s.seasonNumber}</button>
               <div className="row">
                 <span className="badge">{s.monitored ? "Monitored" : "Unmonitored"}</span>
                 <span className="muted">{s.hasFileCount}/{s.episodeCount} have files · {s.wantedCount} wanted</span>
                 <button className="small" disabled={eps.length === 0} onClick={() => { const chosen = eps.find(e => e.monitored && !e.hasFile) ?? eps[0]; if (!chosen) return; setPackOnly(true); setReleaseLabel(`Season ${s.seasonNumber} — season packs`); setReleaseEpisode(chosen.id); }}>Search season packs</button>
                 <button className="small" onClick={() => toggleSeason(s.seasonNumber, !s.monitored)}>{s.monitored ? "Unmonitor season" : "Monitor season"}</button>
-                <button className="small" onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "Expand" : "Collapse"}</button>
+                
               </div>
             </div>
             {!isCollapsed && (
@@ -529,7 +526,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
                       <td>{e.title}</td>
                       <td>{e.airDate ?? ""}</td>
                       <td><button className="small" onClick={() => toggleEpisode(e.id, !e.monitored)}>{e.monitored ? "Yes" : "No"}</button></td>
-                      <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
+                      <td>{e.hasFile ? <span className="badge ok">Present</span> : <span className={e.monitored ? "badge bad" : "badge"}>{e.monitored ? "Missing" : "Not downloaded"}</span>}</td>
                       <td>{e.resolution ? `${e.resolution}p` : "—"}</td>
                       <td><button className="small" aria-label={`Search releases for S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`} onClick={() => { setPackOnly(false); setReleaseLabel(`S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")} — ${e.title}`); setReleaseEpisode(e.id); }}>Search episode</button></td>
                     </tr>
