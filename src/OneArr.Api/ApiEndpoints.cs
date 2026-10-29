@@ -26,7 +26,7 @@ public static class ApiEndpoints
         string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
@@ -958,6 +958,7 @@ public static class ApiEndpoints
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
                 automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
+                automaticImport = await settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct),
                 defaultMovieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct),
                 defaultSeriesRoot = await settings.GetAsync(SettingKeys.DefaultSeriesRoot, ct),
                 defaultMovieProfileId = ParseProfileId(await settings.GetAsync(SettingKeys.DefaultMovieProfile, ct)),
@@ -1000,6 +1001,7 @@ public static class ApiEndpoints
             if (body.TorrentRoot is not null) values[SettingKeys.TorrentRoot] = RequireAbsolute(body.TorrentRoot);
             if (body.MediaRoot is not null) values[SettingKeys.MediaRoot] = RequireAbsolute(body.MediaRoot);
             if (body.AutomaticGrabbing is bool auto) values[SettingKeys.AutomaticGrab] = auto.ToString();
+            if (body.AutomaticImport is bool autoImport) values[SettingKeys.AutomaticImport] = autoImport.ToString();
             if (body.DefaultMovieRoot is not null) values[SettingKeys.DefaultMovieRoot] = string.IsNullOrWhiteSpace(body.DefaultMovieRoot) ? null : RequireAbsolute(body.DefaultMovieRoot);
             if (body.DefaultSeriesRoot is not null) values[SettingKeys.DefaultSeriesRoot] = string.IsNullOrWhiteSpace(body.DefaultSeriesRoot) ? null : RequireAbsolute(body.DefaultSeriesRoot);
             if (body.DefaultMovieProfileId is int movieProfile) values[SettingKeys.DefaultMovieProfile] = (await RequireProfileAsync(db, movieProfile, ct)).ToString();
