@@ -79,6 +79,7 @@ export interface SettingsData {
   torrentRoot: string | null;
   mediaRoot: string | null;
   automaticGrabbing: boolean;
+  automaticImport?: boolean;
   defaultMovieRoot: string | null;
   defaultSeriesRoot: string | null;
   defaultMovieProfileId: number | null;

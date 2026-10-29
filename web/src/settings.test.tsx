@@ -156,6 +156,18 @@ describe("General settings", () => {
     expect(putCalls()[0].body!.automaticGrabbing).toBe(true);
   });
 
+  it("keeps completed-download importing off until explicitly saved, independent of grabbing", async () => {
+    await renderSettings();
+    await openSection("Automation", "Automatic grabbing");
+    const toggle = screen.getByLabelText("Automatic completed-download importing") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByText(/Dry-run is currently ON/)).toBeTruthy();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save completed-download handling" }));
+    await waitFor(() => expect(putCalls().length).toBe(1));
+    expect(putCalls()[0].body).toEqual({ automaticImport: true });
+  });
+
   it("runs a TMDb connection test and shows its result", async () => {
     await renderSettings();
     await openSection("Metadata", "TMDb");

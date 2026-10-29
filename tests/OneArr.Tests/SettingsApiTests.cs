@@ -104,6 +104,33 @@ public class SettingsApiTests
         Assert.True(settings.GetProperty("dryRunImport").GetBoolean(), "imports must default to dry-run");
         Assert.False(settings.GetProperty("tmdbConfigured").GetBoolean());
         Assert.False(settings.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.False(settings.GetProperty("automaticImport").GetBoolean(), "automatic completed importing defaults OFF");
+    }
+
+    [Fact]
+    public async Task AutomaticCompletedImportIsIndependentOptInAndInvalidSettingsNeverEnableIt()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(initial.GetProperty("automaticImport").GetBoolean());
+        Assert.True(initial.GetProperty("dryRunImport").GetBoolean());
+        var invalid = await client.PutAsJsonAsync("/api/settings",
+            new { automaticImport = true, torrentRoot = "not-an-absolute-path" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var after = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(after.GetProperty("automaticImport").GetBoolean());
+        var enabled = await client.PutAsJsonAsync("/api/settings", new { automaticImport = true });
+        Assert.Equal(HttpStatusCode.NoContent, enabled.StatusCode);
+        var saved = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.True(saved.GetProperty("automaticImport").GetBoolean());
+        Assert.False(saved.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.True(saved.GetProperty("dryRunImport").GetBoolean(),
+            "Enabling automatic import must not silently disable the independent dry-run guard");
+        var disabled = await client.PutAsJsonAsync("/api/settings", new { automaticImport = false });
+        Assert.Equal(HttpStatusCode.NoContent, disabled.StatusCode);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/settings"))
+            .GetProperty("automaticImport").GetBoolean());
     }
 
     [Fact]

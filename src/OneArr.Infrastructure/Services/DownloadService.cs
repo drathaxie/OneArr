@@ -127,7 +127,6 @@ public sealed class DownloadService
             var match = FindMatch(job, candidates);
             if (match is not null)
             {
-                var wasCompleted = job.Status == DownloadStatus.Completed;
                 job.Hash ??= match.Hash;
                 job.Status = QBittorrentClient.MapState(match.State, match.Progress);
                 job.Progress = match.Progress;
@@ -137,7 +136,7 @@ public sealed class DownloadService
                 job.EtaSeconds = match.EtaSeconds;
                 job.LastSeenAt = now;
                 job.Error = null;
-                if (job.Status == DownloadStatus.Completed && !wasCompleted && job.CompletedAt is null)
+                if (job.Status == DownloadStatus.Completed && job.CompletedAt is null)
                     job.CompletedAt = now;
                 job.UpdatedAt = now;
                 updated++;
@@ -193,6 +192,200 @@ public sealed class DownloadService
     }
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
+
+    /// <summary>
+    /// A deliberately conservative automatic importer, separate from the manual
+    /// ImportCompletedAsync bulk engine. Every write passes through the SAME
+    /// stored preview, fingerprint recheck and SafeImporter as manual Apply.
+    /// Missing setting, dry-run setting, stale qBit observation and ambiguous
+    /// media all fail closed. The torrent source is never moved or removed.
+    /// </summary>
+    public async Task<ImportRunSummary> AutoImportCompletedAsync(CancellationToken ct)
+    {
+        if (!await _settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct) ||
+            await _settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct))
+            return new ImportRunSummary(0, 0, 0, 0, "Automatic import is disabled or dry-run mode is enabled");
+
+        var now = _time.GetUtcNow();
+        await using var db = await _db.CreateDbContextAsync(ct);
+        // Bounded pass: no unbounded database or filesystem loop on startup.
+        var eligibleQueue = db.DownloadJobs.AsNoTracking().Where(j => j.Status == DownloadStatus.Completed);
+        var pendingCount = await eligibleQueue.CountAsync(ct);
+        // Rotate through bounded pages so old ambiguous jobs cannot starve
+        // newer completed jobs forever. At most 20 candidates and 5 planned
+        // jobs are inspected in one five-minute scheduler pass.
+        const int pageSize = 20;
+        var pages = Math.Max(1, (pendingCount + pageSize - 1) / pageSize);
+        var page = (int)((now.ToUnixTimeSeconds() / 300) % pages);
+        var pending = await eligibleQueue
+            .OrderBy(j => j.Id)
+            .Skip(page * pageSize)
+            .Take(pageSize)
+            .Select(j => j.Id)
+            .ToListAsync(ct);
+        int considered = 0, imported = 0, deferred = 0, failed = 0;
+        foreach (var id in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Recheck immediately prior to each job; toggling OFF never starts
+            // another import on the next job.
+            if (!await _settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct) ||
+                await _settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct)) break;
+            try
+            {
+                // Plan/inspect through the same code as the manual preview,
+                // but do not generate a stored preview for ineligible jobs.
+                await using var planDb = await _db.CreateDbContextAsync(ct);
+                var (job, plans) = await PlanJobAsync(planDb, id, ct);
+                var media = await planDb.MediaItems.AsNoTracking()
+                    .FirstOrDefaultAsync(m => m.Id == job.MediaItemId, ct);
+                var owner = job.DownloadClientId is int ownerId
+                    ? await planDb.DownloadClients.AsNoTracking()
+                        .FirstOrDefaultAsync(c => c.Id == ownerId, ct)
+                    : null;
+                // Queue synchronization ran before this pass. A client that
+                // just became unreachable is NOT trusted even when its job
+                // has a recently cached completed state.
+                var health = job.DownloadClientId is int healthId
+                    ? await planDb.DownloadClientHealth.AsNoTracking()
+                        .FirstOrDefaultAsync(h => h.DownloadClientId == healthId, ct)
+                    : null;
+                Episode? target = job.EpisodeId is int epId
+                    ? await planDb.Episodes.AsNoTracking().FirstOrDefaultAsync(e => e.Id == epId, ct)
+                    : null;
+                considered++;
+                var why = health is null || health.LastError is not null ||
+                        health.LastSeenAt is null || now - health.LastSeenAt > TimeSpan.FromMinutes(3)
+                    ? "Download client is unreachable or has not reported a recent healthy state"
+                    : job.LastSeenAt is null ||
+                      Math.Abs((health.LastSeenAt.Value - job.LastSeenAt.Value).TotalSeconds) > 5
+                        ? "This torrent was not confirmed in the download client's latest queue poll"
+                        : AutoImportReviewReason(job, media, owner, plans, now, target);
+                if (why is not null) { deferred++; if (considered >= 5) break; continue; }
+
+                // Store exactly the verified plans. Apply recomputes and
+                // rechecks the fingerprint; a changed source fails closed.
+                var preview = new ImportPreview
+                {
+                    DownloadJobId = id,
+                    PlansJson = JsonSerializer.Serialize(plans),
+                    Fingerprint = Fingerprint(plans),
+                    CreatedAt = _time.GetUtcNow(),
+                };
+                planDb.ImportPreviews.Add(preview);
+                await planDb.SaveChangesAsync(ct);
+                if (!await _settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct) ||
+                    await _settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct)) break;
+
+                await ApplyPreviewAsync(id, preview.Id, ct);
+                await using var resultDb = await _db.CreateDbContextAsync(ct);
+                var result = await resultDb.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == id, ct);
+                if (result.Status == DownloadStatus.Imported) imported++;
+                else if (result.Status == DownloadStatus.Failed) failed++;
+                else deferred++;
+                if (considered >= 5) break;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException
+                or InvalidOperationException or StalePreviewException)
+            {
+                // Never use the destructive older bulk engine as a fallback.
+                // The job remains Completed for explicit review/retry.
+                deferred++;
+            }
+        }
+        return new ImportRunSummary(considered, imported, failed, deferred,
+            $"Auto import: {imported} completed job(s) imported, {deferred} requiring review or retry, {failed} failed");
+    }
+
+    /// <summary>Pure fail-closed eligibility for fully completed, recently
+    /// observed, unequivocally mapped media. Anything needing judgment is
+    /// left for the existing manual preview/apply UI.</summary>
+    internal static string? AutoImportReviewReason(
+        DownloadJob job, MediaItem? media, DownloadClientConfig? owner,
+        IReadOnlyList<ImportPlanDto> plans, DateTimeOffset now, Episode? episode)
+    {
+        if (job.Status != DownloadStatus.Completed || job.Progress < 0.999)
+            return "Download is not completely finished";
+        // qBittorrent can report 100% while still hashing/checking. Only
+        // confirmed upload/seeding or stopped upload states are considered.
+        if (job.ClientState is not ("uploading" or "stalledUP" or "queuedUP" or "forcedUP"
+            or "pausedUP" or "stoppedUP"))
+            return "qBittorrent has not confirmed a stable completed/upload state";
+        if (job.DownloadClientId is null || owner is null || !owner.Enabled ||
+            string.IsNullOrWhiteSpace(job.Hash))
+            return "Download client identity is not verified";
+        var category = job.MediaType == MediaType.Movie ? owner.MovieCategory : owner.TvCategory;
+        if (string.IsNullOrWhiteSpace(category) || !string.Equals(job.Category, category, StringComparison.OrdinalIgnoreCase))
+            return "Download category does not match the owning client";
+        if (job.CompletedAt is null || now - job.CompletedAt < TimeSpan.FromMinutes(1) ||
+            now - job.CompletedAt > TimeSpan.FromDays(90))
+            return "Completion has not been observed or is too old";
+        if (job.LastSeenAt is null || now - job.LastSeenAt < TimeSpan.Zero ||
+            now - job.LastSeenAt > TimeSpan.FromMinutes(3))
+            return "Download client has not confirmed a recent completed state";
+        if (media is null || media.Id != job.MediaItemId || media.MediaType != job.MediaType)
+            return "Media identity is not verified";
+        if (plans.Count == 0 || plans.Count > 32 ||
+            plans.Any(p => p.PlannedAction is not ("hardlink" or "copy" or "skip") ||
+                p.DestinationConflict || string.IsNullOrWhiteSpace(p.DestinationPath) ||
+                p.SizeBytes <= 0))
+            return "Files require a manual review or have an unsafe plan";
+
+        var release = new ReleaseParser().Parse(job.ReleaseTitle);
+        if (!string.Equals(ReleaseParser.NormalizeTitle(release.Title),
+            ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+            return "Release title does not match the media item";
+        if (media.MediaType == MediaType.Movie)
+        {
+            if (media.HasFile || plans.Count != 1 || job.EpisodeId is not null)
+                return "Existing movie file, ambiguous movie, or multiple video files";
+            if (release.Year is int year && media.Year is int wantedYear && Math.Abs(year - wantedYear) > 1)
+                return "Movie year does not match";
+            var videoName = new ReleaseParser().Parse(Path.GetFileNameWithoutExtension(plans[0].SourcePath));
+            if (!string.Equals(ReleaseParser.NormalizeTitle(videoName.Title),
+                ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+                return "Movie filename does not match the media item";
+            if (videoName.Year is int fileYear && media.Year is int mediaYear &&
+                Math.Abs(fileYear - mediaYear) > 1)
+                return "Video filename has the wrong movie year";
+            return null;
+        }
+
+        if (plans.Any(p => p.MatchedEpisodeIds.Count != 1))
+            return "Multi-episode or unmatched files require manual review";
+        var ids = plans.Select(p => p.MatchedEpisodeIds[0]).ToList();
+        if (ids.Distinct().Count() != ids.Count)
+            return "Multiple files claim the same episode";
+        if (job.EpisodeId is int id && (episode is null || episode.MediaItemId != media.Id ||
+            episode.HasFile || plans.Count != 1 || ids[0] != id))
+            return "Episode association is ambiguous or already has a file";
+        if (job.EpisodeId is null && release.Season is null)
+            return "Season-pack title has no reliable season number";
+        if (episode is not null && (release.Season is int wantedSeason && wantedSeason != episode.SeasonNumber ||
+            release.Episodes.Count > 0 && !release.Episodes.Contains(episode.EpisodeNumber)))
+            return "Release title disagrees with the requested episode";
+        // A single-episode download may carry an unrelated video in its
+        // directory. Do not trust job.EpisodeId without parsing the filename.
+        foreach (var plan in plans)
+        {
+            var matched = LibraryMatcher.ParseEpisodes(Path.GetFileName(plan.SourcePath));
+            if (matched.Count != 1) return "Episode filename is ambiguous";
+            var videoName = new ReleaseParser().Parse(Path.GetFileNameWithoutExtension(plan.SourcePath));
+            if (!string.Equals(ReleaseParser.NormalizeTitle(videoName.Title),
+                ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+                return "Episode filename belongs to a different series";
+            if (job.EpisodeId is int episodeId)
+            {
+                if (episode is null || matched[0].Season != episode.SeasonNumber ||
+                    matched[0].Number != episode.EpisodeNumber)
+                    return "Video filename does not match the grabbed episode";
+            }
+            else if (release.Season is int releaseSeason && matched[0].Season != releaseSeason)
+                return "Video season disagrees with the release";
+        }
+        return null;
+    }
 
     // ---- Import ----
 
@@ -549,7 +742,7 @@ public sealed class DownloadService
                 break;
             }
         }
-        if (mismatch || Fingerprint(stored) != preview.Fingerprint)
+        if (mismatch || stored.Count != fresh.Count || Fingerprint(stored) != preview.Fingerprint)
         {
             var freshDto = new ImportPreviewDto(0, job.Id, _time.GetUtcNow(), fresh, Fingerprint(fresh));
             throw new StalePreviewException(freshDto);

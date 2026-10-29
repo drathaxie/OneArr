@@ -97,6 +97,36 @@ A self-hosted movie and TV manager built as one ASP.NET Core 10 process with a R
 - Symlinks anywhere below the torrent or media root cause the import to fail closed.
 - Migration preview from Sonarr v3 (`/api/v3/series`) and Radarr v3 (`/api/v3/movie`), GET-only, followed by explicit confirmation to copy selected entries into OneArr's own database.
 
+## Automatic completed-download handling (opt-in)
+
+OneArr can now automatically **import completed qBittorrent downloads** without
+a manual approval click, but only when explicitly enabled. The default is OFF.
+This setting is separate from automatic grabbing:
+
+1. Configure and verify torrent/download roots and media roots.
+2. In **Settings → Media Management → Import paths**, turn **dry-run OFF** only
+   after confirming the paths are correct.
+3. In **Settings → Automation → Completed-download importing**, turn on the
+   dedicated automatic-import toggle and save.
+4. If desired, enable renaming in **Media Management → Naming**. Otherwise the
+   original release filename is retained.
+
+The scheduler checks every five minutes, after syncing qBittorrent. To qualify,
+a download must be 100% complete, owned by an enabled/reachable qBittorrent
+client, correctly categorized, recently observed, finished long enough for the
+file to settle, and confidently matched to a media item. Any uncertain match,
+multiple movie files, unmatched/multi-episode TV item, existing movie file,
+destination collision, stale client, changed source or inaccessible path
+requires **manual preview and confirmation** instead. Every automatic import
+passes the same stored preview and fingerprint validation as manual import.
+Hardlinks preserve seeding; verified copies are used across volumes. No source
+file is moved or deleted. No automatic upgrades or torrent cleanup occur.
+
+**Safety switches:** toggling automatic import off stops subsequent jobs;
+`import.dryRun=true` blocks all automatic physical imports regardless of
+the automation setting. Enabling automatic grabbing does not enable imports
+and enabling imports does not enable grabbing.
+
 ## Requirements
 
 - .NET SDK 10.0 (`dotnet --info`)
