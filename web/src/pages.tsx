@@ -792,6 +792,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
   const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [grabSuccess, setGrabSuccess] = useState<string | null>(null);
   const { data: clients } = useLoad<DownloadClient[]>("/api/download-clients");
   const enabledClients = (clients ?? []).filter((c) => c.enabled);
   const [clientId, setClientId] = useState<number | null>(null);
@@ -825,9 +826,11 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   }, [autoSearch, mediaId, episodeId]);
 
   async function grab(r: ReleaseResult) {
+    setMessage(null);
+    setGrabSuccess(null);
     try {
       await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient });
-      setMessage(`Sent to qBittorrent: ${r.title}`);
+      setGrabSuccess(`Sent to qBittorrent: ${r.title}. It will appear in the media library only after import completes. Check Activity → Queue for download and import progress.`);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -859,8 +862,9 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
           <button onClick={onClose}>Close</button>
         </div>
       </div>
-      <p className="muted">Automatic grabbing is off. Only releases you choose here are sent to qBittorrent.</p>
+      <p className="muted">Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library.</p>
       <ErrorLine message={message} />
+      {grabSuccess && <p className="ok" role="status">{grabSuccess}</p>}
       {outcomes.length > 0 && (
         <div>
           <h3>Indexers in this search</h3>
@@ -1057,6 +1061,7 @@ function fileNameOf(path: string): string {
 // explicit confirmation, and a plan that changed since the preview is refused with a fresh one.
 export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "problems" }) {
   const { data: queue, error, reload } = useLoad<QueueData>("/api/queue");
+  const { data: importSettings } = useLoad<SettingsData>("/api/settings");
   // Real routes live under /api (see ApiEndpoints MapGroup("/api")). The old
   // /activity/* paths returned the SPA index.html, so History/Problems never loaded.
   const { data: history, reload: reloadHistory } = useLoad<HistoryEntry[]>("/api/activity/history");
@@ -1129,7 +1134,16 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
         <button onClick={() => run("Sync", "/api/queue/sync")}>Sync from qBittorrent</button>
         <button onClick={() => run("Dry run", "/api/import?dryRun=true")}>Import dry run</button>
       </div>
-      <p className="muted">Real imports run per job: open a job&apos;s Preview, confirm, then Apply. A preview that was merely generated never authorizes an import.</p>
+      <p className="muted">Downloading or seeding a torrent does not make its movie or episode available. The library stays Missing until a completed file is imported and linked. To import manually, open the job's Preview, confirm, then Apply.</p>
+      {jobs.some((job) => job.status === "Completed") && importSettings && (
+        <p className="muted" role="note">
+          {!importSettings.automaticImport
+            ? "Automatic completed-download importing is OFF. Finished downloads require Preview import → Apply import, or opt in under Settings → Automation."
+            : importSettings.dryRunImport
+              ? "Automatic completed-download importing is blocked by dry-run mode. Manually preview and apply, or review Settings → Media Management → Import paths."
+              : "Automatic importing is enabled. Eligible downloads are checked on the five-minute schedule; ambiguous or conflicting files still require Preview import → Apply import."}
+        </p>
+      )}
       <div className="row" role="tablist" aria-label="Activity sections">
         <button className={tab === "queue" ? "primary" : ""} onClick={() => setTab("queue")}>Queue</button>
         <button className={tab === "history" ? "primary" : ""} onClick={() => setTab("history")}>History</button>
