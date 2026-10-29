@@ -7,6 +7,9 @@ public static class SettingKeys
     public const string LibraryReviewState = "library.reviewState";
     public const string TmdbApiKey = "tmdb.apiKey";
     public const string AutomaticGrab = "automation.grab";
+    /// <summary>Independent, explicit opt-in for completed-download imports.
+    /// Missing or invalid value MUST fail closed. Manual import approval is unchanged.</summary>
+    public const string AutomaticImport = "automation.importCompleted";
     public const string DryRunImport = "import.dryRun";
     /// <summary>Explicit opt-in to use safe naming templates in confirmed manual imports.
     /// Background import remains dry-run only, independently of this setting.</summary>
