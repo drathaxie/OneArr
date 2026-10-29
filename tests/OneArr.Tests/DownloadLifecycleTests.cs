@@ -664,6 +664,130 @@ public class DownloadLifecycleTests
         Assert.True(eps[1].HasFile);
     }
 
+    private static async Task ReadyForAutoImportAsync(TestWorld world, int jobId, MediaType type)
+    {
+        await using var db = world.Db.CreateDbContext();
+        var job = await db.DownloadJobs.FirstAsync(j => j.Id == jobId);
+        job.Status = DownloadStatus.Completed;
+        job.Progress = 1;
+        job.CompletedAt = world.Time.GetUtcNow().AddMinutes(-2);
+        job.LastSeenAt = world.Time.GetUtcNow();
+        job.Category = type == MediaType.Movie ? "onearr-movies" : "onearr-tv";
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task AutomaticImport_OptInUsesStoredPreviewAndKeepsSeedingSource()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var source = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.BluRay.mkv", "original-seeding-bytes");
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune.2021.1080p.BluRay",
+            DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(source));
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Movie);
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "true");
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        var scheduler = new BackgroundScheduler(world.Runner, world.Downloads,
+            world.Settings, world.Search, NullLogger<BackgroundScheduler>.Instance);
+        await scheduler.RunPassAsync(5, default);
+        var job = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Imported, job.Status);
+        var dest = Path.Combine(world.Dirs.Media, "movies", "Dune (2021)", "Dune (2021) - 1080p.mkv");
+        Assert.True(File.Exists(dest));
+        Assert.Equal("original-seeding-bytes", await File.ReadAllTextAsync(dest));
+        Assert.Equal("original-seeding-bytes", await File.ReadAllTextAsync(source));
+        await using (var db = world.Db.CreateDbContext())
+        {
+            Assert.NotEmpty(await db.ImportPreviews.Where(p => p.DownloadJobId == jobId).ToListAsync());
+            Assert.Contains(await db.ImportRecords.Where(p => p.DownloadJobId == jobId).ToListAsync(),
+                p => p.Success && p.Action is ImportAction.Hardlink or ImportAction.Copy);
+        }
+        await scheduler.RunPassAsync(10, default);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+    }
+
+    [Fact]
+    public async Task AutomaticImport_DryRunOnBlocksWritesEvenWithExplicitOptIn()
+    {
+        using var world = await WorldAsync();
+        var mediaId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "unchanged");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, mediaId, null, MediaType.Movie, "Dune.2021.1080p",
+            DownloadStatus.Completed, 1, "aa02", Path.GetDirectoryName(file));
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Movie);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        await world.Settings.SetAsync(SettingKeys.DryRunImport, "true");
+        var scheduler = new BackgroundScheduler(world.Runner, world.Downloads,
+            world.Settings, world.Search, NullLogger<BackgroundScheduler>.Instance);
+        await scheduler.RunPassAsync(5, default);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(File.Exists(Path.Combine(world.Dirs.Media, "movies", "Dune (2021)", Path.GetFileName(file))));
+        await using var db = world.Db.CreateDbContext();
+        Assert.Empty(await db.ImportRecords.Where(r => r.DownloadJobId == jobId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task AutomaticImport_WrongEpisodeAndUnmatchedFilesRequireManualReview()
+    {
+        using var world = await WorldAsync();
+        var (series, episodes) = await world.AddSeriesAsync("Show", 3);
+        var file = world.Dirs.WriteFile("torrents/Show/Show - S01E02.mkv", "ep2-only");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p",
+            DownloadStatus.Completed, 1, "aa03", Path.GetDirectoryName(file));
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Series);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+        Assert.Equal(0, result.Imported);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(Directory.Exists(Path.Combine(world.Dirs.Media, "tv", "Show", "Season 01")));
+        await using var db = world.Db.CreateDbContext();
+        Assert.False((await db.Episodes.FirstAsync(e => e.Id == episodes[0])).HasFile);
+        Assert.Empty(await db.ImportPreviews.Where(p => p.DownloadJobId == jobId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task AutomaticImport_ConflictingExistingMovieIsNeverOverwritten()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "new-bytes");
+        AgeFile(file);
+        var existing = world.Dirs.WriteFile("media/movies/Dune (2021)/Dune.2021.1080p.mkv", "old-bytes");
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune.2021.1080p",
+            DownloadStatus.Completed, 1, "aa04", Path.GetDirectoryName(file));
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Movie);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+        Assert.Equal(0, result.Imported);
+        Assert.Equal("old-bytes", await File.ReadAllTextAsync(existing));
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.True(File.Exists(file));
+    }
+
+    [Fact]
+    public async Task AutomaticImport_StaleDownloadClientObservationNeverWrites()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "source");
+        AgeFile(file);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune.2021.1080p",
+            DownloadStatus.Completed, 1, "aa05", Path.GetDirectoryName(file));
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Movie);
+        await using (var db = world.Db.CreateDbContext())
+        {
+            var job = await db.DownloadJobs.FirstAsync(j => j.Id == jobId);
+            job.LastSeenAt = world.Time.GetUtcNow().AddMinutes(-15);
+            await db.SaveChangesAsync();
+        }
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        Assert.Equal(0, (await world.Downloads.AutoImportCompletedAsync(default)).Imported);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+    }
+
     [Fact]
     public async Task SchedulerPass_NeverImportsPhysically_EvenWhenDryRunImportIsOff()
     {
