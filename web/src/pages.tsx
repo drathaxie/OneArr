@@ -262,7 +262,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
       {items && items.length === 0 && <p className="muted">Nothing here yet. Use Add {kind === "movie" ? "Movie" : "Series"} above to search TMDb.</p>}
       {items && items.length > 0 && filtered.length === 0 && <p className="muted">No titles match the current search and filter.</p>}
       {view === "grid" && filtered.length > 0 && (
-        <div className={inspectorItem ? "cc-workspace open" : "cc-workspace"}>
+        <div className="cc-workspace">
           <div className="cc-grid">
             {filtered.map((item) => {
               const status = primaryStatus(item, kind);
@@ -322,7 +322,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               );
             })}
           </div>
-          {inspectorItem && (
+          {false && inspectorItem && (
             <InspectorPanel
               item={inspectorItem}
               kind={kind}
@@ -367,7 +367,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
                       : (<><span className="badge">Unmonitored</span>{status.secondary && <div className="muted">{status.secondary}</div>}</>)}
                     </td>
                     <td className="row">
-                      <button className="small" onClick={(e) => openInspector(item, e.currentTarget)}>Dossier</button>
+                      <button className="small" onClick={() => setDetailId(item.id)}>Manage</button>
                       <button className="small" onClick={() => setDetailId(item.id)}>Details</button>
                       <button className="small" onClick={() => setFilesId(filesId === item.id ? null : item.id)}>Files</button>
                       <button className="small danger" onClick={() => setPendingRemove(item)}>Remove</button>
@@ -378,7 +378,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               </tbody>
             </table>
           </div>
-          {inspectorItem && (
+          {false && inspectorItem && (
             <InspectorPanel
               item={inspectorItem}
               kind={kind}
