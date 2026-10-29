@@ -674,6 +674,10 @@ public class DownloadLifecycleTests
         job.CompletedAt = world.Time.GetUtcNow().AddMinutes(-2);
         job.LastSeenAt = world.Time.GetUtcNow();
         job.Category = type == MediaType.Movie ? "onearr-movies" : "onearr-tv";
+        // An automatic import is allowed only when a real queue poll sees
+        // this exact hash/category/owning client in a completed upload state.
+        world.Qbit.Torrents.Add(new FakeQbit.Torrent(job.Hash!, job.ReleaseTitle,
+            job.Category, "stalledUP", 1, job.ContentPath));
         await db.SaveChangesAsync();
     }
 
@@ -819,6 +823,9 @@ public class DownloadLifecycleTests
             job.LastSeenAt = world.Time.GetUtcNow().AddMinutes(-15);
             await db.SaveChangesAsync();
         }
+        // qBittorrent no longer reports the hash, even though a prior
+        // database snapshot said Completed.
+        world.Qbit.Torrents.Clear();
         await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
         await world.Downloads.SyncQueueAsync(default);
         Assert.Equal(0, (await world.Downloads.AutoImportCompletedAsync(default)).Imported);
