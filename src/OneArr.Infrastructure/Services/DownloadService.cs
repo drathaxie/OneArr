@@ -343,6 +343,9 @@ public sealed class DownloadService
             if (!string.Equals(ReleaseParser.NormalizeTitle(videoName.Title),
                 ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
                 return "Movie filename does not match the media item";
+            if (videoName.Year is int fileYear && media.Year is int mediaYear &&
+                Math.Abs(fileYear - mediaYear) > 1)
+                return "Video filename has the wrong movie year";
             return null;
         }
 
@@ -354,6 +357,11 @@ public sealed class DownloadService
         if (job.EpisodeId is int id && (episode is null || episode.MediaItemId != media.Id ||
             episode.HasFile || plans.Count != 1 || ids[0] != id))
             return "Episode association is ambiguous or already has a file";
+        if (job.EpisodeId is null && release.Season is null)
+            return "Season-pack title has no reliable season number";
+        if (episode is not null && (release.Season is int wantedSeason && wantedSeason != episode.SeasonNumber ||
+            release.Episodes.Count > 0 && !release.Episodes.Contains(episode.EpisodeNumber)))
+            return "Release title disagrees with the requested episode";
         // A single-episode download may carry an unrelated video in its
         // directory. Do not trust job.EpisodeId without parsing the filename.
         foreach (var plan in plans)
