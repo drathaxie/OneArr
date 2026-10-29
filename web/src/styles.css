@@ -417,3 +417,16 @@ tr.selected td { background: var(--panel2); }
 @media (max-width: 750px) {
   .tracker-catalog-controls > select { flex: 1 1 130px; }
 }
+
+
+/* Release searching from a dossier belongs in a visible workspace, not beneath
+   the library grid. Keep the release table wide while allowing viewport scroll. */
+.release-search-backdrop { z-index: 70; }
+.release-search-dialog { width: min(1180px, 100%); max-width: 100%; min-width: 0; }
+.release-search-dialog > .card { margin-top: 0 !important; }
+.release-search-dialog .table-wrap { max-width: 100%; overflow-x: auto; }
+@media (max-width: 700px) {
+  .release-search-backdrop { padding: .5rem; }
+  .release-search-dialog { width: 100%; }
+  .release-search-dialog .row.spread { align-items: flex-start; flex-wrap: wrap; gap: .5rem; }
+}

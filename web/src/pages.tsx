@@ -84,6 +84,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
   const [showAdd, setShowAdd] = useState(false);
   // The poster button that opened the inspector, so closing can return focus to it.
   const openerRef = useRef<HTMLButtonElement | null>(null);
+  const releaseOpenerRef = useRef<HTMLButtonElement | null>(null);
 
   function setViewMode(v: "grid" | "list") {
     setView(v);
@@ -110,6 +111,27 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
     openerRef.current = opener;
     setInspectorId(item.id);
   }
+  function openReleaseSearch(id: number, opener: HTMLButtonElement) {
+    releaseOpenerRef.current = opener;
+    setSearchId(id);
+  }
+
+  function closeReleaseSearch() {
+    const opener = releaseOpenerRef.current;
+    setSearchId(null);
+    // The menu item may have unmounted when its menu closed. Prefer the
+    // original button when it still exists, otherwise restore focus to the
+    // selected poster/dossier rather than losing focus to the document.
+    setTimeout(() => {
+      if (opener?.isConnected) { opener.focus(); return; }
+      const dossierAction = document.querySelector<HTMLButtonElement>(".cc-dossier-actions > button.primary");
+      const searchPoster = document.querySelector<HTMLButtonElement>(`[data-poster-button="${searchId}"]`);
+      const selectedPoster = inspectorId === null ? null
+        : document.querySelector<HTMLButtonElement>(`[data-poster-button="${inspectorId}"]`);
+      (dossierAction ?? searchPoster ?? selectedPoster ?? openerRef.current)?.focus();
+    }, 0);
+  }
+
   function closeInspector() {
     // Focus management, part 2: focus returns to the poster of the title the
     // inspector was showing when it closed (stepping changes that title, so the
@@ -167,7 +189,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
   // - if the remove dialog is open, it owns Escape (capture-phase handler in the dialog)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (inspectorId === null || pendingRemove !== null) return;
+      if (inspectorId === null || pendingRemove !== null || searchId !== null) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
       if (e.key === "Escape" && menuId === null) {
@@ -187,7 +209,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
     // Re-bind when the inspector target or menu state changes so the guards above
     // always see the current state; the handler itself is cheap.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inspectorId, menuId, pendingRemove, filtered]);
+  }, [inspectorId, menuId, pendingRemove, searchId, filtered]);
 
   // A poster menu closes when the user clicks anywhere outside it (its own button
   // and items are the only inside targets).
@@ -284,7 +306,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
                       <div className="cc-menu" role="menu">
                         <button role="menuitem" onClick={() => { setMenuId(null); setDetailId(item.id); }}>Details</button>
                         <button role="menuitem" onClick={() => { setMenuId(null); setFilesId(item.id); }}>Files</button>
-                        <button role="menuitem" onClick={() => { setMenuId(null); setInspectorId(null); setSearchId(item.id); }}>Search releases</button>
+                        <button role="menuitem" onClick={(e) => { setMenuId(null); openReleaseSearch(item.id, e.currentTarget); }}>Search releases</button>
                         <button role="menuitem" onClick={() => { setMenuId(null); toggle(item); }}>{item.monitored ? "Unmonitor" : "Monitor"}</button>
                         <button role="menuitem" className="danger" onClick={() => { setMenuId(null); setPendingRemove(item); }}>Remove…</button>
                       </div>
@@ -313,7 +335,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               onStep={stepInspector}
               canPrev={inspectorIndex > 0}
               canNext={inspectorIndex >= 0 && inspectorIndex < filtered.length - 1}
-              onSearchReleases={(it) => { setInspectorId(null); setSearchId(it.id); }}
+              onSearchReleases={(it, opener) => openReleaseSearch(it.id, opener)}
               onShowFiles={(it) => { setInspectorId(null); setFilesId(it.id); }}
               onShowDetail={(it) => { setInspectorId(null); setDetailId(it.id); }}
               onRemoveRequest={(it) => setPendingRemove(it)}
@@ -369,7 +391,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               onStep={stepInspector}
               canPrev={inspectorIndex > 0}
               canNext={inspectorIndex >= 0 && inspectorIndex < filtered.length - 1}
-              onSearchReleases={(it) => { setInspectorId(null); setSearchId(it.id); }}
+              onSearchReleases={(it, opener) => openReleaseSearch(it.id, opener)}
               onShowFiles={(it) => { setInspectorId(null); setFilesId(it.id); }}
               onShowDetail={(it) => { setInspectorId(null); setDetailId(it.id); }}
               onRemoveRequest={(it) => setPendingRemove(it)}
@@ -379,7 +401,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
         </div>
       )}
       {filesId !== null && <FileList mediaId={filesId} onClose={() => setFilesId(null)} />}
-      {searchId !== null && <ReleasePanel mediaId={searchId} episodeId={null} onClose={() => setSearchId(null)} />}
+      {searchId !== null && <ReleaseSearchDialog mediaId={searchId} onClose={closeReleaseSearch} />}
       {pendingRemove !== null && (
         <ConfirmDialog
           title="Remove title?"
@@ -728,7 +750,44 @@ function ageMs(publishDateUtc: string | null): number {
   return Number.isFinite(ms) && ms >= 0 ? ms : Number.POSITIVE_INFINITY;
 }
 
-export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number; episodeId: number | null; onClose: () => void }) {
+// A search launched from a poster action or dossier must appear in the
+// viewport, not below a possibly hundreds-of-posters-long library grid.
+function ReleaseSearchDialog({ mediaId, onClose }: { mediaId: number; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { dialogRef.current?.focus(); }, []);
+  function onDialogKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    ) ?? []).filter((el) => el.getClientRects().length > 0 || !el.hasAttribute("hidden"));
+    if (focusable.length === 0) { e.preventDefault(); dialogRef.current?.focus(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+  return (
+    <div className="dialog-backdrop release-search-backdrop"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true"
+        aria-label="Manual release search" className="dialog release-search-dialog"
+        onKeyDown={onDialogKeyDown}>
+        <ReleasePanel mediaId={mediaId} episodeId={null} onClose={onClose} autoSearch />
+      </div>
+    </div>
+  );
+}
+
+export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }: { mediaId: number; episodeId: number | null; onClose: () => void; autoSearch?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
   const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
@@ -757,6 +816,13 @@ export function ReleasePanel({ mediaId, episodeId, onClose }: { mediaId: number;
       setBusy(false);
     }
   }
+
+  // The dossier's Search releases action searches immediately; inline
+  // ReleasePanel usage retains the explicit Search indexers button.
+  useEffect(() => {
+    if (autoSearch) void search();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearch, mediaId, episodeId]);
 
   async function grab(r: ReleaseResult) {
     try {

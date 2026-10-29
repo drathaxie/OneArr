@@ -122,7 +122,7 @@ export function InspectorPanel({ item, kind, profiles, onClose, onStep, canPrev,
   onStep: (dir: -1 | 1) => void;
   canPrev: boolean;
   canNext: boolean;
-  onSearchReleases: (item: MediaItem) => void;
+  onSearchReleases: (item: MediaItem, opener: HTMLButtonElement) => void;
   onShowFiles: (item: MediaItem) => void;
   onShowDetail: (item: MediaItem) => void;
   onRemoveRequest: (item: MediaItem) => void;
@@ -279,7 +279,7 @@ export function InspectorPanel({ item, kind, profiles, onClose, onStep, canPrev,
         )}
       </div>
       <div className="cc-dossier-actions">
-        <button className="primary" onClick={() => onSearchReleases(item)}>Search releases</button>
+        <button className="primary" onClick={(e) => onSearchReleases(item, e.currentTarget)}>Search releases</button>
         <div className="row" style={{ marginTop: ".6rem" }}>
           <button style={{ flex: 1 }} onClick={() => onShowFiles(item)}>Files</button>
           <button style={{ flex: 1 }} onClick={() => onShowDetail(item)}>Full details</button>
