@@ -500,6 +500,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           </form>
         </div>
       </div>
+      {isSeries && managerTab === "settings" && <div className="card"><h2>Series settings</h2><p className="muted">Use the monitoring, root folder and quality profile controls above. Changes save immediately.</p></div>}
       {showReleases && !isSeries && <ReleasePanel mediaId={mediaId} episodeId={null} onClose={() => setShowReleases(false)} />}
       {isSeries && <div className="series-manager-tabs" role="tablist" aria-label="Manager sections"><button role="tab" aria-selected={managerTab === "seasons"} className={managerTab === "seasons" ? "active" : ""} onClick={() => setManagerTab("seasons")}>Seasons & episodes</button><button role="tab" aria-selected={managerTab === "files"} className={managerTab === "files" ? "active" : ""} onClick={() => setManagerTab("files")}>Linked files ({data.files.length})</button><button role="tab" aria-selected={managerTab === "settings"} className={managerTab === "settings" ? "active" : ""} onClick={() => setManagerTab("settings")}>Settings</button></div>}
       {isSeries && managerTab === "seasons" && <div className="row spread series-season-heading"><h2>Seasons</h2><div className="row"><button className="small" onClick={() => setCollapsed(new Set(data.seasons.map(s => s.seasonNumber)))}>Expand all</button><button className="small" onClick={() => setCollapsed(new Set())}>Collapse all</button></div></div>}
