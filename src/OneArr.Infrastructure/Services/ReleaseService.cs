@@ -18,7 +18,7 @@ public sealed record IndexerSearchOutcome(int Id, string Name, string Status, in
 
 public sealed record ReleaseSearchResult(IReadOnlyList<ReleaseDecision> Decisions, IReadOnlyList<IndexerSearchError> IndexerErrors, IReadOnlyList<IndexerSearchOutcome> IndexerOutcomes);
 
-public sealed record GrabRequest(int MediaItemId, int? EpisodeId, string ReleaseTitle, string Link, string? InfoHash, int? DownloadClientId = null);
+public sealed record GrabRequest(int MediaItemId, int? EpisodeId, string ReleaseTitle, string Link, string? InfoHash, int? DownloadClientId = null, bool SeasonPackOnly = false);
 
 /// <summary>Manual release search and manual grab. Automated grabbing is gated by the automation setting and off by default.</summary>
 public sealed class ReleaseService
@@ -42,8 +42,9 @@ public sealed class ReleaseService
         _native = native;
     }
 
-    public async Task<ReleaseSearchResult> SearchAsync(int mediaItemId, int? episodeId, CancellationToken ct)
+    public async Task<ReleaseSearchResult> SearchAsync(int mediaItemId, int? episodeId, CancellationToken ct, bool seasonPackOnly = false)
     {
+        if (seasonPackOnly && episodeId is null) throw new ArgumentException("Season-pack search requires an episode in the target season");
         var (target, search, indexers) = await BuildTargetAsync(mediaItemId, episodeId, ct);
         var outcomes = new List<IndexerSearchOutcome>();
         var found = new List<ReleaseCandidate>();
@@ -66,6 +67,7 @@ public sealed class ReleaseService
         }
 
         var decisions = found
+            .Where(c => !seasonPackOnly || (new ReleaseParser().Parse(c.Title) is var parsed && parsed.IsSeasonPack && parsed.Season == target.Season))
             .DistinctBy(c => (c.Title.ToLowerInvariant(), c.Link))
             .Select(c => _ranker.Evaluate(c, target))
             .OrderByDescending(d => d.Accepted)
@@ -80,7 +82,14 @@ public sealed class ReleaseService
     public async Task<DownloadJob> GrabAsync(GrabRequest request, CancellationToken ct)
     {
         if (!UrlGuard.IsAllowedDownloadLink(request.Link)) throw new ArgumentException("Link must be a magnet or http(s) URL");
+        if (request.SeasonPackOnly && request.EpisodeId is null) throw new ArgumentException("Season-pack grab requires an episode in the selected season");
         var (target, _, _) = await BuildTargetAsync(request.MediaItemId, request.EpisodeId, ct);
+        if (request.SeasonPackOnly)
+        {
+            var pack = new ReleaseParser().Parse(request.ReleaseTitle);
+            if (!pack.IsSeasonPack || pack.Season != target.Season)
+                throw new ArgumentException("Release is not a season pack for the selected season");
+        }
 
         // Re-evaluate server-side so a manual grab cannot bypass duplicate, wrong-media or unsafe-name checks.
         var candidate = new ReleaseCandidate(request.ReleaseTitle, request.Link, 1, 1, request.InfoHash, "manual", []);
