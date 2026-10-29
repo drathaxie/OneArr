@@ -814,7 +814,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false, 
     setBusy(true);
     setMessage(null);
     try {
-      const res = await api<{ results: ReleaseResult[]; indexers: IndexerSearchOutcome[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId });
+      const res = await api<{ results: ReleaseResult[]; indexers: IndexerSearchOutcome[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId, seasonPackOnly: packOnly });
       setResults(res.results);
       setOutcomes(res.indexers ?? []);
     } catch (e) {
@@ -835,7 +835,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false, 
     setMessage(null);
     setGrabSuccess(null);
     try {
-      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient });
+      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient, seasonPackOnly: packOnly });
       setGrabSuccess(`Sent to qBittorrent: ${r.title}. It will appear in the media library only after import completes. Check Activity → Queue for download and import progress.`);
     } catch (e) {
       setMessage((e as Error).message);
