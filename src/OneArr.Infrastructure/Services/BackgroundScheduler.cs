@@ -4,9 +4,10 @@ using Microsoft.Extensions.Logging;
 namespace OneArr.Infrastructure.Services;
 
 /// <summary>
-/// Single bounded loop: queue sync every minute, completed-download import planning (dry run) every fifth minute, wanted search every 15th.
-/// Each job goes through JobRunner's per-job lock, so scheduled and manual runs cannot overlap. Automatic grabbing is intentionally absent,
-/// and the scheduled import step is read-only by construction: it never performs a physical import.
+/// Single bounded loop: queue sync every minute, completed-download imports every fifth minute,
+/// wanted search every fifteenth minute. Physical imports are strictly opt-in and fail closed
+/// while the separate dry-run setting is enabled. Import uses the stored preview/revalidation
+/// engine and never deletes or moves qBittorrent source files.
 /// </summary>
 public sealed class BackgroundScheduler : BackgroundService
 {
@@ -51,13 +52,9 @@ public sealed class BackgroundScheduler : BackgroundService
         }
     }
 
-    /// <summary>One scheduled pass: queue sync every tick, wanted search every 15th tick (only
-    /// when automatic grabbing is on), and import planning every 5th tick. The import step is
-    /// ALWAYS a dry run: the scheduler may preview or inspect only, never perform physical
-    /// writes. Physical imports happen only through the confirmed preview/apply workflow
-    /// (per-job import-apply or bulk import with confirmed pairs) — never via the DryRunImport
-    /// setting, so flipping that setting cannot silently enable scheduled imports. Automatic
-    /// grabbing being off is not what prevents this; the hardcoded dry run is.</summary>
+    /// <summary>Queue state is refreshed before import decisions. Import is
+    /// read-only unless both AutomaticImport is true and DryRunImport is false.
+    /// Manual approvals always remain explicit and independent.</summary>
     public async Task RunPassAsync(int tick, CancellationToken ct)
     {
         await _runner.TryRunAsync("queue-sync", async t => $"Updated {await _downloads.SyncQueueAsync(t)} job(s)", ct);
@@ -67,6 +64,13 @@ public sealed class BackgroundScheduler : BackgroundService
             await _runner.TryRunAsync("wanted-search", async t => (await _search.RunOnceAsync(t)).ToString(), ct);
 
         if (tick % 5 == 0)
-            await _runner.TryRunAsync("import", async t => (await _downloads.ImportCompletedAsync(true, t)).Message, ct);
+        {
+            var autoImport = await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticImport, false, ct);
+            var dryRun = await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.DryRunImport, true, ct);
+            await _runner.TryRunAsync("import",
+                async t => autoImport && !dryRun
+                    ? (await _downloads.AutoImportCompletedAsync(t)).Message
+                    : (await _downloads.ImportCompletedAsync(true, t)).Message, ct);
+        }
     }
 }
