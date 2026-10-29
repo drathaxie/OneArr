@@ -125,9 +125,10 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
     setTimeout(() => {
       if (opener?.isConnected) { opener.focus(); return; }
       const dossierAction = document.querySelector<HTMLButtonElement>(".cc-dossier-actions > button.primary");
+      const searchPoster = document.querySelector<HTMLButtonElement>(`[data-poster-button="${searchId}"]`);
       const selectedPoster = inspectorId === null ? null
         : document.querySelector<HTMLButtonElement>(`[data-poster-button="${inspectorId}"]`);
-      (dossierAction ?? selectedPoster ?? openerRef.current)?.focus();
+      (dossierAction ?? searchPoster ?? selectedPoster ?? openerRef.current)?.focus();
     }, 0);
   }
 
