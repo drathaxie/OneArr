@@ -391,7 +391,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               onStep={stepInspector}
               canPrev={inspectorIndex > 0}
               canNext={inspectorIndex >= 0 && inspectorIndex < filtered.length - 1}
-              onSearchReleases={(it) => { setInspectorId(null); setSearchId(it.id); }}
+              onSearchReleases={(it, opener) => openReleaseSearch(it.id, opener)}
               onShowFiles={(it) => { setInspectorId(null); setFilesId(it.id); }}
               onShowDetail={(it) => { setInspectorId(null); setDetailId(it.id); }}
               onRemoveRequest={(it) => setPendingRemove(it)}
