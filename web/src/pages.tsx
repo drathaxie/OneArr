@@ -424,6 +424,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [managerTab, setManagerTab] = useState<"seasons" | "files" | "settings">("seasons");
   const [releaseLabel, setReleaseLabel] = useState<string | null>(null);
+  const [packOnly, setPackOnly] = useState(false);
 
   async function patch(body: Record<string, unknown>, after?: () => void) {
     setMessage(null);
@@ -512,6 +513,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
               <div className="row">
                 <span className="badge">{s.monitored ? "Monitored" : "Unmonitored"}</span>
                 <span className="muted">{s.hasFileCount}/{s.episodeCount} have files · {s.wantedCount} wanted</span>
+                <button className="small" disabled={eps.length === 0} onClick={() => { const chosen = eps.find(e => e.monitored && !e.hasFile) ?? eps[0]; if (!chosen) return; setPackOnly(true); setReleaseLabel(`Season ${s.seasonNumber} — season packs`); setReleaseEpisode(chosen.id); }}>Search season packs</button>
                 <button className="small" onClick={() => toggleSeason(s.seasonNumber, !s.monitored)}>{s.monitored ? "Unmonitor season" : "Monitor season"}</button>
                 <button className="small" onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "Expand" : "Collapse"}</button>
               </div>
@@ -528,7 +530,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
                       <td><button className="small" onClick={() => toggleEpisode(e.id, !e.monitored)}>{e.monitored ? "Yes" : "No"}</button></td>
                       <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
                       <td>{e.resolution ? `${e.resolution}p` : "—"}</td>
-                      <td><button className="small" aria-label={`Search releases for S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`} onClick={() => { setReleaseLabel(`S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")} — ${e.title}`); setReleaseEpisode(e.id); }}>Search episode</button></td>
+                      <td><button className="small" aria-label={`Search releases for S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`} onClick={() => { setPackOnly(false); setReleaseLabel(`S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")} — ${e.title}`); setReleaseEpisode(e.id); }}>Search episode</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -555,7 +557,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           </table></div>
         )}
       </div>}
-      {releaseEpisode !== null && <div className="dialog-backdrop release-search-backdrop"><div role="dialog" aria-modal="true" aria-label={`Episode releases: ${releaseLabel ?? ""}`} className="dialog release-search-dialog"><p className="mono">{releaseLabel}</p><ReleasePanel mediaId={mediaId} episodeId={releaseEpisode} onClose={() => { setReleaseEpisode(null); setReleaseLabel(null); }} autoSearch /></div></div>}
+      {releaseEpisode !== null && <div className="dialog-backdrop release-search-backdrop"><div role="dialog" aria-modal="true" aria-label={`Episode releases: ${releaseLabel ?? ""}`} className="dialog release-search-dialog"><p className="mono">{releaseLabel}</p><ReleasePanel key={`${releaseEpisode}-${packOnly}`} mediaId={mediaId} episodeId={releaseEpisode} packOnly={packOnly} onClose={() => { setReleaseEpisode(null); setReleaseLabel(null); }} autoSearch /></div></div>}
     </>
   );
 }
@@ -790,7 +792,7 @@ function ReleaseSearchDialog({ mediaId, onClose }: { mediaId: number; onClose: (
   );
 }
 
-export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }: { mediaId: number; episodeId: number | null; onClose: () => void; autoSearch?: boolean }) {
+export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false, packOnly = false }: { mediaId: number; episodeId: number | null; onClose: () => void; autoSearch?: boolean; packOnly?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
   const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
@@ -843,6 +845,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   // Client-side sorting and filtering only. The server re-validates every grab, so a rejected
   // release can never pass because of a frontend change.
   const visible = (results ?? []).filter((r) =>
+    (!packOnly || /(?:^|[. _-])S\\d{1,3}(?:[. _-]|$)/i.test(r.title) && !/S\\d{1,3}E\\d{1,3}/i.test(r.title)) &&
     (indexerFilter === "all" || r.indexer === indexerFilter) &&
     (decisionFilter === "all" || (decisionFilter === "accepted") === r.accepted) &&
     (minSeeders === "" || r.seeders >= Number(minSeeders)));
@@ -859,13 +862,13 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   return (
     <div className="card" style={{ marginTop: "1rem" }}>
       <div className="row spread">
-        <h2>Manual release search</h2>
+        <h2>{packOnly ? "Season pack releases" : episodeId !== null ? "Episode releases" : "Manual release search"}</h2>
         <div className="row">
           <button className="primary" onClick={search} disabled={busy}>{busy ? "Searching…" : "Search indexers"}</button>
           <button onClick={onClose}>Close</button>
         </div>
       </div>
-      <p className="muted">Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library.</p>
+      <p className="muted">{packOnly ? "Season-pack candidates only. OneArr validates the selected season through an episode in that season. Review pack contents before grabbing; this does not guarantee all episodes are present." : "Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library."}</p>
       <ErrorLine message={message} />
       {grabSuccess && <p className="ok" role="status">{grabSuccess}</p>}
       {outcomes.length > 0 && (
