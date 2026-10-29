@@ -224,7 +224,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
   }, [menuId]);
 
   if (detailId !== null) {
-    return <MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} />;
+    return <div className="dialog-backdrop series-workspace-backdrop"><section role="dialog" aria-modal="true" aria-label="Media manager" className="series-workspace-dialog"><MediaDetail mediaId={detailId} profiles={profiles ?? []} onBack={() => { setDetailId(null); reload(); }} /></section></div>;
   }
 
   return (
@@ -422,6 +422,9 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   const [showReleases, setShowReleases] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [managerTab, setManagerTab] = useState<"seasons" | "files" | "settings">("seasons");
+  const [releaseLabel, setReleaseLabel] = useState<string | null>(null);
+  const [packOnly, setPackOnly] = useState(false);
 
   async function patch(body: Record<string, unknown>, after?: () => void) {
     setMessage(null);
@@ -455,7 +458,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
 
   return (
     <>
-      <button onClick={onBack}>← Back to {isSeries ? "Series" : "Movies"}</button>
+      <div className="row spread series-manager-toolbar"><span className="mono">ONEARR / {isSeries ? "SERIES" : "MOVIE"} MANAGER</span><button onClick={onBack} aria-label="Close media manager">✕ Close</button></div>
       <ErrorLine message={error ?? message} />
       <div className="card detail-head">
         {posterUrl(data.posterPath)
@@ -497,10 +500,13 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           </form>
         </div>
       </div>
+      {isSeries && managerTab === "settings" && <div className="card"><h2>Series settings</h2><p className="muted">Use the monitoring, root folder and quality profile controls above. Changes save immediately.</p></div>}
       {showReleases && !isSeries && <ReleasePanel mediaId={mediaId} episodeId={null} onClose={() => setShowReleases(false)} />}
-      {isSeries && data.seasons.map((s) => {
+      {isSeries && <div className="series-manager-tabs" role="tablist" aria-label="Manager sections"><button role="tab" aria-selected={managerTab === "seasons"} className={managerTab === "seasons" ? "active" : ""} onClick={() => setManagerTab("seasons")}>Seasons & episodes</button><button role="tab" aria-selected={managerTab === "files"} className={managerTab === "files" ? "active" : ""} onClick={() => setManagerTab("files")}>Linked files ({data.files.length})</button><button role="tab" aria-selected={managerTab === "settings"} className={managerTab === "settings" ? "active" : ""} onClick={() => setManagerTab("settings")}>Settings</button></div>}
+      {isSeries && managerTab === "seasons" && <div className="row spread series-season-heading"><h2>Seasons</h2><div className="row"><button className="small" onClick={() => setCollapsed(new Set(data.seasons.map(s => s.seasonNumber)))}>Expand all</button><button className="small" onClick={() => setCollapsed(new Set())}>Collapse all</button></div></div>}
+      {isSeries && managerTab === "seasons" && data.seasons.map((s) => {
         const eps = data.episodes.filter((e) => e.seasonNumber === s.seasonNumber);
-        const isCollapsed = collapsed.has(s.seasonNumber);
+        const isCollapsed = !collapsed.has(s.seasonNumber);
         return (
           <div key={s.seasonNumber} className="card">
             <div className="row spread">
@@ -508,6 +514,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
               <div className="row">
                 <span className="badge">{s.monitored ? "Monitored" : "Unmonitored"}</span>
                 <span className="muted">{s.hasFileCount}/{s.episodeCount} have files · {s.wantedCount} wanted</span>
+                <button className="small" disabled={eps.length === 0} onClick={() => { const chosen = eps.find(e => e.monitored && !e.hasFile) ?? eps[0]; if (!chosen) return; setPackOnly(true); setReleaseLabel(`Season ${s.seasonNumber} — season packs`); setReleaseEpisode(chosen.id); }}>Search season packs</button>
                 <button className="small" onClick={() => toggleSeason(s.seasonNumber, !s.monitored)}>{s.monitored ? "Unmonitor season" : "Monitor season"}</button>
                 <button className="small" onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "Expand" : "Collapse"}</button>
               </div>
@@ -524,19 +531,17 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
                       <td><button className="small" onClick={() => toggleEpisode(e.id, !e.monitored)}>{e.monitored ? "Yes" : "No"}</button></td>
                       <td>{e.hasFile ? <span className="badge ok">have</span> : <span className="badge">missing</span>}</td>
                       <td>{e.resolution ? `${e.resolution}p` : "—"}</td>
-                      <td><button className="small" onClick={() => setReleaseEpisode(releaseEpisode === e.id ? null : e.id)}>Releases</button></td>
+                      <td><button className="small" aria-label={`Search releases for S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")}`} onClick={() => { setPackOnly(false); setReleaseLabel(`S${String(e.seasonNumber).padStart(2, "0")}E${String(e.episodeNumber).padStart(2, "0")} — ${e.title}`); setReleaseEpisode(e.id); }}>Search episode</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table></div>
             )}
-            {releaseEpisode !== null && eps.some((e) => e.id === releaseEpisode) && (
-              <ReleasePanel mediaId={mediaId} episodeId={releaseEpisode} onClose={() => setReleaseEpisode(null)} />
-            )}
+
           </div>
         );
       })}
-      <div className="card">
+      {(!isSeries || managerTab === "files") && <div className="card">
         <h2>Linked files ({data.files.length})</h2>
         {data.files.length === 0 ? <p className="muted">No linked files yet. Run a library scan in Settings, or import a download, and they will appear here.</p> : (
           <div className="table-wrap"><table>
@@ -552,7 +557,8 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
             ))}</tbody>
           </table></div>
         )}
-      </div>
+      </div>}
+      {releaseEpisode !== null && <div className="dialog-backdrop release-search-backdrop"><div role="dialog" aria-modal="true" aria-label={`Episode releases: ${releaseLabel ?? ""}`} className="dialog release-search-dialog"><p className="mono">{releaseLabel}</p><ReleasePanel key={`${releaseEpisode}-${packOnly}`} mediaId={mediaId} episodeId={releaseEpisode} packOnly={packOnly} onClose={() => { setReleaseEpisode(null); setReleaseLabel(null); }} autoSearch /></div></div>}
     </>
   );
 }
@@ -787,7 +793,7 @@ function ReleaseSearchDialog({ mediaId, onClose }: { mediaId: number; onClose: (
   );
 }
 
-export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }: { mediaId: number; episodeId: number | null; onClose: () => void; autoSearch?: boolean }) {
+export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false, packOnly = false }: { mediaId: number; episodeId: number | null; onClose: () => void; autoSearch?: boolean; packOnly?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
   const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
@@ -808,7 +814,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
     setBusy(true);
     setMessage(null);
     try {
-      const res = await api<{ results: ReleaseResult[]; indexers: IndexerSearchOutcome[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId });
+      const res = await api<{ results: ReleaseResult[]; indexers: IndexerSearchOutcome[] }>("POST", "/api/search", { mediaItemId: mediaId, episodeId, seasonPackOnly: packOnly });
       setResults(res.results);
       setOutcomes(res.indexers ?? []);
     } catch (e) {
@@ -829,7 +835,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
     setMessage(null);
     setGrabSuccess(null);
     try {
-      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient });
+      await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient, seasonPackOnly: packOnly });
       setGrabSuccess(`Sent to qBittorrent: ${r.title}. It will appear in the media library only after import completes. Check Activity → Queue for download and import progress.`);
     } catch (e) {
       setMessage((e as Error).message);
@@ -840,6 +846,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   // Client-side sorting and filtering only. The server re-validates every grab, so a rejected
   // release can never pass because of a frontend change.
   const visible = (results ?? []).filter((r) =>
+    (!packOnly || /(?:^|[. _-])S\\d{1,3}(?:[. _-]|$)/i.test(r.title) && !/S\\d{1,3}E\\d{1,3}/i.test(r.title)) &&
     (indexerFilter === "all" || r.indexer === indexerFilter) &&
     (decisionFilter === "all" || (decisionFilter === "accepted") === r.accepted) &&
     (minSeeders === "" || r.seeders >= Number(minSeeders)));
@@ -856,13 +863,13 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   return (
     <div className="card" style={{ marginTop: "1rem" }}>
       <div className="row spread">
-        <h2>Manual release search</h2>
+        <h2>{packOnly ? "Season pack releases" : episodeId !== null ? "Episode releases" : "Manual release search"}</h2>
         <div className="row">
           <button className="primary" onClick={search} disabled={busy}>{busy ? "Searching…" : "Search indexers"}</button>
           <button onClick={onClose}>Close</button>
         </div>
       </div>
-      <p className="muted">Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library.</p>
+      <p className="muted">{packOnly ? "Season-pack candidates only. OneArr validates the selected season through an episode in that season. Review pack contents before grabbing; this does not guarantee all episodes are present." : "Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library."}</p>
       <ErrorLine message={message} />
       {grabSuccess && <p className="ok" role="status">{grabSuccess}</p>}
       {outcomes.length > 0 && (

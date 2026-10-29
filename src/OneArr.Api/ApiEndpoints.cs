@@ -18,8 +18,8 @@ public static class ApiEndpoints
     public sealed record SetupRequest(string Password);
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
     public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
-    public sealed record SearchBody(int MediaItemId, int? EpisodeId);
-    public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null);
+    public sealed record SearchBody(int MediaItemId, int? EpisodeId, bool SeasonPackOnly = false);
+    public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null, bool SeasonPackOnly = false);
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
     // Priority: LOWER values are searched first; ties break by Id. Default 0 preserves Id order.
     public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
@@ -302,7 +302,7 @@ public static class ApiEndpoints
 
         api.MapPost("/search", async (SearchBody body, ReleaseService releases, CancellationToken ct) =>
         {
-            var result = await releases.SearchAsync(body.MediaItemId, body.EpisodeId, ct);
+            var result = await releases.SearchAsync(body.MediaItemId, body.EpisodeId, ct, body.SeasonPackOnly);
             return Results.Ok(new
             {
                 indexerErrors = result.IndexerErrors,
@@ -330,7 +330,7 @@ public static class ApiEndpoints
 
         api.MapPost("/grab", async (GrabBody body, ReleaseService releases, CancellationToken ct) =>
         {
-            var job = await releases.GrabAsync(new GrabRequest(body.MediaItemId, body.EpisodeId, body.Title, body.Link, body.InfoHash, body.DownloadClientId), ct);
+            var job = await releases.GrabAsync(new GrabRequest(body.MediaItemId, body.EpisodeId, body.Title, body.Link, body.InfoHash, body.DownloadClientId, body.SeasonPackOnly), ct);
             return Results.Created($"/api/queue/{job.Id}", job);
         });
 
