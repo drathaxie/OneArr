@@ -678,6 +678,23 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
+    public async Task AlreadyCompletedJobWithoutTimestampGetsObservedCompletionFromQbit()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "movie");
+        AgeFile(file);
+        var id = await AddJobAsync(world, movieId, null, MediaType.Movie, "Dune.2021.1080p",
+            DownloadStatus.Completed, 1, "aa06", Path.GetDirectoryName(file));
+        world.Qbit.Torrents.Add(new FakeQbit.Torrent("aa06", "Dune.2021.1080p",
+            "onearr-movies", "stalledUP", 1, Path.GetDirectoryName(file)));
+        Assert.Null((await GetJobAsync(world, id)).CompletedAt);
+        await world.Downloads.SyncQueueAsync(default);
+        Assert.Equal(world.Time.GetUtcNow(), (await GetJobAsync(world, id)).CompletedAt);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, id)).Status);
+    }
+
+    [Fact]
     public async Task AutomaticImport_OptInUsesStoredPreviewAndKeepsSeedingSource()
     {
         using var world = await WorldAsync();
