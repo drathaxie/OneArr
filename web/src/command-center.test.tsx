@@ -82,6 +82,11 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     ],
     "GET /api/media/1/detail": detailFor(1),
     "GET /api/media/2/detail": detailFor(2),
+    "GET /api/download-clients": [{ id: 1, name: "qBittorrent", enabled: true }],
+    "POST /api/search": {
+      results: [],
+      indexers: [{ id: 7, name: "TorrentLeech", status: "failed", resultCount: 0, message: "HTTP 404" }],
+    },
   };
   if (method === "PATCH" || method === "DELETE") {
     return Promise.resolve(new Response(undefined, { status: 204, headers: { "Content-Type": "application/json" } }));
@@ -162,6 +167,48 @@ describe("command center inspector", () => {
     fireEvent.change(screen.getByLabelText("Root folder"), { target: { value: "/data/movies2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save root folder" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/api/media/1" && (c.body as { rootFolder?: string }).rootFolder === "/data/movies2")).toBe(true));
+  });
+
+  it("opens the release search in a visible dialog without closing the dossier, and starts the search", async () => {
+    await openInspector("Dune");
+    const dossier = screen.getByRole("complementary", { name: "Dossier for Dune" });
+    const open = within(dossier).getByRole("button", { name: "Search releases" });
+    fireEvent.click(open);
+
+    const dialog = await screen.findByRole("dialog", { name: "Manual release search" });
+    expect(within(dialog).getByText("Manual release search")).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Dossier for Dune" })).toBeTruthy();
+    await waitFor(() => expect(calls.some(c => c.method === "POST" && c.path === "/api/search" &&
+      (c.body as { mediaItemId?: number } | undefined)?.mediaItemId === 1)).toBe(true));
+    // A failed tracker search must remain visible, not vanish below the poster grid.
+    expect(await within(dialog).findByText(/TorrentLeech: failed — HTTP 404/)).toBeTruthy();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Manual release search" })).toBeNull();
+    expect(screen.getByRole("complementary", { name: "Dossier for Dune" })).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(open));
+  });
+
+  it("opens the same visible search dialog from the poster action menu", async () => {
+    render(<Movies />);
+    await screen.findByText("Showing 2 of 2.");
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Arrival" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Search releases" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manual release search" });
+    expect(within(dialog).getByText("Manual release search")).toBeTruthy();
+    await waitFor(() => expect(calls.some(c => c.method === "POST" && c.path === "/api/search" &&
+      (c.body as { mediaItemId?: number } | undefined)?.mediaItemId === 2)).toBe(true));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Manual release search" })).toBeNull();
+  });
+
+  it("keeps the release search dialog visible in List view", async () => {
+    await openInspector("Dune");
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
+    fireEvent.click(within(screen.getByRole("complementary", { name: "Dossier for Dune" }))
+      .getByRole("button", { name: "Search releases" }));
+    expect(await screen.findByRole("dialog", { name: "Manual release search" })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Dossier for Dune" })).toBeTruthy();
   });
 
   it("toggles monitoring from the inspector switch", async () => {
