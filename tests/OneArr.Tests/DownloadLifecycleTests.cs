@@ -346,6 +346,51 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
+    public async Task RemoteClientPathMappingAllowsSafePreviewAndConfirmedImport()
+    {
+        using var world = await WorldAsync();
+        var movieId = await world.AddMovieAsync("Dune", 2021);
+        var original = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "movie-contents");
+        AgeFile(original);
+        await world.Settings.SetAsync(
+            OneArr.Infrastructure.Files.DownloadPathMapper.SettingsKey(1),
+            OneArr.Infrastructure.Files.DownloadPathMapper.Serialize(
+                new OneArr.Infrastructure.Files.DownloadPathMapping("/remote/downloads", world.Dirs.Torrents)));
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie,
+            "Dune.2021.1080p.BluRay", DownloadStatus.Completed, 1, "remote01",
+            "/remote/downloads/Dune");
+        var importer = PreviewService(world);
+        var preview = await importer.PreviewImportAsync(jobId, CancellationToken.None);
+        var plan = Assert.Single(preview.Plans);
+        Assert.Equal("hardlink", plan.PlannedAction);
+        Assert.True(plan.DestinationPath!.StartsWith(world.Dirs.Media, StringComparison.Ordinal));
+        await importer.ApplyPreviewAsync(jobId, preview.PreviewId, CancellationToken.None);
+        Assert.True(File.Exists(plan.DestinationPath));
+        Assert.True(File.Exists(original));
+        Assert.Equal("movie-contents", await File.ReadAllTextAsync(original));
+    }
+
+    [Fact]
+    public async Task RemotePathOutsideConfiguredPrefixCannotImportUnrelatedFiles()
+    {
+        using var world = await WorldAsync();
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var actual = world.Dirs.WriteFile("torrents/Dune/Dune.2021.1080p.mkv", "original");
+        AgeFile(actual);
+        await world.Settings.SetAsync(
+            OneArr.Infrastructure.Files.DownloadPathMapper.SettingsKey(1),
+            OneArr.Infrastructure.Files.DownloadPathMapper.Serialize(
+                new OneArr.Infrastructure.Files.DownloadPathMapping("/remote/downloads", world.Dirs.Torrents)));
+        var job = await AddJobAsync(world, id, null, MediaType.Movie,
+            "Dune.2021.1080p", DownloadStatus.Completed, 1, "remote02", "/wrong/elsewhere");
+        var svc = PreviewService(world);
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            svc.PreviewImportAsync(job, CancellationToken.None));
+        Assert.Contains("remote prefix", error.Message);
+        Assert.True(File.Exists(actual));
+    }
+
+    [Fact]
     public async Task Preview_PlansWithoutWriting_AndApplyImportsExactlyThePlan()
     {
         using var world = await WorldAsync();

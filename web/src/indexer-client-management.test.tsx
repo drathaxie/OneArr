@@ -220,6 +220,33 @@ describe("Indexer management", () => {
   });
 });
 
+describe("Remote download path mapping", () => {
+  it("previews and saves a client-scoped rule without changing downloads", async () => {
+    routes["GET /api/download-clients/3/path-mapping"] = () => ({ body: { mapping: null } });
+    routes["POST /api/download-clients/3/path-mapping/preview"] = () => ({
+      body: { localPath: "/data/torrents/Show/episode.mkv", exists: false, applied: false },
+    });
+    routes["PUT /api/download-clients/3/path-mapping"] = () => ({ body: {
+      remotePrefix: "/downloads", localPrefix: "/data/torrents",
+    } });
+    await renderSettings();
+    await openSection("Download Clients", "Download clients (qBittorrent)");
+    await screen.findByText("qbit-main");
+    fireEvent.click(screen.getByRole("button", { name: "Paths" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Download client path mapping" }));
+    fireEvent.change(dialog.getByLabelText("Remote download prefix"), { target: { value: "/downloads" } });
+    fireEvent.change(dialog.getByLabelText("Mapped local folder"), { target: { value: "/data/torrents" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Preview path" }));
+    await waitFor(() => expect(calls.some(x => x.path === "/api/download-clients/3/path-mapping/preview")).toBe(true));
+    expect(await dialog.findByText(/Mapped path:/)).toBeTruthy();
+    fireEvent.click(dialog.getByRole("button", { name: "Save mapping" }));
+    await waitFor(() => expect(calls.some(x => x.path === "/api/download-clients/3/path-mapping" && x.method === "PUT")).toBe(true));
+    const saved = calls.find(x => x.path === "/api/download-clients/3/path-mapping" && x.method === "PUT")!;
+    expect(saved.body).toEqual({ remotePrefix: "/downloads", localPrefix: "/data/torrents" });
+    expect(calls.some(x => x.path.includes("/grab") || x.path.includes("/import"))).toBe(false);
+  });
+});
+
 describe("Download client management", () => {
   it("lists clients with health and tests a row by saved id", async () => {
     await renderSettings();

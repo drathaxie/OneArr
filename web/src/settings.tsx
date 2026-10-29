@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type ConnectionTestResult, type DownloadClient, type Indexer, type QualityProfile, type SettingsData } from "./api";
 import { TrackerCatalog } from "./tracker-catalog";
 import { ErrorLine, useLoad } from "./common";
@@ -666,6 +666,7 @@ function ClientsSection() {
   const [healthFilter, setHealthFilter] = useState("all");
   const [sort, setSort] = useState("name");
   const [editing, setEditing] = useState<DownloadClient | "new" | null>(null);
+  const [pathClient, setPathClient] = useState<DownloadClient | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -757,6 +758,7 @@ function ClientsSection() {
               <div className="manage-actions">
                 <button className="small" disabled={busy !== null} onClick={() => testRow(c)}>{busy === `client-${c.id}` ? "Testing…" : "Test"}</button>
                 <button className="small" onClick={() => setEditing(c)}>Edit</button>
+                <button className="small" onClick={() => setPathClient(c)}>Paths</button>
                 <button className="small" disabled={busy !== null} onClick={() => toggleEnabled(c)}>{c.enabled ? "Disable" : "Enable"}</button>
                 {confirmDelete === c.id ? (
                   <>
@@ -772,7 +774,80 @@ function ClientsSection() {
         </div>
       </div>
       {editing && <ClientDialog initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {pathClient && <ClientPathMappingDialog client={pathClient} onClose={() => setPathClient(null)} />}
     </>
+  );
+}
+
+function ClientPathMappingDialog({ client, onClose }: { client: DownloadClient; onClose: () => void }) {
+  const { data, error, reload } = useLoad<{ mapping: { remotePrefix: string; localPrefix: string } | null }>(
+    `/api/download-clients/${client.id}/path-mapping`);
+  const [remote, setRemote] = useState("");
+  const [local, setLocal] = useState("");
+  const [reported, setReported] = useState("/downloads/Show/episode.mkv");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (data?.mapping) {
+      setRemote(data.mapping.remotePrefix);
+      setLocal(data.mapping.localPrefix);
+    }
+  }, [data]);
+
+  async function test() {
+    setBusy(true); setMessage(null); setPreview(null);
+    try {
+      const result = await api<{ localPath: string; exists: boolean }>("POST",
+        `/api/download-clients/${client.id}/path-mapping/preview`,
+        { remotePrefix: remote, localPrefix: local, reportedPath: reported });
+      setPreview(`${result.localPath} (${result.exists ? "exists" : "not found"})`);
+    } catch (e) { setMessage((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function save() {
+    setBusy(true); setMessage(null);
+    try {
+      await api("PUT", `/api/download-clients/${client.id}/path-mapping`,
+        { remotePrefix: remote, localPrefix: local });
+      setMessage("Saved. Import previews now translate this client's reported paths.");
+      reload();
+    } catch (e) { setMessage((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function remove() {
+    setBusy(true); setMessage(null);
+    try {
+      await api("DELETE", `/api/download-clients/${client.id}/path-mapping`);
+      setRemote(""); setLocal(""); setPreview(null);
+      setMessage("Download path mapping cleared.");
+      reload();
+    } catch (e) { setMessage((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog card" role="dialog" aria-modal="true" aria-label="Download client path mapping">
+        <h2>Remote download paths — {client.name}</h2>
+        <p className="muted">Use only when qBittorrent reports a remote Linux path but OneArr sees the files at another local folder. This is different from Sonarr/Radarr library migration mappings. One mapping per client; the mapped folder must exist within the configured torrent root. Import checks the mapping again before writing.</p>
+        <ErrorLine message={error} />
+        <label>Remote path prefix<input aria-label="Remote download prefix" value={remote} placeholder="/downloads" onChange={e => setRemote(e.target.value)} /></label>
+        <label>Local mounted folder<input aria-label="Mapped local folder" value={local} placeholder="D:\\Downloads" onChange={e => setLocal(e.target.value)} /></label>
+        <label>Example qBittorrent content path<input aria-label="Example reported path" value={reported} onChange={e => setReported(e.target.value)} /></label>
+        <ErrorLine message={message} />
+        {preview && <p aria-live="polite">Mapped path: <code>{preview}</code></p>}
+        <div className="row">
+          <button type="button" disabled={busy || !remote || !local || !reported} onClick={() => void test()}>Preview path</button>
+          <button className="primary" type="button" disabled={busy || !remote || !local} onClick={() => void save()}>Save mapping</button>
+          {data?.mapping && <button type="button" disabled={busy} onClick={() => void remove()}>Remove mapping</button>}
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
