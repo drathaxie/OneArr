@@ -768,6 +768,23 @@ public class DownloadLifecycleTests
     }
 
     [Fact]
+    public async Task AutomaticImport_DifferentMovieFileIsNotImportedEvenIfGrabTitleLooksCorrect()
+    {
+        using var world = await WorldAsync();
+        var mediaId = await world.AddMovieAsync("Dune", 2021);
+        var file = world.Dirs.WriteFile("torrents/Dune/Other.Movie.2021.1080p.mkv", "wrong-movie");
+        AgeFile(file);
+        var id = await AddJobAsync(world, mediaId, null, MediaType.Movie, "Dune.2021.1080p",
+            DownloadStatus.Completed, 1, "aa07", Path.GetDirectoryName(file));
+        await ReadyForAutoImportAsync(world, id, MediaType.Movie);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        await world.Downloads.SyncQueueAsync(default);
+        Assert.Equal(0, (await world.Downloads.AutoImportCompletedAsync(default)).Imported);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, id)).Status);
+        Assert.False(Directory.Exists(Path.Combine(world.Dirs.Media, "movies", "Dune (2021)")));
+    }
+
+    [Fact]
     public async Task AutomaticImport_ConflictingExistingMovieIsNeverOverwritten()
     {
         using var world = await WorldAsync();
