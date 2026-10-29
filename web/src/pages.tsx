@@ -792,6 +792,7 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   const [results, setResults] = useState<ReleaseResult[] | null>(null);
   const [outcomes, setOutcomes] = useState<IndexerSearchOutcome[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [grabSuccess, setGrabSuccess] = useState<string | null>(null);
   const { data: clients } = useLoad<DownloadClient[]>("/api/download-clients");
   const enabledClients = (clients ?? []).filter((c) => c.enabled);
   const [clientId, setClientId] = useState<number | null>(null);
@@ -825,9 +826,11 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
   }, [autoSearch, mediaId, episodeId]);
 
   async function grab(r: ReleaseResult) {
+    setMessage(null);
+    setGrabSuccess(null);
     try {
       await api("POST", "/api/grab", { mediaItemId: mediaId, episodeId, title: r.title, link: r.link, infoHash: r.infoHash, downloadClientId: selectedClient });
-      setMessage(`Sent to qBittorrent: ${r.title}`);
+      setGrabSuccess(`Sent to qBittorrent: ${r.title}. It will appear in the media library only after import completes. Check Activity → Queue for download and import progress.`);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -859,8 +862,9 @@ export function ReleasePanel({ mediaId, episodeId, onClose, autoSearch = false }
           <button onClick={onClose}>Close</button>
         </div>
       </div>
-      <p className="muted">Automatic grabbing is off. Only releases you choose here are sent to qBittorrent.</p>
+      <p className="muted">Only releases you choose here are sent to qBittorrent. Downloading is separate from importing the video into your library.</p>
       <ErrorLine message={message} />
+      {grabSuccess && <p className="ok" role="status">{grabSuccess}</p>}
       {outcomes.length > 0 && (
         <div>
           <h3>Indexers in this search</h3>
