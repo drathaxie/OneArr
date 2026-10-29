@@ -94,6 +94,17 @@ describe("Manual release search", () => {
     expect(text.indexOf("Movie.2021.720p.WEB")).toBeLessThan(text.indexOf("Movie.2021.1080p.WEB"));
   });
 
+  it("shows a successful qBittorrent grab in success styling while explaining import is pending", async () => {
+    await openPanel();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab" })[0]);
+    const status = await screen.findByRole("status");
+    expect(status.className).toContain("ok");
+    expect(status.textContent).toContain("Sent to qBittorrent:");
+    expect(status.textContent).toContain("only after import completes");
+    expect(status.textContent).toContain("Activity → Queue");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("grabs to the selected client, defaulting to the first enabled one", async () => {
     await openPanel();
     fireEvent.click(screen.getAllByRole("button", { name: "Grab" })[0]);
