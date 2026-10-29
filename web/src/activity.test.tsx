@@ -52,6 +52,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
   const routes: Record<string, unknown> = {
     "GET /api/queue": queue,
+    "GET /api/settings": { automaticImport: false, dryRunImport: true },
     "GET /api/activity/history": history,
     "GET /api/activity/problems": problems,
     "GET /api/imports": [],
@@ -86,6 +87,8 @@ describe("activity", () => {
     await screen.findByText("Show S01 Complete");
     expect(screen.getAllByText("qbit").length).toBeGreaterThan(0);
     expect(screen.getByText("Ready to import")).toBeTruthy();
+    expect(screen.getByText(/Downloading or seeding a torrent does not make its movie or episode available/)).toBeTruthy();
+    expect(await screen.findByText(/Automatic completed-download importing is OFF/)).toBeTruthy();
     expect(screen.getByText("2.5 MB/s")).toBeTruthy();
     expect(screen.getByText("10m")).toBeTruthy();
     // The completed job reports no speed/ETA: dashes, not invented numbers.
