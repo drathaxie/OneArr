@@ -210,10 +210,18 @@ public sealed class DownloadService
         var now = _time.GetUtcNow();
         await using var db = await _db.CreateDbContextAsync(ct);
         // Bounded pass: no unbounded database or filesystem loop on startup.
-        var pending = await db.DownloadJobs.AsNoTracking()
-            .Where(j => j.Status == DownloadStatus.Completed)
+        var eligibleQueue = db.DownloadJobs.AsNoTracking().Where(j => j.Status == DownloadStatus.Completed);
+        var pendingCount = await eligibleQueue.CountAsync(ct);
+        // Rotate through bounded pages so old ambiguous jobs cannot starve
+        // newer completed jobs forever. At most 20 candidates and 5 planned
+        // jobs are inspected in one five-minute scheduler pass.
+        const int pageSize = 20;
+        var pages = Math.Max(1, (pendingCount + pageSize - 1) / pageSize);
+        var page = (int)((now.ToUnixTimeSeconds() / 300) % pages);
+        var pending = await eligibleQueue
             .OrderBy(j => j.Id)
-            .Take(5)
+            .Skip(page * pageSize)
+            .Take(pageSize)
             .Select(j => j.Id)
             .ToListAsync(ct);
         int considered = 0, imported = 0, deferred = 0, failed = 0;
@@ -241,7 +249,7 @@ public sealed class DownloadService
                     : null;
                 considered++;
                 var why = AutoImportReviewReason(job, media, owner, plans, now, target);
-                if (why is not null) { deferred++; continue; }
+                if (why is not null) { deferred++; if (considered >= 5) break; continue; }
 
                 // Store exactly the verified plans. Apply recomputes and
                 // rechecks the fingerprint; a changed source fails closed.
@@ -263,6 +271,7 @@ public sealed class DownloadService
                 if (result.Status == DownloadStatus.Imported) imported++;
                 else if (result.Status == DownloadStatus.Failed) failed++;
                 else deferred++;
+                if (considered >= 5) break;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException
@@ -700,7 +709,7 @@ public sealed class DownloadService
                 break;
             }
         }
-        if (mismatch || Fingerprint(stored) != preview.Fingerprint)
+        if (mismatch || stored.Count != fresh.Count || Fingerprint(stored) != preview.Fingerprint)
         {
             var freshDto = new ImportPreviewDto(0, job.Id, _time.GetUtcNow(), fresh, Fingerprint(fresh));
             throw new StalePreviewException(freshDto);
