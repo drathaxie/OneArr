@@ -257,7 +257,10 @@ public sealed class DownloadService
                 var why = health is null || health.LastError is not null ||
                         health.LastSeenAt is null || now - health.LastSeenAt > TimeSpan.FromMinutes(3)
                     ? "Download client is unreachable or has not reported a recent healthy state"
-                    : AutoImportReviewReason(job, media, owner, plans, now, target);
+                    : job.LastSeenAt is null ||
+                      Math.Abs((health.LastSeenAt.Value - job.LastSeenAt.Value).TotalSeconds) > 5
+                        ? "This torrent was not confirmed in the download client's latest queue poll"
+                        : AutoImportReviewReason(job, media, owner, plans, now, target);
                 if (why is not null) { deferred++; if (considered >= 5) break; continue; }
 
                 // Store exactly the verified plans. Apply recomputes and
