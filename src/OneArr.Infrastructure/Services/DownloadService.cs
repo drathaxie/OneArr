@@ -305,6 +305,11 @@ public sealed class DownloadService
     {
         if (job.Status != DownloadStatus.Completed || job.Progress < 0.999)
             return "Download is not completely finished";
+        // qBittorrent can report 100% while still hashing/checking. Only
+        // confirmed upload/seeding or stopped upload states are considered.
+        if (job.ClientState is not ("uploading" or "stalledUP" or "queuedUP" or "forcedUP"
+            or "pausedUP" or "stoppedUP"))
+            return "qBittorrent has not confirmed a stable completed/upload state";
         if (job.DownloadClientId is null || owner is null || !owner.Enabled ||
             string.IsNullOrWhiteSpace(job.Hash))
             return "Download client identity is not verified";
