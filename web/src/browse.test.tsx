@@ -73,11 +73,12 @@ describe("poster grid", () => {
     await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
   });
 
-  it("opening a card shows the dossier with linked files", async () => {
+  it("opening a card shows the media manager with linked files", async () => {
     render(<Movies />);
     await screen.findByText("Showing 2 of 2.");
-    fireEvent.click(screen.getByRole("button", { name: "Open Dune" }));
-    await screen.findByRole("complementary", { name: "Dossier for Dune" });
+    fireEvent.click(screen.getByRole("button", { name: "Manage Dune" }));
+    const dialog = await screen.findByRole("dialog", { name: "Media manager" });
+    expect(dialog).toBeTruthy();
     expect(screen.getByText(/Dune\.mkv/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/media/1/detail")).toBe(true);
   });
