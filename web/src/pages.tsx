@@ -107,10 +107,6 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
     await api("DELETE", `/api/media/${item.id}`).catch((e: Error) => setMessage(e.message));
     reload();
   }
-  function openInspector(item: MediaItem, opener: HTMLButtonElement | null) {
-    openerRef.current = opener;
-    setInspectorId(item.id);
-  }
   function openReleaseSearch(id: number, opener: HTMLButtonElement) {
     releaseOpenerRef.current = opener;
     setSearchId(id);
@@ -322,7 +318,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               );
             })}
           </div>
-          {false && inspectorItem && (
+          {inspectorItem && (
             <InspectorPanel
               item={inspectorItem}
               kind={kind}
@@ -378,7 +374,7 @@ function MediaPage({ kind, onNavigate }: { kind: "movie" | "series"; onNavigate?
               </tbody>
             </table>
           </div>
-          {false && inspectorItem && (
+          {inspectorItem && (
             <InspectorPanel
               item={inspectorItem}
               kind={kind}
