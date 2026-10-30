@@ -79,7 +79,6 @@ describe("poster grid", () => {
     fireEvent.click(screen.getByRole("button", { name: "Manage Dune" }));
     const dialog = await screen.findByRole("dialog", { name: "Media manager" });
     expect(dialog).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Linked files (1)" }));
     expect(screen.getByText(/Dune\.mkv/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/media/1/detail")).toBe(true);
   });
