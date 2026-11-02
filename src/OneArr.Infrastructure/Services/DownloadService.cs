@@ -103,6 +103,16 @@ public sealed class DownloadService
 
             var relFolder = RelativeFolder(media, job, db);
             var files = ListFiles(job.ContentPath!, torrentRoot);
+            // Content that is present but holds no importable file (only samples, or no media) fails visibly instead of retrying silently.
+            if (files.Count == 0 && !dryRun && ContentExists(job.ContentPath!))
+            {
+                var empty = await db.DownloadJobs.FirstAsync(j => j.Id == job.Id, ct);
+                empty.Status = DownloadStatus.Failed;
+                empty.Error = "No importable media file. The download holds only samples or non-media files";
+                empty.UpdatedAt = _time.GetUtcNow();
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
             var jobFailed = false;
             var jobDeferred = false;
 
@@ -177,13 +187,21 @@ public sealed class DownloadService
         return Path.Combine(title, $"Season {season:00}");
     }
 
-    private static List<string> ListFiles(string contentPath, string torrentRoot)
+    private static bool ContentExists(string contentPath)
     {
         var full = Path.GetFullPath(contentPath);
-        if (File.Exists(full)) return SafeImporter.IsMediaFile(full) ? [full] : [];
+        return File.Exists(full) || Directory.Exists(full);
+    }
+
+    /// <summary>Importable media files under a download, samples excluded. Public so the rule can be tested directly.</summary>
+    public static List<string> ListFiles(string contentPath, string torrentRoot)
+    {
+        var full = Path.GetFullPath(contentPath);
+        // Samples are excluded here, so the real episode file is the only candidate for its destination.
+        if (File.Exists(full)) return SafeImporter.IsMediaFile(full) && !SampleFiles.IsSample(full) ? [full] : [];
         if (!Directory.Exists(full)) return [];
         return Directory.EnumerateFiles(full, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
-            .Where(SafeImporter.IsMediaFile)
+            .Where(f => SafeImporter.IsMediaFile(f) && !SampleFiles.IsSample(f))
             .Where(f => f.StartsWith(Path.GetFullPath(torrentRoot), StringComparison.Ordinal))
             .ToList();
     }

@@ -10,6 +10,8 @@ public sealed record AddMediaRequest(MediaType Type, string ProviderId, int Qual
 
 public sealed record AddMediaResult(MediaItem Item, bool Created);
 
+public sealed record RematchResult(int MediaItemId, string Title, int? Year, int EpisodesUpdated, int EpisodesAdded, int EpisodesUnmonitored, int FilesUnlinked);
+
 /// <summary>Catalog operations: add (deduplicated), monitoring and wanted lists. All identity checks use (MediaType, Provider, ProviderId).</summary>
 public sealed class MediaService
 {
@@ -131,6 +133,95 @@ public sealed class MediaService
         }
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    /// <summary>
+    /// Points an existing item at a different TMDb entry (fix match). Episode rows are matched by season and number and kept, with their
+    /// ids, so download history that refers to them stays valid. Episodes the new entry does not list are unmonitored, not deleted.
+    /// Library links for this item are removed, because they were verified against the old title. The item's review flag is cleared, so
+    /// automatic grabbing waits for a library scan. No file on disk is touched.
+    /// </summary>
+    public async Task<RematchResult> RematchAsync(int id, string providerId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(providerId) || !providerId.All(char.IsDigit))
+            throw new ArgumentException("Provider id must be numeric");
+
+        MediaType type;
+        await using (var check = await _db.CreateDbContextAsync(ct))
+        {
+            var current = await check.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct)
+                ?? throw new KeyNotFoundException("Catalog entry not found");
+            type = current.MediaType;
+            if (await check.MediaItems.AnyAsync(m => m.MediaType == type && m.Provider == "tmdb" && m.ProviderId == providerId && m.Id != id, ct))
+                throw new InvalidOperationException("That entry is already in OneArr. Remove the duplicate first, or choose another match.");
+        }
+
+        // Metadata is fetched before the write transaction, so network latency never holds a write lock.
+        var details = await _metadata.GetDetailsAsync(type, providerId, ct);
+        var seasons = type == MediaType.Series ? await _metadata.GetSeasonsAsync(providerId, ct) : [];
+
+        await using var write = await _db.CreateDbContextAsync(ct);
+        await using var tx = await write.Database.BeginTransactionAsync(ct);
+        var item = await write.MediaItems.Include(m => m.Episodes).FirstAsync(m => m.Id == id, ct);
+
+        item.ProviderId = providerId;
+        item.Title = details.Title;
+        item.Year = details.Year;
+        item.Overview = details.Overview;
+        item.PosterPath = details.PosterPath;
+        item.LibraryReviewedUtc = null;
+
+        var episodesUpdated = 0;
+        var episodesAdded = 0;
+        var episodesUnmonitored = 0;
+        if (type == MediaType.Series)
+        {
+            var existingSeasons = await write.Seasons.Where(s => s.MediaItemId == id).Select(s => s.SeasonNumber).ToListAsync(ct);
+            foreach (var season in seasons.Where(s => !existingSeasons.Contains(s.SeasonNumber)))
+                write.Seasons.Add(new Season { MediaItemId = id, SeasonNumber = season.SeasonNumber, Monitored = item.Monitored });
+
+            var listed = new HashSet<(int Season, int Number)>();
+            foreach (var season in seasons)
+            {
+                foreach (var e in season.Episodes)
+                {
+                    listed.Add((season.SeasonNumber, e.EpisodeNumber));
+                    var existing = item.Episodes.FirstOrDefault(x => x.SeasonNumber == season.SeasonNumber && x.EpisodeNumber == e.EpisodeNumber);
+                    if (existing is null)
+                    {
+                        write.Episodes.Add(new Episode
+                        {
+                            MediaItemId = id, SeasonNumber = season.SeasonNumber, EpisodeNumber = e.EpisodeNumber,
+                            ProviderId = e.ProviderId, Title = e.Title, AirDate = e.AirDate, Monitored = item.Monitored,
+                        });
+                        episodesAdded++;
+                    }
+                    else
+                    {
+                        existing.ProviderId = e.ProviderId;
+                        existing.Title = e.Title;
+                        existing.AirDate = e.AirDate;
+                        episodesUpdated++;
+                    }
+                }
+            }
+            foreach (var ep in item.Episodes.Where(ep => ep.Monitored && !listed.Contains((ep.SeasonNumber, ep.EpisodeNumber))))
+            {
+                ep.Monitored = false;
+                episodesUnmonitored++;
+            }
+        }
+
+        var links = await write.MediaFiles.Include(f => f.EpisodeLinks).Where(f => f.MediaItemId == id).ToListAsync(ct);
+        foreach (var file in links)
+        {
+            write.MediaFileEpisodes.RemoveRange(file.EpisodeLinks);
+            file.MediaItemId = null;
+        }
+
+        await write.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new RematchResult(item.Id, details.Title, details.Year, episodesUpdated, episodesAdded, episodesUnmonitored, links.Count);
     }
 
     public async Task<bool> DeleteAsync(int id, CancellationToken ct)

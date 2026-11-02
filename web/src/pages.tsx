@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type EpisodeRow, type Job, type MediaItem, type MetadataResult, type QualityProfile, type ReleaseResult } from "./api";
 import { LibraryPanel, RootFolderTool } from "./library";
+import { FixMatchPanel } from "./fixmatch";
 
 function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -72,6 +73,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
   const { data: items, error, reload } = useLoad<MediaItem[]>(`/api/media?type=${kind}`, [kind]);
   const { data: profiles } = useLoad<QualityProfile[]>("/api/quality-profiles");
   const [openId, setOpenId] = useState<number | null>(null);
+  const [fixId, setFixId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   async function toggle(item: MediaItem) {
@@ -109,6 +111,7 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
                   <td className="row">
                     {kind === "movie" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Releases</button>}
                     {kind === "series" && <button className="small" onClick={() => setOpenId(openId === item.id ? null : item.id)}>Episodes</button>}
+                    <button className="small" onClick={() => setFixId(fixId === item.id ? null : item.id)}>Fix match</button>
                     <button className="small danger" onClick={() => remove(item)}>Remove</button>
                   </td>
                 </tr>
@@ -118,6 +121,9 @@ function MediaPage({ kind }: { kind: "movie" | "series" }) {
         )}
       </div>
       {kind === "movie" && openId !== null && <ReleasePanel mediaId={openId} episodeId={null} onClose={() => setOpenId(null)} />}
+      {fixId !== null && items?.find((i) => i.id === fixId) && (
+        <FixMatchPanel item={items.find((i) => i.id === fixId)!} kind={kind} onDone={reload} onClose={() => setFixId(null)} />
+      )}
     </>
   );
 }

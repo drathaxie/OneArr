@@ -17,6 +17,7 @@ public static class ApiEndpoints
     public sealed record SetupRequest(string Password);
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
     public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
+    public sealed record RematchBody(string? ProviderId);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId);
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash);
     public sealed record IndexerBody(string Name, string BaseUrl, string ApiKey, bool Enabled);
@@ -121,6 +122,27 @@ public static class ApiEndpoints
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
             await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
+
+        // Fix match: points an existing entry at the correct TMDb title. Library links are cleared for re-checking; files are not touched.
+        api.MapPut("/media/{id:int}/match", async (int id, RematchBody body, MediaService media, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await media.RematchAsync(id, body.ProviderId?.Trim() ?? "", ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException)
+            {
+                return Results.BadRequest(new { error = OutboundHttp.Redact(ex.Message) });
+            }
+        });
 
         api.MapDelete("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
             await media.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound());
