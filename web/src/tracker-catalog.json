@@ -1,6 +1,6 @@
 {
   "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
-  "sourceMetadataHash": "19c7e680a7d7ba58",
+  "sourceMetadataHash": "a6290f2e26085734",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -121,6 +121,7 @@
     "definitions/v11/datascene-api.yml",
     "definitions/v11/daxiangjiao-api.yml",
     "definitions/v11/daxiangjiao.yml",
+    "definitions/v11/deep-water-api.yml",
     "definitions/v11/deildu.yml",
     "definitions/v11/depthstudio-api.yml",
     "definitions/v11/depthstudio.yml",
@@ -181,6 +182,7 @@
     "definitions/v11/ggpt.yml",
     "definitions/v11/gigatorrents.yml",
     "definitions/v11/girotorrent.yml",
+    "definitions/v11/goldengate.yml",
     "definitions/v11/haidan.yml",
     "definitions/v11/haitang.yml",
     "definitions/v11/happyfappy.yml",
@@ -423,6 +425,7 @@
     "definitions/v11/rudub.yml",
     "definitions/v11/rustorka.yml",
     "definitions/v11/rutor.yml",
+    "definitions/v11/sagmire.yml",
     "definitions/v11/samaritano.yml",
     "definitions/v11/sapibr.yml",
     "definitions/v11/sbpt.yml",
@@ -466,7 +469,6 @@
     "definitions/v11/teamflix.yml",
     "definitions/v11/teamhd.yml",
     "definitions/v11/teamos.yml",
-    "definitions/v11/thebrothers.yml",
     "definitions/v11/thecrazyones.yml",
     "definitions/v11/theempire.yml",
     "definitions/v11/thefallingangels.yml",
@@ -1592,6 +1594,14 @@
       "tv": true
     },
     {
+      "path": "definitions/v11/deep-water-api.yml",
+      "name": "Deep-Water (API)",
+      "privacy": "private",
+      "language": "de-DE",
+      "movies": true,
+      "tv": true
+    },
+    {
       "path": "definitions/v11/deildu.yml",
       "name": "Deildu",
       "privacy": "semi-private",
@@ -2068,6 +2078,14 @@
       "name": "Girotorrent",
       "privacy": "private",
       "language": "it-IT",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/goldengate.yml",
+      "name": "Golden Gate (GG)",
+      "privacy": "private",
+      "language": "de-DE",
       "movies": true,
       "tv": true
     },
@@ -4008,6 +4026,14 @@
       "tv": true
     },
     {
+      "path": "definitions/v11/sagmire.yml",
+      "name": "Sagmire",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": false,
+      "tv": false
+    },
+    {
       "path": "definitions/v11/samaritano.yml",
       "name": "SAMARITANO (API)",
       "privacy": "private",
@@ -4350,14 +4376,6 @@
       "language": "en-US",
       "movies": false,
       "tv": false
-    },
-    {
-      "path": "definitions/v11/thebrothers.yml",
-      "name": "The Brothers",
-      "privacy": "private",
-      "language": "de-DE",
-      "movies": true,
-      "tv": true
     },
     {
       "path": "definitions/v11/thecrazyones.yml",
