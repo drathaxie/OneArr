@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRef } from "react";
+import { FixMatchPanel } from "./fixmatch";
 import { api, ApiError, formatBytes, posterUrl, type DownloadClient, type HistoryEntry, type ImportPreview, type IndexerSearchOutcome, type MediaDetail, type MediaFile, type MediaItem, type MetadataResult, type Problem, type QualityProfile, type QueueData, type ReleaseResult, type SettingsData } from "./api";
 import { availabilityClass, availabilityStamp, ConfirmDialog, ErrorLine, primaryStatus, useLoad } from "./common";
 import { InspectorPanel, OpsStrip, type CommandNavigate } from "./command-center";
@@ -415,6 +416,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
   const [showReleases, setShowReleases] = useState(false);
   const [releaseEpisode, setReleaseEpisode] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [showFixMatch, setShowFixMatch] = useState(false);
   const [managerTab, setManagerTab] = useState<"seasons" | "files" | "settings">("seasons");
   const [releaseLabel, setReleaseLabel] = useState<string | null>(null);
   const [packOnly, setPackOnly] = useState(false);
@@ -476,6 +478,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           <p className="muted">Root folder: <code>{data.rootFolder}</code>{data.legacyPath ? <> · imported from <code>{data.legacyPath}</code> ({data.legacySource})</> : ""}</p>
           <div className="row">
             <button className="small" onClick={() => patch({ monitored: !data.monitored })}>{data.monitored ? "Unmonitor" : "Monitor"}</button>
+            <button className="small" onClick={() => setShowFixMatch(!showFixMatch)}>Fix match</button>
             <button className="small" onClick={() => setShowReleases(!showReleases)}>{showReleases ? "Hide releases" : "Search releases"}</button>
           </div>
           <form className="row" style={{ marginTop: ".5rem" }} onSubmit={(e) => { e.preventDefault(); if (root !== null) patch({ rootFolder: root }); }}>
@@ -493,6 +496,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           </form>
         </div>
       </div>
+      {showFixMatch && <FixMatchPanel item={data} kind={isSeries ? "series" : "movie"} onDone={reload} onClose={() => setShowFixMatch(false)} />}
       {isSeries && managerTab === "settings" && <div className="card"><h2>Series settings</h2><p className="muted">Use the monitoring, root folder and quality profile controls above. Changes save immediately.</p></div>}
       {showReleases && !isSeries && <ReleasePanel mediaId={mediaId} episodeId={null} onClose={() => setShowReleases(false)} />}
       {isSeries && <div className="series-manager-tabs" role="tablist" aria-label="Manager sections"><button role="tab" aria-selected={managerTab === "seasons"} className={managerTab === "seasons" ? "active" : ""} onClick={() => setManagerTab("seasons")}>Seasons & episodes</button><button role="tab" aria-selected={managerTab === "files"} className={managerTab === "files" ? "active" : ""} onClick={() => setManagerTab("files")}>Linked files ({data.files.length})</button><button role="tab" aria-selected={managerTab === "settings"} className={managerTab === "settings" ? "active" : ""} onClick={() => setManagerTab("settings")}>Settings</button></div>}

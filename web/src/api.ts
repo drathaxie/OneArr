@@ -113,6 +113,7 @@ export interface DetailEpisode {
 
 export interface MediaDetail {
   id: number;
+  providerId?: string;
   mediaType: "Movie" | "Series";
   title: string;
   year: number | null;

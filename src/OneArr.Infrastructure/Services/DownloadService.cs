@@ -447,7 +447,7 @@ public sealed class DownloadService
         {
             return await FailJobOrReportAsync(db, job, "Download path mapping: " + ex.Message, dryRun, ct);
         }
-        if (files.Count == 0) return await FailJobOrReportAsync(db, job, "No media files found in the completed download", dryRun, ct);
+        if (files.Count == 0) return await FailJobOrReportAsync(db, job, "No media files found in the completed download (samples are excluded)", dryRun, ct);
 
         int considered = 0, imported = 0, failed = 0, planned = 0;
         var jobFailed = false;
@@ -894,7 +894,7 @@ public sealed class DownloadService
                     "Multiple source files would resolve to the same destination; change the naming template", conflict: true)
                 : p).ToList();
         if (plans.Count == 0)
-            throw new ArgumentException("No media files found in the completed download; nothing to preview");
+            throw new ArgumentException("No importable media files found in the completed download (samples are excluded); nothing to preview");
         return (job, plans);
     }
 
@@ -1003,16 +1003,16 @@ public sealed class DownloadService
             : DownloadPathMapper.Map(DownloadPathMapper.Read(json), job.ContentPath, torrentRoot);
     }
 
-    private static List<string> ListFiles(string contentPath, string torrentRoot)
+    public static List<string> ListFiles(string contentPath, string torrentRoot)
     {
         var full = Path.GetFullPath(contentPath);
-        if (File.Exists(full)) return SafeImporter.IsMediaFile(full) ? [full] : [];
+        if (File.Exists(full)) return SafeImporter.IsMediaFile(full) && !SampleFiles.IsSample(full) ? [full] : [];
         if (!Directory.Exists(full)) return [];
         // Boundary-correct containment: a file under D:\Downloads2 must not pass a D:\Downloads
         // root. SafeImporter.CanonicalUnder appends the separator before comparing; a raw
         // StartsWith here would accept the sibling directory.
         return Directory.EnumerateFiles(full, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
-            .Where(SafeImporter.IsMediaFile)
+            .Where(f => SafeImporter.IsMediaFile(f) && !SampleFiles.IsSample(f))
             .Where(f =>
             {
                 try { SafeImporter.CanonicalUnder(torrentRoot, f); return true; }

@@ -18,6 +18,7 @@ public static class ApiEndpoints
     public sealed record SetupRequest(string Password);
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
     public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
+    public sealed record RematchBody(string? ProviderId);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId, bool SeasonPackOnly = false);
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null, bool SeasonPackOnly = false);
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
@@ -274,7 +275,7 @@ public static class ApiEndpoints
                 : item.HasFile ? "Available" : "Missing";
             return Results.Ok(new
             {
-                item.Id, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
+                item.Id, item.ProviderId, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
                 item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
                 availability = seriesAvailability,
                 availableEpisodes = item.MediaType == MediaType.Series ? availableEpisodes : (int?)null,
@@ -293,6 +294,27 @@ public static class ApiEndpoints
                 }),
                 files,
             });
+        });
+
+        // Fix match: points an existing entry at the correct TMDb title. Library links are cleared for re-checking; files are not touched.
+        api.MapPut("/media/{id:int}/match", async (int id, RematchBody body, MediaService media, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await media.RematchAsync(id, body.ProviderId?.Trim() ?? "", ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException)
+            {
+                return Results.BadRequest(new { error = OutboundHttp.Redact(ex.Message) });
+            }
         });
 
         api.MapDelete("/media/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
