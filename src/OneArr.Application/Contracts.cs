@@ -28,6 +28,9 @@ public interface IIndexerClient
 public interface IDownloadClient
 {
     Task<string> AddAsync(DownloadClientConfig client, string link, string category, CancellationToken ct);
+    /// <summary>Submit previously authenticated .torrent bytes directly to the download client.</summary>
+    Task<string> AddTorrentAsync(DownloadClientConfig client, byte[] torrent, string category, CancellationToken ct) =>
+        throw new ExternalServiceException("This download client does not support authenticated torrent uploads");
     Task<IReadOnlyList<DownloadClientItem>> ListAsync(DownloadClientConfig client, string category, CancellationToken ct);
 }
 
@@ -69,7 +72,8 @@ public sealed record ReleaseCandidate(
     int Seeders,
     string? InfoHash,
     string Indexer,
-    IReadOnlyList<int> Categories);
+    IReadOnlyList<int> Categories,
+    DateTimeOffset? PublishDateUtc = null);
 
 public sealed record ParsedRelease(
     string Title,
@@ -100,7 +104,7 @@ public sealed record ReleaseDecision(
     int Score,
     IReadOnlyList<string> Reasons);
 
-public sealed record DownloadClientItem(string Hash, string Name, string State, double Progress, string? ContentPath, string Category, long Size);
+public sealed record DownloadClientItem(string Hash, string Name, string State, double Progress, string? ContentPath, string Category, long Size, long DownloadSpeedBps = 0, long EtaSeconds = -1);
 
 public sealed record ImportRequest(
     string SourcePath,
@@ -108,11 +112,17 @@ public sealed record ImportRequest(
     string DestinationRelativePath,
     string TorrentRoot,
     bool DryRun,
-    int? DownloadJobId);
+    int? DownloadJobId,
+    string? DestinationFileName = null);
 
 public sealed record ImportOutcome(ImportAction Action, string DestinationPath, bool Success, string Message);
 
 public sealed record LegacyArrSource(string Kind, string BaseUrl, string ApiKey);
+
+public sealed record LegacySeason(int SeasonNumber, bool Monitored);
+
+/// <summary>One episode's monitored flag from Sonarr. Season/episode numbers are Sonarr's, not TMDb's.</summary>
+public sealed record LegacyEpisode(int SeasonNumber, int EpisodeNumber, bool Monitored);
 
 public sealed record LegacyItem(
     string Source,
@@ -124,7 +134,12 @@ public sealed record LegacyItem(
     string? ImdbId,
     string? Path,
     bool Monitored,
-    string? Error);
+    string? Error,
+    IReadOnlyList<LegacySeason>? Seasons = null,
+    // Null means episode data was not supplied (caller falls back to season flags, if any).
+    // EpisodesUnknown means the reader tried and failed to get episode data: sync must leave episodes alone.
+    IReadOnlyList<LegacyEpisode>? Episodes = null,
+    bool EpisodesUnknown = false);
 
 public class ProviderNotConfiguredException : Exception
 {

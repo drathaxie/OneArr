@@ -23,6 +23,10 @@ public sealed class SafeImporter : IImporter
     private static readonly StringComparison PathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     private readonly TimeSpan _quietPeriod;
 
+    /// <summary>The quiet period this importer actually enforces, so previews plan with the same
+    /// deferral rule the real import will apply.</summary>
+    public TimeSpan QuietPeriod => _quietPeriod;
+
     public SafeImporter(TimeSpan? quietPeriod = null)
     {
         _quietPeriod = quietPeriod ?? DefaultQuietPeriod;
@@ -38,12 +42,13 @@ public sealed class SafeImporter : IImporter
         {
             source = CanonicalUnder(request.TorrentRoot, request.SourcePath);
             RequireNoLinksBelow(request.TorrentRoot, source);
-            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath, Path.GetFileName(source));
+            dest = PlanDestination(request.DestinationRoot, request.DestinationRelativePath,
+                request.DestinationFileName ?? Path.GetFileName(source));
             RequireNoLinksBelow(request.DestinationRoot, dest);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ImportOutcome(ImportAction.Failed, request.DestinationRoot, false, ex.Message);
+            return new ImportOutcome(ImportAction.Failed, "", false, ex.Message);
         }
 
         var info = new FileInfo(source);
@@ -68,6 +73,12 @@ public sealed class SafeImporter : IImporter
 
         if (TryHardLink(source, dest, out var linkReason))
             return new ImportOutcome(ImportAction.Hardlink, dest, true, "Hardlinked on the same volume");
+
+        // A failed hardlink falls back to a real data copy. Always check the
+        // actual destination volume before allocating a temporary file.
+        var spaceError = CopySpaceGuard.CopyProblem(dest, info.Length);
+        if (spaceError is not null)
+            return new ImportOutcome(ImportAction.Failed, dest, false, spaceError);
 
         var temp = dest + ".onearr-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -119,6 +130,25 @@ public sealed class SafeImporter : IImporter
         return removed;
     }
 
+    /// <summary>Whether two paths sit on the same volume (same drive root, case-insensitive on
+    /// Windows; same UNC server + share for network paths). Used by import previews to say honestly
+    /// whether the plan is a hardlink or a copy. A failed root parse is not the same volume.</summary>
+    public static bool IsSameVolume(string a, string b)
+    {
+        try
+        {
+            var ra = Path.GetPathRoot(Path.GetFullPath(a)) ?? "";
+            var rb = Path.GetPathRoot(Path.GetFullPath(b)) ?? "";
+            if (ra.Length == 0 || rb.Length == 0) return false;
+            return string.Equals(ra.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                rb.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), PathComparison);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>Resolves a path and requires it to be inside the given root. Case-insensitive on Windows.</summary>
     public static string CanonicalUnder(string root, string candidate)
     {
@@ -126,7 +156,13 @@ public sealed class SafeImporter : IImporter
         var full = Path.GetFullPath(candidate);
         if (!full.StartsWith(rootFull, PathComparison))
             throw new UnauthorizedAccessException("Path is outside the allowed root");
-        return full;
+        // Rebuild from the configured root so the root portion always carries the root's
+        // casing: on Windows a client may report d:\downloads while the root is configured
+        // as D:\Downloads, and the same file must always map to the same string. The part
+        // below the root keeps the candidate's casing, which the filesystem resolves
+        // case-insensitively on Windows and case-sensitively elsewhere (where the check
+        // above already required an exact-case match).
+        return rootFull + full.Substring(rootFull.Length);
     }
 
     /// <summary>

@@ -1,11 +1,786 @@
 # PROGRESS
 
+## Fix match and sample filtering continuation (2026-11-04)
+
+- Integrated `fix-match-and-samples` with main at `bd45cd5`, retaining the direct movie/series manager,
+  client path mappings, naming previews and opt-in automatic completed-download importer.
+- Fix match is available inside the existing manager. It preserves episode IDs and download history,
+  unlinks library records and clears old availability flags, and requires a library review before automatic grabbing.
+- One shared sample rule filters library matching, manual import previews, apply and automatic import candidates.
+  Sample-only bulk imports fail visibly; a manual preview explains that no importable files remain.
+- Local verification: production frontend build passed; all 67 frontend tests passed, including five new manager
+  regressions. Backend run: 380 passed and one test-fixture failure; after supplying the release quality needed
+  by the naming template, both new lifecycle regressions passed. All 381 applicable backend cases have passed
+  across these runs. Six symbolic-link containment cases could not run here because link creation is unavailable.
+- CI passed on the original `8211d90` branch. Fresh CI and Windows snapshot checks are required for this integration.
+  No installed app update or real-library acceptance was performed. Copy-only import and post-seeding cleanup
+  remain separate work; this change preserves existing hardlink/copy policy and never deletes source downloads.
+
 Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed. Everything else is labelled.
 
 ## Goal
 
 A Windows user installs and runs OneArr without Docker, WSL, Git, Node.js or any SDK. Updates come from precompiled
 release artifacts, and the background backend runs without a dashboard window.
+
+## PR #6 — Complete download lifecycle & operational readiness (branch `download-lifecycle`, stacked on `settings-ui-overhaul` / PR #5, which is still unmerged)
+
+Base: PR #5 head 2131e2b (main still d81cdf9). This branch contains PR #5 plus the work below; its PR
+targets `settings-ui-overhaul`, not main. Nothing here merges, publishes, enables automatic grabbing,
+touches real user media, deletes torrents, alters monitoring preferences, or performs a real import
+without explicit authorization. Dry-run stays the default.
+
+### Audit — what the lifecycle looked like before PR #6 (all verified in code, not assumed)
+
+Flow: Torznab indexer → ReleaseService search/rank → manual grab → qBittorrent (first enabled
+client, chosen category) → DownloadJob → BackgroundScheduler queue sync (1 min) + import (5 min, dry
+by default) → SafeImporter → MediaItem/Episode HasFile → Library availability → Wanted.
+
+What already worked:
+- Grab guards: server-side re-evaluation of the release, one active download per movie/episode, a
+  Missing job blocks re-grab until an operator clears it (clear-missing touches only OneArr's record).
+- SafeImporter guarantees: boundary-correct containment (trailing-separator prefix check), no links/
+  junctions/reparse redirections below either root, no overwrite (identical content is a no-op,
+  different content fails), 30 s quiet period deferring still-changing files, hardlink-or-verified-
+  copy (SHA-256), source opened shared and never deleted or modified, stale-temp sweep limited to
+  OneArr's own temp pattern.
+- Scheduler + JobRunner: per-named-job locks so scheduled and manual runs of the same job cannot
+  overlap; failures recorded in JobHistory, not thrown into the host; wanted search only when
+  grabbing is on (off by default).
+- Wanted consistency basis: WantedAsync counts only Queued/Downloading/Completed as active, so a
+  Missing/Failed job never hides a wanted episode; unmonitored items are never listed as wanted.
+- Library reconciliation backstop: a scan marks episode/movie HasFile from files actually present.
+
+Defects found (each fixed or explicitly scoped below):
+1. **No client identity on jobs.** DownloadJob stored no client id, so SyncQueue matched every job
+   against every client's list. A job on client A could be marked Missing because client B did not
+   report it (order-dependent: whichever client was processed last won). Two clients with the same
+   torrent name collided on the name fallback, and a torrent-link grab (hash unknown until the
+   client reports it) was name-matched across all clients on its first syncs.
+2. **Client outage aborted the whole sync and looked like missing data.** One ListAsync throw
+   (down, auth failure, network outage) propagated out of SyncQueue before SaveChanges, discarding
+   every client's updates, with no per-client health recorded anywhere. Unreachable was
+   indistinguishable from missing.
+3. **Missing rule was too narrow and too eager at once.** Only Queued/Downloading jobs older than
+   15 minutes could become Missing, and only when no client reported them; a Completed job whose
+   torrent was externally removed stayed Completed forever, and jobs with an empty category were
+   never updated at all.
+4. **Download failure was terminal and conflated with import failure.** Client `error` /
+   `missingFiles` mapped to Failed, and Failed jobs were excluded from all later syncs, so a
+   transient client error could never recover; and there was no way to retry a failed import, nor
+   any endpoint for a single-job import at all (only bulk import of every Completed job).
+5. **Per-file exceptions aborted whole import runs.** SafeImporter rethrows on copy/lock/drive
+   errors, and ImportCompletedAsync had no per-file catch, so one locked file killed the run, wrote
+   no ImportRecord for that file, and left the job Completed with the error lost.
+6. **Prefix check in ListFiles was boundary-incorrect.** It used a raw `StartsWith(torrentRoot)`
+   without a trailing separator, so a file under `D:\Downloads2` passed a `D:\Downloads` root check
+   at enumeration time (SafeImporter's own CanonicalUnder was already boundary-correct, so the
+   import itself would still refuse it — defense in depth held, but the enumeration was wrong).
+7. **Season packs and multi-episode files were not linked.** Import marked at most one episode
+   (job.EpisodeId) or the movie HasFile, and put every file in one folder. Pack episodes other than
+   the job's episode never became available from import (only a later library scan repaired them),
+   and an import could be marked complete without every relevant episode linked.
+8. **Silent no-ops.** A Completed job with no media files, a deleted media item, or a null content
+   path was skipped with no record and no error — invisible forever. A job whose content path
+   vanished also stayed Completed.
+9. **No import preview, no per-job apply, no retry, no Activity.** There was no endpoint to inspect
+   a completed download before importing, no stale-preview protection, no retry for failed imports,
+   no History timeline, and no Problems surface. The Queue page showed status/progress/category/
+   hash only — no client, size, speed, ETA, import readiness, or per-job actions. The queue API
+   also returned raw grab Links, which can embed indexer API keys.
+10. **Speed/ETA were never captured.** qBittorrent's `dlspeed`/`eta` fields were ignored, so no UI
+    could show real progress information.
+11. **Competing imports of one download were possible across paths.** The `import` JobRunner lock
+    serialized bulk imports, but a preview-apply path (new in this PR) would have bypassed it if not
+    routed through the same lock; restart mid-import relied solely on dest-exists Skipped.
+
+### State-transition specification (DownloadJob, as implemented in PR #6)
+
+Statuses: Queued → Downloading → Completed → Imported, with Failed and Missing as side states and
+Unknown for unrecognized client states. Transitions are only ever driven by the owning client's
+reports, by import outcomes, or by explicit operator actions — never by another client's silence.
+
+- Queued/Downloading: updated from the owning client's list (hash match preferred; name match only
+  within the owning client, or, for legacy jobs with no client, only when the name is unique across
+  all clients). Progress, client state, content path, speed, ETA, and LastSeenAt refresh each poll.
+- Completed: set when the owning client reports a seeding/finished state (uploading, stalledUP,
+  queuedUP, forcedUP, pausedUP, stoppedUP, checkingUP, or a downloading-family state at progress
+  ≥ 1). CompletedAt is recorded on first entry. A Completed job whose torrent disappears from the
+  owning client after the grace period becomes Missing (same rule as active jobs).
+- Missing: only when the owning client is reachable and does not report the job, and the job has
+  not been seen for more than 15 minutes. Missing blocks re-grab until cleared by an operator
+  (clear-missing → Failed, OneArr record only, never touches a torrent or file). If the owning
+  client is unreachable, the status is left untouched and the outage is recorded as client health,
+  never as a Missing job.
+- Failed: two kinds, kept distinct by ImportFailed. Download-side failure (client `error` /
+  `missingFiles`) is re-polled on later syncs, so recovery is possible. Import-side failure
+  (ImportFailed = true) is terminal until an operator retries it (retry → Completed, then import
+  runs again); it never auto-retries into a duplicate grab and never deletes anything.
+- Imported: only after a real (non-dry) import pass in which every media file was imported or
+  skipped-as-identical, at least one file was processed, and every matched episode/movie record was
+  marked available. All-deferred stays Completed for the next pass. Any failed file → Failed +
+  ImportFailed, with per-file ImportRecords explaining each outcome.
+- Imported and Failed jobs are never re-polled for client state (Imported is terminal; Failed
+  import-side jobs wait for an operator). Unknown client states map to Unknown and are re-polled.
+- Restart safety: sync and import are idempotent. Repeated polls update the same rows (no duplicate
+  jobs — jobs are created only by grab, keyed by (MediaItemId, EpisodeId, active status)). Repeated
+  imports hit dest-exists → Skipped on identical content, Failed on different content, never
+  overwrite. ImportRecords are de-duplicated for dry runs and appended for real runs with the
+  outcome of that run. A restart mid-import leaves partial records; the next pass resumes from
+  dest-exists Skipped and re-copies anything whose temp was swept (temps older than 10 minutes
+  matching OneArr's pattern only).
+
+### What PR #6 changes (implementation notes)
+
+- Schema (one migration, no data loss, existing rows get NULL client/speed/ETA and
+  ImportFailed = false): DownloadJob gains DownloadClientId, ClientName (denormalized so a deleted
+  client still displays), LastSeenAt, CompletedAt, DownloadSpeedBps, EtaSeconds, ImportFailed; new
+  DownloadClientHealth table (one row per client: last seen, last error) and ImportPreview table
+  (job, created, fingerprint, plans JSON) for preview-bound applies.
+- Sync: per-client try/catch with health upserts; scoped matching as specified above; grace-period
+  Missing only from the owning (or, for legacy jobs, all) reachable clients; unreachable clients
+  never mark jobs missing; Failed download-side jobs keep polling; speed/ETA stored.
+- Grab: records DownloadClientId + ClientName on the new job (still first enabled client; no new
+  client-picker UI in this phase).
+- Import: per-job import path shared by bulk import, retry, and preview-apply, all under the
+  `import` JobRunner lock; per-file exception capture into Failed ImportRecords; boundary-correct
+  ListFiles; media-aware linking via LibraryMatcher.ParseEpisodes (S01E02, ranges, 1x02) so every
+  episode a file actually covers becomes available and unmatched files are reported, never silently
+  counted; zero-file / orphaned / null-path jobs become Failed + ImportFailed with an explanation
+  instead of silent skips; dry-run records de-duplicated as before.
+- Preview: POST /queue/{id}/import-preview plans every file (matched media, source, destination,
+  size, media type, planned action hardlink/copy/skip/defer/reject + reason, conflicts, same-volume)
+  without moving, linking, copying, renaming, or deleting anything; POST /queue/{id}/import-apply
+  requires { previewId, confirmed: true }, recomputes plans, and refuses (409 + fresh preview) when
+  any fingerprint (source path + size + last-write) or destination changed. Apply preserves sources
+  and records per-file ImportRecords. No automatic import or grab is enabled by a preview.
+- Activity: the Queue page becomes Activity with Queue / History / Problems tabs. Queue shows
+  client, size, speed, ETA, import readiness, and per-job Preview / Retry / Clear-missing actions;
+  History is a timeline derived from jobs, import records, previews, and scheduler runs (no secrets
+  logged — queue responses no longer return raw grab Links); Problems surfaces unreachable clients,
+  invalid categories/destinations, missing downloads, offline drives, locked/still-downloading
+  files, unmatched episodes, and failed verifications, with safe actions (Refresh state, Preview
+  import, Retry failed import). No destructive torrent controls were added.
+- Performance: sync still does two bounded category lists per enabled client plus one SaveChanges;
+  queue/history/problems endpoints are capped (200 rows) and indexed (DownloadJobs by Status and
+  by (MediaItemId, EpisodeId, Status)); no new framework, no extra polling beyond the existing
+  1-minute sync / 5-minute import cadence.
+- Tests: DownloadLifecycleTests (fake qBittorrent upstreams, 18 tests: two-client name collision,
+  hash-keyed no-name-fallback, client-offline health, state mapping + recovery, idempotent polling,
+  movie/single-episode/pack/multi-episode imports, partial-failure resume, identical reimport,
+  sibling-prefix rejection, missing-content visibility, preview plans + stale refusal, Wanted/Library
+  agreement, unmonitored preservation, safety defaults), DownloadWindowsTests (Platform=Windows:
+  drive-letter prefix + case, UNC server/share comparison, real junction refusal, Windows-path
+  movie import), activity.test.tsx (3 tests: real client/speed/ETA rows, preview + confirmed apply,
+  history/problems tabs), plus the preserved PR #4/PR #5 suites. Frontend in the Linux sandbox:
+  27/27 vitest + tsc/vite build passed (230 KB JS). Backend tests were NOT run in the sandbox
+  (no .NET SDK); CI is their verification.
+- CI acceptance: a new synthetic lifecycle script (tools/windows/lifecycle-acceptance.ps1) that
+  drives setup → settings → profile → stub client + connection test → add series (stub TMDb via
+  ONEARR_TMDB_BASE_URL) → wanted → manual grab → stub downloading → sync → restart → stub
+  completed → sync → import preview (nothing written) → confirmed apply → file association →
+  Library available → Wanted cleared → restart → still consistent, against generated fixtures and
+  stub qBittorrent/TMDb servers; it never touches real media. The ci.yml step that would run it
+  after the existing acceptance run (and upload its JSON as windows-lifecycle-acceptance) is
+  prepared in the local tree but could NOT be pushed by the GitHub App: GitHub refuses workflow
+  file changes from an app without workflow scope (403 on the tree containing .github/workflows/
+  ci.yml). Until that step is added by hand (one edit to ci.yml in the GitHub web UI, or an app
+  with workflow scope), run the script manually against a release-shaped build; the script itself
+  is in the repo and is the acceptance procedure.
+- Verification status at push time: frontend verified locally (27/27 + build); backend and the two
+  Windows acceptance scripts are verified by CI on this PR, not in the sandbox. The migration was
+  hand-written (no dotnet/ef tooling in the sandbox) following the existing migration format, with
+  the model snapshot updated to match; the CI acceptance run applies it to a fresh database, which
+  is the check that it is correct.
+
+### Corrective push after initial PR #6 review (CI run #70 failed to compile)
+
+- CI run #70 failed on Linux and Windows with `CS1739`: `DownloadService.cs` called
+  `ImportRequest` with named argument `dryRun`, but the record parameter is `DryRun`
+  (C# named arguments are case-sensitive). Fixed to `DryRun: false`. The frontend build
+  passed; backend tests, Windows filesystem tests, packaging, and Windows acceptance never ran.
+- Review findings fixed in the same push, all verified in code first:
+  - `POST /api/import` with dry-run off no longer imports directly: it applies approved
+    previews only (`ApplyApprovedAsync`), skipping jobs without a stored preview and jobs
+    whose preview went stale. `RetryImportAsync` likewise requires a stored preview and
+    applies the latest one (stale → 409 with a fresh preview, as in apply).
+    (Superseded by the later bulk-approval gate: see "Bulk approval gate" below — a stored
+    preview alone no longer authorizes a bulk import at all.)
+  - Empty previews cannot be created (zero-file plan throws) or applied (stored empty plan
+    throws); previewing requires a completed download (Completed, or Failed + ImportFailed
+    for retry); the stale comparison and the fingerprint now include episode associations.
+  - Dry runs are strictly read-only: no job status change, no import record, no file write,
+    including the early-failure paths (missing media, null content path, bad root, no files).
+  - Imports now create `MediaFile` / `MediaFileEpisode` rows (keyed by the reconciler's
+    `PathKey`, links unioned), so Details → Files shows what was imported.
+  - Owned jobs never fall back to other clients: a disabled or deleted owner leaves the job
+    untouched, and the Problems view surfaces it as `client-disabled`.
+  - Bulk import no longer filters out null-`ContentPath` jobs: they fail visibly
+    (Failed + ImportFailed) in real runs and report without mutating in dry runs.
+  - A series pack file that matches no episode is imported but recorded as `Unmatched`,
+    shown in the preview reason and in Problems, and the job stays Completed with an
+    explanation instead of being marked fully Imported.
+- New regression tests: null content path (real + dry-run), dry-run purity, disabled-owner
+  no-fallback, preview status/empty guards, apply-empty refusal, retry-requires-preview,
+  MediaFile links (movie + series pack), unmatched pack files staying unresolved, and stale
+  refusal when the episode mapping changes. The PartialFailure test now previews before retry.
+- Still open after this push: the `ci.yml` lifecycle step still needs its manual web-UI edit
+  (GitHub App 403 on workflow files); lifecycle acceptance remains unverified until it runs.
+  Backend + Windows tests for this push are CI-verified only (no .NET SDK in the sandbox).
+
+### Follow-up: CI run #74 failures and their fixes (head cf5c623 → next push)
+
+- Run #74 compiled but failed 23 backend tests. Root cause 1: the hand-written migration
+  `20261026160000_AddDownloadClientTracking` had no `.Designer.cs`, so EF never discovered
+  it as a migration — the model then differed from the last discovered migration and
+  `MigrateAsync` raised the pending-model-changes error. The `onearr.lock` teardown errors
+  in the same run are most plausibly downstream of that (the app cannot migrate/start, so
+  ApiFactory teardown trips on the lock); the next run confirms or refutes that. Fix: added
+  `20261026160000_AddDownloadClientTracking.Designer.cs` with the `[DbContext]` /
+  `[Migration]` attributes and a `BuildTargetModel` body verified byte-identical to the
+  model snapshot's model. The migration's `Up()` itself was already complete (7 columns,
+  3 indexes, both tables); only discovery was broken.
+- Root cause 2 (semantic, per the review): the season-pack test expected `Imported` for a
+  pack containing `extras.mkv`, which the review's unmatched-file rule contradicts. The
+  review's reading was kept (job stays Completed with an `Unmatched` record while covered
+  episodes are marked and E04 stays unmarked) and the test was updated to that expectation.
+  If the intended reading was instead "Imported, but loudly recorded", that is a two-line
+  flip in the bulk/apply final-status logic plus the two pack tests — flag it in review.
+
+### Bulk approval gate (second PR #6 review: a stored preview is not approval)
+
+- The review found `ApplyApprovedAsync` treated any stored preview as approval: calling
+  `POST /api/import` with dry-run off could apply previews that were merely inspected.
+  Fixed by replacing it with `ApplySelectedAsync(confirmed, approvals)`: a real bulk import
+  applies ONLY explicitly confirmed `(jobId, previewId)` pairs from the request body, each
+  through the same stale-checked per-job apply. Unconfirmed calls and empty approval lists
+  are refused with 400 before anything is applied; a pair for a missing/stale preview is
+  counted failed, never silently applied. The per-job `import-apply` endpoint already had
+  its `confirmed: true` gate and is unchanged.
+- Frontend: the ungated "Import now" button is removed from Activity (it could not express
+  confirmed pairs); the dry-run button stays, and a note points at the per-job
+  Preview → confirm → Apply flow, which remains the real-import path.
+- Callers updated to the new flow: `tools/smoke/smoke.sh` and
+  `tools/windows/staging-check.ps1` now generate a preview for the test job and pass its
+  confirmed pair to the bulk endpoint; the lifecycle-acceptance script already used the
+  per-job preview → apply path and is unchanged.
+- New test `BulkImport_PreviewAloneNeverAuthorizesAPhysicalImport` proves the gate: after
+  generating a preview, unconfirmed calls, empty lists, and bogus pairs leave the job
+  Completed with no file and no import records, and only the confirmed pair for the
+  job's actual preview applies it.
+
+### Root cause found with EF tooling (CI run #76: Designer alone did not fix it)
+
+- Run #76 still failed with 22 pending-model-changes errors, so the missing Designer was
+  not the whole story. With a .NET 10 SDK installed in the sandbox, `dotnet ef migrations
+  add TempProbe` reported exactly ONE difference between the model and the snapshot:
+  `DownloadClientHealth.DownloadClientId` needed `Sqlite:Autoincrement` — i.e. the snapshot
+  was missing `.ValueGeneratedOnAdd()` on that key. (An integer primary key gets
+  ValueGeneratedOnAdd by EF convention even when its name is not `Id`; the hand-written
+  snapshot omitted it.) Fix applied to the snapshot and to the migration Designer (kept
+  byte-identical), plus the matching `.Annotation("Sqlite:Autoincrement", true)` on the
+  `CreateTable` column in the migration's `Up()` for schema fidelity. A second probe
+  migration then came back with an EMPTY `Up()` — EF itself confirms zero remaining
+  differences, which is the exact check `MigrateAsync` performs in CI.
+- Two compile errors in the bulk-gate push were caught by the local build (not by CI yet)
+  and fixed here: `BulkApproval`/`BulkApplyResult` had been declared nested inside
+  `DownloadService`, so `ApiEndpoints` could not see them (CS0246) — both records moved to
+  namespace scope; and the new bulk test had a duplicated `[Fact]` attribute (CS0579) —
+  removed. The local API build now succeeds.
+- Local backend test execution is blocked by a sandbox-only testhost problem: vstest
+  spawns the testhost process but never connects to it (90s and 300s timeouts, also via
+  direct `dotnet vstest`), even though loopback TCP and Unix sockets both work in this
+  sandbox. This does not affect the product or CI (whose runners execute the suite in
+  ~44s on Linux); CI remains the backend verification, now backed by the empty EF probe
+  above rather than by hand inspection.
+
+### Scheduler preview bypass (third PR #6 review: BackgroundScheduler)
+
+- The scheduler ran `ImportCompletedAsync(dry, t)` every fifth tick with `dry` read from
+  the persisted `DryRunImport` setting, so flipping that setting to false let the
+  background service physically import downloads with no preview or approval — automatic
+  grabbing being off did not prevent this path. Fixed by extracting the tick body into a
+  testable `RunPassAsync(tick, ct)` and hardcoding the import step to dry-run `true`: the
+  scheduled importer is read-only by construction, and physical imports happen only
+  through the confirmed preview/apply workflow (per-job import-apply or bulk import with
+  confirmed pairs). After this change no production caller passes `false` to
+  `ImportCompletedAsync` (API endpoint passes `true` for planning; the `false` path
+  survives only in tests as the bulk real-import engine).
+- New regression test `SchedulerPass_NeverImportsPhysically_EvenWhenDryRunImportIsOff`:
+  with `DryRunImport=false` (the test world's default), a tick-5 scheduler pass leaves
+  the Completed job untouched, writes no file, and creates no import records. On the old
+  code this test fails, because the pass would have physically imported.
+
+### Run #80 verdict (head fe9fb47): EF fix confirmed, one Windows filesystem failure
+
+- Linux: Success. Windows backend cross-platform: 267/267 passed, frontend 27/27 passed,
+  and the log shows zero pending-model-changes and zero onearr.lock errors — the EF fix
+  holds on both platforms. Packaging and Windows acceptance were skipped (never ran).
+- The run's only failure is `DownloadWindowsTests.SiblingDirectory_WithSharedPrefix_IsRejected`:
+  expected `D:\Downloads\Show\file.mkv`, got `d:\downloads\Show\file.mkv`. Root cause: the
+  test (new in PR #6, previously masked because earlier runs never reached the Windows
+  filesystem step) expects `CanonicalUnder` to return the path with the configured root's
+  casing when the candidate arrives lowercase; the implementation returned the candidate
+  as given. `CanonicalUnder` itself is unchanged since PR #5 — the test's expectation was
+  never satisfied. Fix (not a test weakening): `CanonicalUnder` now rebuilds the result
+  from the configured root, so the root portion always carries the root's casing and the
+  same file maps to the same string regardless of how the client cased the drive/root.
+  The part below the root keeps the candidate's casing. No other `CanonicalUnder`
+  assertion is affected (the cross-platform suite only asserts the sibling rejection).
+
+### Remaining limitations before replacing Sonarr/Radarr (honest list)
+
+- No client picker on grab (first enabled client), no multi-client category mapping UI, no
+  automatic search/grab (still OFF by design), no season-pack episode splitting beyond filename
+  parsing (a pack file with no S/E markers in its name cannot be linked to episodes and is reported
+  unmatched, not guessed).
+- Import preview plans are per-file, not per-torrent-content-tree: nested archives (rar/zip) are
+  not unpacked or inspected.
+- History is derived from existing records, so events from before this PR (e.g. when a download
+  completed) are only as precise as the records kept then; CompletedAt is NULL for jobs completed
+  before this PR.
+- Screenshots: still none from a running app in the sandbox (no live backend there); the PC-run
+  screenshots from the PR #5 checklist remain the way to get them.
+
+## Windows acceptance checklist for the user's PC (NOT run in the sandbox — no Windows, no real library there)
+
+Run these against a release-shaped build of the PR #5 head, with the real library, before merging.
+Safety rules for every step: do NOT press Apply on any monitoring sync, do NOT move/rename/delete
+media files, keep imports dry-run until verified, and keep automatic grabbing OFF (Settings →
+Automation must read off before and after).
+
+1. **Install/startup.** Launch the published build (API + tray) from a fresh folder. Record: time from
+   launch to `/health` answering, and whether the tray icon appears and the dashboard opens.
+2. **Sign-in.** First-run setup, then log out and back in; confirm the password still works after a
+   full stop/restart (the CI acceptance run checks this on a throwaway config; this step checks it on
+   the real config).
+3. **Settings persistence.** Set a movie default root, a series default root, and a per-type default
+   profile in Settings → Media Management / Profiles. Stop, restart, and confirm all four values
+   read back unchanged. Do not toggle grabbing on for this check; only confirm the toggle reads OFF
+   and that a failed settings save (e.g. a relative path) leaves it OFF.
+4. **Series page at real scale (~205 series).** Scroll the poster grid end to end; record any
+   stutter, blank posters, or wrong badges. Spot-check: at least one Complete, one Partial, one
+   Missing, and one Unknown series, and confirm each classification against its episodes (monitored
+   + aired + file present, by hand, for one title each).
+5. **WWE/AEW monitoring exceptions.** Open the Details page for a WWE/AEW series with intentionally
+   unmonitored old episodes. Confirm: the unmonitored episodes do NOT count as missing, the Wanted
+   count excludes them, and no season toggle has flipped them to monitored. Do NOT run a sync Apply
+   to "fix" anything seen here.
+6. **Wanted counts.** Compare the Wanted view's counts against a manual count for one series
+   (monitored aired episodes without files). Confirm unmonitored and unaired episodes are excluded.
+7. **Add dialogs.** Open Add Series and Add Movie: confirm each prefills its OWN default root and
+   profile (series dialog must not show the movie root), and that with a default cleared the dialog
+   starts empty with guidance and a disabled Add button. Add nothing for real in this step, or add a
+   throwaway test title and remove it from OneArr afterwards (removal from OneArr only — no files).
+8. **Settings layout.** View Settings at a normal width and at ~800px narrow: sidebar must stack
+   above content, every category must open, Advanced toggle must hide/show path mappings and
+   connection tests only.
+9. **Files and paths.** Open Details → Files for a title with linked files; confirm the listed files
+   match disk and that nothing was moved, renamed, or rescanned destructively. Confirm the media
+   root in Settings still contains every title's root folder, or note any title that would now fail
+   closed on import.
+10. **Update/rollback.** Record the current installed version and config backup location before
+    replacing the build; after running the new build, confirm the old build + config restore still
+    starts (rollback path). Record release folder size and idle RAM/CPU from Task Manager (the CI
+    acceptance run reports idle private memory and CPU on a throwaway config; this step is the real
+    one).
+11. **Screenshots (genuine, from this run only).** Capture: (1) Settings overview + sidebar,
+    (2) Media Management + default roots, (3) Series page with real posters, (4) Add Series dialog,
+    (5) one Complete/Partial/Missing/Unknown card each, (6) Series Details with season/episode
+    monitoring toggles. Attach them to PR #5. No mockups, no cropped synthetic libraries.
+
+What CI already covers (so the PC run does not need to redo it): Linux + Windows backend tests
+(including the Windows filesystem regression suite), frontend vitest + build, a synthetic
+20,000-movie Windows library benchmark (timings, not the user's library), and the headless Windows
+acceptance run (startup, health, sign-in, settings persistence across restart, single-instance
+refusal, graceful shutdown, idle CPU/memory gates) — all on throwaway configs, never a real library.
+
+## PR #5 review fixes (branch `settings-ui-overhaul`, same PR, still open and unmerged)
+
+Both points from the PR #5 review were addressed; neither changes the UI architecture, and neither
+merges, publishes, or enables automatic grabbing.
+
+1. **No more shared-root fallback for adds.** `MediaDefaults.ResolveRoot` no longer takes a legacy
+   root at all: a per-type default, or empty. `POST /api/media` with no explicit root and no per-type
+   default now returns 400 naming the type and where to set the default, instead of silently landing a
+   series in `D:\Media\Movies` (or a movie in the TV folder) whenever that path was the shared root.
+   The Add dialog mirrors this: it starts empty when its type has no saved default, shows guidance
+   pointing at Settings → Media Management, keeps Add disabled until a folder is typed, and no longer
+   reads the legacy localStorage root at all. The media root itself stays as a real setting, relabelled
+   "Media root (imports must stay inside it)": it is the import containment root (imports fail closed
+   outside it), and Settings now says plainly that it is not an Add default. A title's root should sit
+   inside the media root, or its later imports will fail closed.
+2. **Settings saves are atomic.** `PUT /api/settings` now validates the entire request first (absolute
+   paths, profile existence) and only then commits everything with one new
+   `SettingsStore.SetManyAsync` call (one context, one SaveChanges). A failed field can no longer leave
+   earlier fields changed while returning an error — including the automatic-grabbing toggle, which is
+   the field where a half-applied save would be dangerous. The endpoint's request/response shape is
+   unchanged, and existing settings tests still pass against it.
+- New tests for these fixes (backend for CI, frontend executed here): `AvailabilityTests` ResolveRoot
+  cases now assert empty with no per-type default; `SettingsDefaultsApiTests.FailedPutWritesNothingIncludingGrabbing`
+  asserts a failed PUT (bad root, then bad profile id) leaves grabbing, torrent root, and series root
+  untouched; `add-dialog-defaults.test.tsx` asserts a series dialog with no series default but a
+  movies-looking shared root starts empty, shows the guidance, keeps Add disabled, and posts only the
+  typed folder. Frontend suite is now 24 passed, build 224 KB JS.
+
+## Settings & Library UI overhaul (branch `settings-ui-overhaul`, from main d81cdf9 — PR #4 merged)
+
+Note: PR #4 was merged into main (d81cdf9, tag v0.4.0) before this work started, so this branch is
+based on main and its PR targets main, not `visual-library`. Nothing here merges, publishes, or enables
+automatic grabbing; grabbing stays off by default and is only changeable from Settings → Automation.
+
+### Settings navigation (new `web/src/settings.tsx`)
+- Settings overview with a card per category, a persistent sidebar with expandable categories and
+  subsection links, clear active-section highlighting, and a Show Advanced / Hide Advanced toggle
+  (stored in localStorage `onearr.advanced`, default on). Advanced items are path mappings and
+  connection tests; hiding them never removes the underlying functionality. Below 860px the sidebar
+  stacks above the content. Theme handling is unchanged (system theme; dark when the system is dark).
+- Categories, all backed by existing functionality only: Media Management (per-type default roots,
+  import paths, bulk root folders, library folders/scan/review, path mappings), Profiles (quality
+  profiles + per-type default profiles), Indexers, Download Clients, Metadata (TMDb), Automation
+  (toggle + safety gate), Migration (the existing Migration component, unchanged), General
+  (application note + security status; there is deliberately no password-change screen, which OneArr
+  does not support), UI (Posters/List preference + advanced toggle).
+- The old flat Settings page was split: TMDb into Metadata, torrent/media roots and dry-run into
+  Media Management, the grabbing toggle into Automation. Profile/indexer/client creation forms are
+  unchanged in behaviour; connection tests are now scoped per category (TMDb only in Metadata, etc.).
+
+### Per-type defaults (backend, no database migration)
+- New `AppSetting` keys only (no schema change): `media.defaultRoot.movie`,
+  `media.defaultRoot.series`, `profile.default.movie`, `profile.default.series`. GET/PUT `/api/settings`
+  exposes them; PUT validates roots as absolute (empty clears, null leaves unchanged) and rejects
+  unknown profile ids. Pure helper `MediaDefaults.ResolveRoot` resolves movie defaults only from the
+  movie default and series defaults only from the series default — so a movie root can never become
+  a series default. (Historical note: the first version of this section said the resolver fell back
+  to the legacy single media root when a per-type default was unset. That fallback was removed by the
+  PR #5 review fix at the top of this file: with no per-type default, adds now require an explicit
+  folder instead of silently inheriting the shared root.) POST `/api/media` uses it when no
+  explicit root folder is sent; re-adding an existing title still returns it unchanged (root, profile,
+  and monitoring are never overwritten by a later add).
+
+### Movies/Series pages and the Add dialog
+- The permanent TMDb add/search panel and the bulk root-folder panel are gone from both pages.
+  An Add Movie / Add Series button opens a dialog: TMDb search, result selection, root folder and
+  quality profile prefilled from the per-type server defaults, monitoring scope (movie: Monitor
+  checkbox; series: All seasons / First season only / None), and a confirmation summary before the
+  Add button sends anything. (Historical note: the first version of this section said the legacy
+  localStorage root was a last-resort fallback on first run. That fallback was removed by the PR #5
+  review fix at the top of this file: the dialog no longer reads the localStorage root at all, and
+  with no saved per-type default it starts empty with guidance instead of prefilling any folder.)
+- Poster grid, List view, search, sort, filters, and per-title monitoring controls are retained.
+  Series filters now include Complete/Partial/Missing/Unknown. Per-title root, profile, and monitoring
+  overrides remain on each title's Details page. Bulk root-folder changes live in Settings → Media
+  Management, per media type.
+
+### Accurate series availability (backend, one aggregate query)
+- `GET /api/media?type=series` and `GET /api/media/{id}/detail` now report episode-based availability:
+  Complete / Partial / Missing / Unknown plus `availableEpisodes` / `applicableEpisodes` counts
+  (e.g. "126 / 180 monitored aired episodes available"). Applicable means monitored with a known air
+  date on or before today; unaired episodes and unmonitored episodes (including Sonarr per-episode
+  exceptions inside a monitored season) never count as missing. Applicable == 0 (no episodes, no
+  monitored episodes, or no monitored episode with a known air date) is Unknown, never Complete or
+  Missing. The series-level `HasFile` flag is no longer used for the series badge: a series with one
+  downloaded episode cannot read as Complete. Movies keep Available/Missing from `HasFile`.
+  `MediaService.SeriesAvailabilityAsync` is one grouped query for the whole library, not one request
+  per poster card. Scan-review and manual-search behaviour are untouched, and monitoring sync still
+  touches only Monitored flags (see the PR #4 sections below).
+
+### Poster grid polish (CSS only, no new dependencies)
+- Two-line titles via line clamping with a fixed two-line height so cards stay aligned; full title
+  on hover via the `title` attribute; consistent 2/3 poster aspect ratio including the fallback;
+  cards are equal-height flex columns; badges are legible and distinct (Complete green, Partial
+  amber, Missing red, Unknown neutral); lazy loading and the poster fallback are unchanged.
+  Bundle: 223 KB JS (66 KB gzip), up from 205 KB (62 KB) — the new Settings/dialog code, no new framework.
+
+### Tests actually executed
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 23 passed (was 14; new: settings navigation
+  and per-type defaults, Add Series dialog incl. first-season scope, series availability badges, plus
+  updated settings tests for the split forms), and `npm run build` (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is
+  claimed. New backend tests added for CI: `AvailabilityTests` (Complete/Partial/Missing, no-episode
+  Unknown, unaired + unmonitored exclusion, unknown-air-date Unknown, ResolveRoot cross-type
+  separation, classification boundaries, re-add never overwrites) and `SettingsDefaultsApiTests`
+  over the real API host (defaults start empty, per-type independence, empty-string clearing,
+  relative-root rejection, profile existence validation). CI on the new PR is the backend verification.
+
+### Remaining verification (not done here)
+- CI backend tests for this branch, and a Windows run with a real or realistic large library
+  (including ~205 series) to check poster-grid performance, the new Settings layout at narrow
+  widths, and the Add dialog against a real TMDb key.
+- Screenshots for the PR (Settings overview, sidebar, simplified Series page, Add Series dialog,
+  Complete/Partial/Missing cards) were not captured in this sandbox: the frontend build runs, but
+  there is no live backend here to sign into and render a populated library. They should be taken
+  from the Windows run and attached to the PR before it is reviewed as final.
+- General → Security honestly notes there is no password-change screen yet; that is a missing
+  feature, not a setting that was hidden.
+
+## Review fixes round 2 to PR #4 (branch `visual-library`, same PR, not merged)
+
+1. **Preview comparison is now identity-strict.** `PreviewMatches()` previously compared only the counts of
+   changed seasons and episodes, so a preview for episodes 1 and 2 would pass after the source moved to
+   episodes 3 and 4. `MonitoringChange` now carries `SeasonChanges` and `EpisodeChanges` — each with its exact
+   identifier (season number, or season + episode number) and its old and proposed monitored values — populated
+   by sync for both the per-episode and the season-fallback paths. `PreviewMatches()` compares those lists
+   by identity (order-insensitive), in addition to the previous title/series-flag/count checks. The sync
+   response now includes the detail lists, the UI shows them (e.g. `S1E2 on→off`), and the frontend sends
+   them back verbatim with the Apply request. Backend test: same counts with different episode identities,
+   different season identities, and different proposed values all reject; the identical preview still passes.
+2. **Missing Sonarr series ids now mark episodes unknown.** The reader previously skipped episode fetching
+   when the Sonarr series `id` was absent but left `EpisodesUnknown=false`, so sync fell back to season flags
+   and could overwrite per-episode exceptions. Now any Sonarr series for which an episode-level read cannot
+   be performed — missing id, not only a failed request — is marked `EpisodesUnknown`, and sync leaves its
+   episodes alone (the same handling as a failed episode read). Backend test: a series record with no `id`
+   produces `Episodes=null, EpisodesUnknown=true`, and no episode request is made for it.
+
+**Tests actually executed for round 2**
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 14 passed, and `npm run build` (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests added for CI: identity-strict preview rejection (episodes, seasons, values), sync detail
+  population for a per-episode exception, and the missing-Sonarr-id unknown case. CI on PR #4 is the backend
+  verification for these fixes as well.
+
+## Review fixes to PR #4 (branch `visual-library`, same PR, not merged)
+
+Four review findings, all fixed on the same branch:
+
+1. **Preview missed series/movie-only monitored changes (bug, fixed).** `SyncLegacyMonitoringAsync` compared
+   `item.Monitored` to its original value after conditionally updating it, so during Preview (no update) a
+   series-level-only change was never reported. Now `monitoredChanged` is computed before any mutation, is
+   reported as its own field in every change, and preview and apply report the same change set.
+2. **Episode-level Sonarr exceptions (now supported, not just documented).** The reader now also reads
+   `GET /api/v3/episode?seriesId={id}` for each Sonarr series (one GET per series, a one-off migration cost).
+   Sync applies per-episode flags, which win over season flags, and episodes Sonarr does not report are left
+   alone. New imports pass episode flags through to `AddAsync`, which also prefers them over the season flag.
+   If an episode read fails, that series is marked `EpisodesUnknown`: its season flags still sync, but its
+   episodes are left alone and the series is listed in the sync result and in the UI as unknown, instead of
+   being silently forced to its season flag.
+3. **Apply now requires a valid preview.** The API returns 400 if `apply: true` arrives without a preview,
+   recomputes from the current source and database, and returns 409 with the fresh preview if the source,
+   the database, or any proposed change moved since the preview the user saw. The Migration UI keeps the
+   preview bound to its source: Apply is disabled until a preview exists for the current kind + URL, changing
+   kind, URL, or key clears the preview, and after a 409 the user must Preview again. Loading the regular
+   migration preview no longer clears the API key (it previously forced retyping the key before a sync);
+   the key still lives only in session state and is never stored.
+4. **Missing season data no longer defaults new imports to all monitored.** `/migration/import` now safe-skips
+   a new series with no season monitoring data, reporting `skipped` with the reason, instead of setting
+   `MonitorAllSeasons=true`. An already-imported series still reports `exists` (its monitored state is not
+   touched by a re-import). If episode data was unavailable for an otherwise successful import, the result
+   carries a warning that episodes took their season flags and monitoring sync should be run later.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm test` (vitest) — 14 passed (was 13; 1 new Migration gate test:
+  key survives loading preview, Apply is disabled until a current-source preview exists, and changing the
+  source clears it), and `npm run build` (tsc + vite) — passed, 205 KB JS (62 KB gzip).
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests added for CI: preview reports a series-only monitored change without writing; per-episode
+  exceptions inside a monitored season are preserved and an unreported episode is left alone; unknown episode
+  data leaves episodes alone while seasons still sync; the reader parses episodes and marks unknown on episode
+  read failure; and the preview-match and series-import-skip rules (including the drifted-preview case).
+  CI on PR #4 is the backend verification for these fixes as well.
+
+**Remaining verification for these fixes**
+- CI backend tests for this commit, plus a real Sonarr run: Preview sync must show per-episode exceptions
+  (e.g. a deliberately unmonitored episode inside a monitored season) as unchanged, and a series whose episode
+  read fails must appear in the unknown list with its episodes untouched.
+- A real import of a series Sonarr reports without seasons must show `skipped`, not `added`, and must not
+  create an all-monitored series.
+- Apply with a stale preview (change Sonarr monitoring between Preview and Apply) must be refused with the
+  fresh preview, and Apply must stay disabled until a new Preview for the current source is run.
+
+## Visual library + monitoring fidelity (branch `visual-library`, from main 27fb5df, PR #3 merged)
+
+**Source of truth.** Started from main 27fb5df ("Merge pull request #3", v0.3.0 tag present on main). Nothing from
+the v0.3.0 branch was rebuilt: reconciliation, path mapping, backup scripts, connection tests, missing-download
+blocking, and Windows packaging are all reused as merged.
+
+**What changed, by priority**
+- P1 poster grid (Movies, Series): poster cards are now the default view, with a Posters/List toggle that is remembered
+  in localStorage. Cards show the TMDb poster (lazy-loaded, `w342`, with a title fallback when there is no poster),
+  title, year, Monitored/Unmonitored, Available/Missing, and quality profile. Search, sort (title, year, available
+  first), and filters (available, missing, monitored, unmonitored) are client-side over the existing `/api/media`
+  list, so no new list endpoint was needed. Partial is deliberately NOT shown in the grid: the list response only
+  carries a single have/missing flag per item, so a series card says Available or Missing, and the real
+  Partial/Missing/Available breakdown lives on the detail page where episode data is known.
+- P2 detail pages: clicking a card or title opens a detail view (no router change; it is page state, so Back returns
+  to the grid). It shows poster, title, year, overview, monitored state, quality profile, root folder, file status,
+  and linked files, plus release/manual search actions (movies, and per-episode for series), root-folder editing,
+  and quality-profile changing. Series detail adds a season-by-season view with collapsible seasons, per-season
+  monitored toggles, per-season have/wanted counts, and episode rows (number, title, air date, monitored,
+  have/missing, file resolution from the linked file row, not the filename). The old inline episode list in the
+  Movies/Series table was replaced by this detail view; its per-episode release action is preserved there.
+- P3 monitoring fidelity (the root cause of inflated wanted counts): the Sonarr reader previously dropped the
+  `seasons` array entirely, and migration import forced `MonitorAllSeasons=true`, so every season and episode of
+  an imported series became monitored even when Sonarr had seasons unmonitored. Now: `LegacyItem` carries seasons,
+  the reader parses them, new imports keep Sonarr's season flags, and a new `POST /api/migration/monitoring-sync`
+  (preview by default, explicit Apply with a confirmation in the Migration UI) syncs monitored flags into
+  already-imported items matched by TMDb id, without creating items or duplicates. It touches only Monitored flags
+  on the item, its seasons, and episodes in synced seasons; it never touches titles, quality profiles, root folders,
+  or file state, and it never forces episode flags when a legacy series reports no seasons array. New endpoints
+  `PATCH /api/media/{id}/seasons/{season}` (season + its episodes) and `PATCH /api/media/episodes/{episodeId}`
+  (single episode, season flag left alone) back the detail-page toggles. Wanted is computed from monitored flags
+  as before, so after a sync the wanted counts fall to the real monitored set.
+- P4 Wanted: filters by movies/episodes, search, and download state (in progress vs none); episodes are grouped by
+  series with collapse/expand; every row links to its detail view; and the page now states plainly that Wanted lists
+  only monitored items with no file, with the unmonitored without-file counts shown alongside so legacy/unmonitored
+  data is visible instead of hidden. "Why wanted" is always "no file (monitored, aired)" for this list, because that
+  is what Wanted actually computes. Unmatched, ambiguous, sample-only, misnumbered, and inaccessible files are NOT
+  wanted items — they live in the Library scan review, and the Wanted page says so with a pointer to Settings.
+  A new `hasActiveDownload` flag (Queued/Downloading/Completed jobs only; Missing/Failed do not count) distinguishes
+  "wanted, download running" from "wanted, nothing happening".
+- P5 Library/files: scan review rows now show the catalog title next to the file path (links, confirmed missing, and
+  unknown rows via mediaItemId; ambiguous rows show candidate titles), so review no longer means matching bare paths
+  to titles from memory. No file information was removed, and apply still never moves, renames, copies, or deletes a file.
+- P6 Settings: a new Automation status card at the top of Settings shows the grabbing toggle state together with the
+  library automation gate and its blocking reason, in plain language, instead of leaving the toggle and the gate in
+  separate sections. Each library root now has a live Test folder button (new read-only
+  `POST /api/library/roots/{id}/test`; it does not scan, does not update the stored last-scan state, and does not
+  touch files in the folder).
+- P7 stack discipline: still React + the existing ASP.NET Core API, no Electron, no Chromium embedding, no new UI
+  framework, no image library. Posters are plain `<img loading="lazy">` against TMDb's image CDN, and the grid is plain
+  CSS. Bundle went from 188 KB JS (57 KB gzip) to 204 KB JS (61 KB gzip) in the sandbox build — a modest increase
+  for the grid + detail views, not a new framework.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm ci`, `npm test` (vitest) — 13 passed (was 10; 3 new poster-grid/detail tests:
+  grid badges and poster fallback, search + list toggle, card → detail with linked files), and `npm run build`
+  (tsc + vite) — passed.
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend tests were added and must pass in CI: Sonarr seasons parsing, monitoring-sync preview (no writes)
+  then apply (season + episodes flip, series flag and file state untouched, Wanted drops to zero with the
+  unmonitored count reported), monitoring-sync without a seasons array (episodes left alone), and season/episode
+  toggle semantics. CI on this PR is the backend verification for this branch.
+
+**Real versus simulated**
+- Real: frontend tests exercise real request/response handling at the fetch layer (with a fake fetch). No real
+  Sonarr, Radarr, TMDb, qBittorrent, or library was contacted from this sandbox, and no live test is claimed.
+  The monitoring sync was verified only against the test fixtures above; the first real run must be Preview on the
+  Windows PC against the real Sonarr/Radarr, reviewed, and only then Applied.
+
+**Remaining blockers**
+- CI backend tests and the Windows acceptance run for this PR (required; backend was never compiled here).
+- Real Sonarr monitoring sync (Preview → review → Apply) on the Windows PC, especially the WWE/AEW series that
+  motivated P3, and confirmation that wanted counts fall to the real monitored set without losing wanted items
+  that should stay wanted.
+- Real poster rendering at library scale (hundreds of cards) on the Windows PC; the sandbox only checked the
+  component logic with two items, not rendering performance with a real library.
+- A release candidate and its publication, both requiring explicit authorization (not done here).
+- Automatic grabbing stays off by default throughout; enabling it on the PC is a separate, explicit decision
+  after the library is reconciled and monitoring is synced.
+
+**Exact instructions for testing on the Windows PC**
+1. Back up `%LOCALAPPDATA%\OneArr\config` first. Do not stop or change Radarr/Sonarr containers.
+2. Build this branch on Windows from a clean checkout (per README, developers only) and run it with a disposable
+   config folder, or, once authorized, use the manual `release` workflow and install that zip instead. Do not
+   install the test build over `%LOCALAPPDATA%\OneArr` until steps 3–6 pass.
+3. Open Movies and Series: confirm the poster grid is the default, search/sort/filters work, cards show the right
+   monitored and available/missing badges, and the List toggle still shows the old table.
+4. Open a series detail page: confirm seasons collapse/expand, per-season and per-episode monitored toggles work,
+   wanted counts look right, and linked files show real paths, sizes, and resolutions.
+5. On Migration, with the real Sonarr URL and key: run Preview monitoring sync first, review every change
+   (especially WWE/AEW seasons), and only then Apply. Then check Wanted: it should no longer be flooded with
+   episodes from unmonitored seasons, and the unmonitored counts should explain the remainder.
+6. In Settings → Library, use Test folder on each root, then run a preview scan and confirm titles now appear
+   next to file paths in the review lists. Keep automatic grabbing off until monitoring is synced and the
+   library shows as reconciled.
+
+## v0.3.0 readiness (branch `v030-work`, from main 4144235)
+
+**What this branch does, and what it deliberately does not do.** It does not reimplement reconciliation,
+path mapping, automatic-grabbing safeguards, native Windows hardlinks, backup scripts, or validation tooling:
+all of those are already merged on main. It adds only the missing controls and diagnostics needed to use them
+on a real Windows PC, and it does not merge, publish a release, enable automatic grabbing by default, delete,
+rename, move, or modify any media file, or touch Radarr, Sonarr, or any other container.
+
+**Implemented**
+- Automatic grabbing toggle in Settings → General (Phase 5). It uses the existing `PUT /api/settings`
+  `automaticGrabbing` field, which previously had no UI control, and replaces the stale "Automatic grabbing is
+  not implemented in this build" text. Default remains off. Turning it on does not bypass the reconciliation
+  gate: searches still only run when the Library panel shows the library as reconciled, every folder is
+  reachable, and no download is active for an item.
+- Linked files for a catalog item (Phase 2). New read-only `GET /api/media/{id}/files` returns the files
+  OneArr already recorded in its own database (path, size, resolution, status, match method) plus the item's
+  root folder and have/missing state. It never scans the disk. Movies and Series pages gain a Files button
+  showing that list. The Library preview "Will link" table now also shows file size and detected resolution,
+  which were already in the preview response but not rendered.
+- Non-destructive connection tests (Phase 3/5). New `POST /api/connections/test` with Settings buttons for
+  TMDb, each Torznab indexer, and each qBittorrent client, and a Test connection button on the Migration
+  page for Radarr/Sonarr. TMDb: one test search. Torznab: the caps document (categories and search/TV/movie
+  search availability) via a new pure `TorznabClient.ParseCaps`. qBittorrent: sign-in plus torrent counts
+  per configured category, torrent states, and whether any item reports a content path (paths themselves are
+  not returned). Radarr/Sonarr: one read-only catalog read, reporting readable/error counts and sample
+  titles. Nothing is added, downloaded, imported, or written to a legacy application. Stored keys/passwords
+  are used server-side only and never returned; a body-supplied legacy key is used for one test and never
+  stored. Failures return a clear `ok: false` diagnostic instead of a bare HTTP error.
+- Stuck-download reconciliation (Phase 4). A download marked Missing in qBittorrent no longer silently
+  triggers a re-grab: automatic search skips it with a new `SkippedMissingDownload` outcome (reconsidered
+  after 1 hour, not immediately), and a manual grab is refused with a message pointing at Queue. Queue gains
+  a Clear missing button for Missing jobs only, which changes OneArr's record to Failed and leaves every
+  torrent and file untouched. Only then can the item be searched or grabbed again.
+- Phase 1 version and docs: product version in `OneArr.Api` and `OneArr.Updates` is now 0.3.0 (the release
+  workflow still sets the exact version at publish time). README's Docker section now says Docker is an
+  optional, unverified developer path, not the v0.3.0 Windows path. The upgrade/rollback machinery itself
+  was audited and not changed: the release workflow gates on tests and an acceptance run, EF Core
+  `MigrateAsync` upgrades the database at startup, the updater backs up the database before an update and
+  preserves a failed update's database, and `INSTALL.txt` already documents that config and backups survive
+  updates and uninstall. The tray-acceptance default of v0.2.0 was left alone on purpose: it tests a
+  published tag, and v0.3.0 is not published yet.
+
+**Tests actually executed**
+- Frontend, in this Linux sandbox: `npm ci`, `npm test` (vitest) — 10 passed (was 8; the 2 new tests cover
+  the automatic-grabbing toggle submitting `true` and the TMDb connection-test button showing its result),
+  and `npm run build` (tsc + vite) — passed, web bundle 188 KB JS (57 KB gzip).
+- Backend: NOT executed in this sandbox — no .NET SDK is installed here, and no backend test run is claimed.
+  New backend regression tests were added and must pass in CI: `TorznabClient.ParseCaps` (categories/search
+  flags, rejection of non-caps and invalid XML) and two missing-download tests (automatic search skips a
+  Missing job with `SkippedMissingDownload` and no second grab; manual grab is refused while Missing).
+  Existing backend tests are unchanged in intent; CI on this PR is the backend verification for this branch.
+
+**Real versus simulated**
+- Real: the frontend tests exercise real request/response handling at the fetch layer (with a fake fetch).
+  The connection-test endpoints, when run on a Windows PC with real services, make real read-only calls.
+- Simulated / not live: no real TMDb, Torznab, qBittorrent, Radarr, or Sonarr service was contacted from
+  this sandbox, and no live test is claimed. The new backend tests use the existing fake indexer/qBittorrent
+  fixtures. The staging end-to-end workflow (Catalog → Search → Release evaluation → qBittorrent submission
+  → Download status → Safe import → Library reconciliation → Available) already exists as
+  `tools/windows/staging-check.ps1` and is the procedure for real-service testing, not something re-run here.
+
+**Resource measurements**
+- No new Windows runtime measurements were taken in this sandbox (Linux, no .NET, no Windows runner here).
+  The last Windows measurements on main remain the run 40205398175 acceptance numbers (16/16 checks,
+  startup 1.83 s, idle private memory 36.2 MB, idle CPU 0.44%). New Windows startup/idle/scan measurements
+  for this branch must come from CI's acceptance run and from the PC test below; do not carry the old
+  numbers forward as this branch's results.
+
+**Remaining blockers**
+- CI backend tests and the Windows acceptance run for this PR (required before any release candidate).
+- Real-service connection tests on the Windows PC (TMDb, Torznab caps, qBittorrent, Radarr/Sonarr) — the
+  in-app buttons plus `tools/windows/staging-check.ps1` with disposable folders and authorized test content.
+- Reconciliation of the real movie/TV libraries on that PC, including a complete scan apply and the
+  Automatic grabbing panel showing "reconciled".
+- A v0.3.0 release candidate and its publication, both requiring explicit authorization (not done here).
+- Automatic grabbing stays off by default throughout; enabling it on the PC is a separate, explicit decision
+  after the library is reconciled, and it is not part of this branch's verification.
+
+**Exact instructions for testing the release on your Windows PC (controlled test, no production changes)**
+1. Back up your existing data first: copy `%LOCALAPPDATA%\OneArr\config` somewhere safe. Do not point
+   this test at your production config, and do not stop or change your Radarr/Sonarr containers.
+2. Build the branch on Windows from a clean checkout (per README, developers only): `cd web; npm ci; npm run build; cd ..; dotnet build OneArr.slnx -c Release`, then run it with a disposable config folder,
+   e.g. `ONEARR_CONFIG_DIR=C:\OneArrTest\config dotnet run --project src\OneArr.Api` — or, once authorized,
+   use the manual `release` workflow with version 0.3.0 and install that zip instead. Do not install the
+   test build over `%LOCALAPPDATA%\OneArr` until steps 3–6 pass.
+3. Sign in, open Settings, and use the new Connection tests: Test TMDb, each indexer, each qBittorrent
+   client. On Migration, use Test connection for Radarr and Sonarr before Load preview. Expect a clear
+   ok/error message for each; no key or password should ever appear in the UI.
+4. In Settings → Library, add your Windows movie and TV folders, add Docker-to-Windows path mappings from
+   the suggestions, then Preview scan. Check the Will link table (now with size and resolution), Ambiguous,
+   Unmatched, Unknown, and Confirmed missing lists. Apply only after a complete scan, with unmatched files
+   acknowledged if you intend to allow automatic grabbing later.
+5. On Movies and Series, open Files for reconciled items and confirm the actual paths, sizes, and
+   resolutions match the files on disk. Confirm items that were previously shown as "missing" now show
+   as having files, without any file being moved, renamed, or deleted.
+6. In Queue, confirm any Missing download is not re-grabbed automatically, and that Clear missing (only
+   for Missing jobs) lets that item be searched again. Keep automatic grabbing off until step 4 shows the
+   library as reconciled, then decide explicitly whether to turn it on in Settings.
 
 ## Windows validation (branch `library-validation`, verified at 064ab97)
 
@@ -51,12 +826,24 @@ any real library. Figures are one run each.
 | Phase | Windows (GitHub runner, 4 logical CPUs) | Linux sandbox (4 logical CPUs) |
 |---|---|---|
 | Enumerate folders and files | 987 ms wall, 1,109 ms CPU, 32 MB allocated | 396 ms wall, 571 ms CPU, 37 MB |
-| Match files (indexed) | 179 ms wall, 92 MB allocated | 534 ms wall, 72 MB |
-| Preview (enumerate, match, probe, store plan) | 1,796 ms wall, 227 MB allocated | 1,361 ms wall, 184 MB |
+| Match files (indexed) | 179 ms wall, 188 ms CPU, 92 MB allocated | 534 ms wall, 72 MB |
+| Preview (enumerate, match, probe, store plan) | 1,796 ms wall, 1,938 ms CPU, 227 MB allocated | 1,361 ms wall, 184 MB |
 | Apply (re-scan, writes, recalculation) | 4,937 ms wall, 5,766 ms CPU, 965 MB allocated | 4,013 ms wall, 934 MB |
-| Second preview, no changes | 820 ms wall, 191 MB allocated | 382 ms wall, 167 MB |
+| Second preview, no changes | 820 ms wall, 922 ms CPU, 191 MB allocated | 382 ms wall, 167 MB |
 | Cancel a preview 50 ms in: stopped after | 163 ms | 301 ms |
 | Peak working set of test process | 338 MB | 561 MB |
+
+Cross-checked against the downloaded `windows-library-benchmark` artifact from run 40205398175
+(`build/library-benchmark-windows.txt`): every Windows figure above matches the artifact exactly. Two
+artifact lines were not in the table before and are added here for completeness, clearly labelled:
+fixture generation (not reconciler work) took 24,419 ms wall, 8,266 ms CPU, 47 MB allocated, and the
+benchmark test itself passed in 59 s (1 test, 0 failed).
+
+**Acceptance run, same Windows job (run 40205398175, `windows-measurements` artifact,
+`build/measurements.json`).** This is the release-shaped build acceptance run, not the synthetic-library
+benchmark and not a real user library: 16 of 16 checks passed, startup 1.83 s, graceful stop 0.56 s
+(exit 0), idle CPU 0.44% over 60 s, idle private memory 36.2 MB, idle working set 108.1 MB, 14 threads,
+release folder 224.4 MB (361 files), database 172.0 KB, config folder 212.1 KB.
 
 Apply's memory is the largest cost and it grows linearly: at 40,000 movies (Linux sandbox) it allocated 1.86 GB, against 934 MB at
 20,000. Before this change, apply allocated 2.2 GB at 20,000 files. The remaining cost is spread across the re-scan, the inserts,
@@ -247,6 +1034,157 @@ attached to releases; they are not yet read back from a release.
 - Upgrades (replacing a file below the quality cutoff) are not searched.
 - The tray does not update itself. To update the tray, run the installer from the newer release folder while the old tray
   is closed.
+
+## UI responsive overhaul (branch ui-responsive-overhaul, unmerged)
+
+Root cause of the narrow layout: `.content` in `web/src/styles.css` capped every page at
+`max-width: 1200px`, so on a 1728px window a third of the viewport sat empty and every page
+— Series, Movies, Settings — was squeezed into one column. The fix removes that cap: content
+now fills the viewport (sidebar stays a consistent 210px, 180px below 1100px, a scrolling
+row below 860px), and the poster grid is fluid (`repeat(auto-fill, minmax(180px, 1fr))`,
+~180–210px cards on desktop, 140px floor on phones) instead of a hardcoded column count.
+
+- Shared design tokens in `styles.css`: full-width content, `.toolbar` (growing search input,
+  wrapping controls, view switch pinned right), `.card-actions` (actions pinned to card
+  bottoms for equal-height cards), focus-visible outlines, button hover states, table cells
+  that wrap long paths/titles, dialogs widened to 720px.
+- Availability vs monitoring, presentation only: an unmonitored title now headlines
+  "Unmonitored" with availability as secondary text ("Missing · 0 / 368 episodes available"),
+  so an intentionally unmonitored series is never headlined Missing. Monitored titles keep
+  the availability badge primary plus the Monitored badge. Applied to poster cards, List
+  view (Status column), and detail headers. No monitoring calculation, Wanted eligibility,
+  or database record changed.
+- Settings: the sidebar is now the single navigation pattern. The overview is orientation
+  (category descriptions + subsection lists), not a second set of Open buttons.
+- Pages touched: Dashboard (jobs table wrapped), Movies/Series (grid, toolbar, list),
+  Wanted (toolbar), Activity (preview table wrapped), Settings (overview + narrow
+  sidebar), Migration Preview (toolbar), detail pages, Add dialogs (unchanged behaviour).
+- Tests: 31 frontend tests pass (was 27), including new status-presentation and
+  poster/list filter-preservation tests; two existing tests updated to the new intended
+  presentation (overview navigation via sidebar; unmonitored movie headlines Unmonitored).
+  Backend untouched; backend suites run in CI on the PR.
+- Visual acceptance: real backend + seeded test library screenshotted locally (see PR).
+  Screenshots caught and fixed two real defects before the PR: (1) the active nav item
+  went white-on-pale whenever the cursor rested on it — the generic `button:hover` rule
+  out-specifics `.nav.active`; fixed with an explicit `.nav.active:hover` rule.
+  (2) List-view Year/Monitored columns wrapped mid-word — `overflow-wrap: anywhere` on
+  table cells shrinks min-content to one character; changed to `break-word`.
+  Poster art did not load in the sandbox (external image host unreachable there), so
+  screenshots show poster frames with alt text; layout, aspect, and spacing are verified.
+  the user's real 205-series library on his PC remains the final visual check.
+
+## Indexer Manager, Download Clients & Interactive Search (branch `feature/indexer-client-management`, PR open, NOT merged)
+
+Base: main 4d97b283 (PR #8 merge) + the PR #9 responsive correction integrated as aa1638b
+(2 files: styles.css, settings.tsx) so the feature does not omit it. If PR #9 merges first, that
+commit drops out on rebase before this PR merges. Nothing here merges, tags, releases, enables
+automatic grabbing, touches real media, deletes torrents, or alters monitoring preferences.
+
+What already existed (verified in code, reused, not rebuilt): secrets redacted in GET responses
+(hasKey/hasPassword only); a real Torznab caps test and a real qBittorrent category-listing test
+at POST /api/connections/test with sanitized errors; manual search already returning per-indexer
+errors; server-side grab validation (duplicates, Missing-state, rejected releases) authoritative;
+download jobs already recording their owning client id, with queue sync never reassigning them.
+
+What this adds:
+- IndexerConfig gains MoviesEnabled, TvEnabled (both default true; the migration sets existing
+  rows to true so an upgrade never silently stops searching an indexer) and Priority (LOWER is
+  searched first; ties break by Id; default 0 preserves Id order). New IndexerHealth table
+  (IndexerId PK, LastTestedAt, LastStatus, LastError) written only by connection tests, never
+  by searches. Migration IndexerClientManagement, verified with an empty EF probe migration.
+- Full CRUD: POST/PUT/DELETE for /api/indexers and /api/download-clients. Edits keep stable
+  DB ids; an empty API key/password on PUT preserves the stored secret (a non-empty value
+  replaces it); deleting a client never touches download jobs (they keep their owning-client id).
+  Validation errors return 400/502 with sanitized messages; unknown ids return 404.
+- Connection tests, no longer behind Advanced: Test on every row and inside every Add/Edit
+  dialog. Saved records test their stored values and update their health row; unsaved form
+  values test exactly what was typed via /api/connections/test (baseUrl + key, or baseUrl +
+  username/password/categories) without saving anything or writing health. Torznab 401/403
+  now reports an authentication failure instead of a bare HTTP code. Tests are read-only:
+  sign-in + category listing only, never adding/pausing/deleting torrents.
+- POST /api/connections/test-all: every enabled indexer + client in one call, max 4 concurrent,
+  30 s per item, 120 s per batch, one failure never stops the others, each result updating only
+  its own health row. No polling, no background work.
+- Manual search transparency: /api/search now returns per-indexer outcomes (results /
+  no-results / failed / skipped with the reason: Disabled, Movies not enabled, TV not enabled)
+  alongside the existing errors; disabled and media-type-disabled indexers are reported as
+  skipped instead of silently omitted. Torznab pubDate is parsed into ReleaseCandidate
+  (naive dates read as UTC) and returned as publishDateUtc for the Age column.
+- Manual grab client selection: GrabRequest takes an optional DownloadClientId; the server
+  validates it exists and is enabled, otherwise the first enabled client stays the default.
+  The chosen client's id and category are recorded on the job, as before.
+- Frontend: Settings Indexers and Download Clients are full management lists (responsive rows
+  that stack on narrow screens, not clipped tables) with text filter, enabled/health filters,
+  sorting, Test/Edit/Enable-Disable/Delete on every row (delete is two-click confirmed),
+  Test All, and Add/Edit dialogs with an in-form Test button, loading states, and
+  "Leave blank to keep the stored key/password" placeholders (secrets are never rendered).
+  Manual search gains client-side sort (best match / quality / size / seeders / newest),
+  filters (indexer, accepted/rejected, minimum seeders), an Age column, a per-indexer outcome
+  list, and a download-client selector defaulting to the first enabled client; the server
+  still re-validates every grab.
+- Tests: 12 new frontend tests (manager lists, sorting/filtering, row + form Test buttons,
+  unsaved-test-no-save, edit-preserves-secret, two-click delete, Test All, search outcomes +
+  age + filters + sort + selected client in grab) — 43 frontend tests pass locally, vite
+  build clean. 12 new backend tests (CRUD + key/password preservation proven against the
+  stored row, unsaved tests persisting nothing, health failure-then-success, Test All
+  enabled-only + failure isolation, validation/404s, client-delete ownership preservation,
+  search outcomes + publish dates, per-media-type skips, grab client selection + rejection)
+  — backend suites run in CI on the PR (local dotnet test execution hangs in this sandbox:
+  the vstest testhost never connects, a sandbox-only quirk).
+- Visual acceptance: real backend + seeded test library + local fake Torznab/qBittorrent
+  servers screenshotted at 1728/1366/390 (see PR). Layout verified: management rows, dialogs,
+  filters, health badges, transparency panel. Sandbox limitation found during this run, NOT
+  an app bug: the sandbox blocks the assistant's direct TCP connections ("Other TCP
+  connections is turned off"), so the app's loopback calls to the fake servers fail there
+  while curl and the browser reach them fine. Success-path screenshots (caps test, manual
+  search results) were therefore captured against public fixture URLs after the branch was
+  pushed; the user's PC run with real local services remains the final check.
+- Known limitations: no live-service testing was done (no real indexer or qBittorrent was
+  contacted); the qBittorrent connection-test success path is covered by tests, not by a
+  live screenshot; priority is a plain number (no drag-to-reorder); Test All has no
+  per-item progress display beyond the final summary.
+
+## PR #10 review corrections (2026-10-27, PR unmerged, run #99 failed 279/281)
+
+the user's review found three defects; all fixed on the same branch, no merge/tag/release:
+- Fixture weekday: torznab_search.xml and two inline test feeds said "Wed, 01 Oct 2026";
+  October 1, 2026 was a Thursday, and the parser (correctly) rejects the inconsistent
+  date, so the two age-related tests failed. Fixed to "Thu" in all three places; the
+  parser is unchanged, assertions retained.
+- Edit-dialog Test credential: the dialog sent its blank key/password field, so testing
+  an unchanged saved connection failed. Now the edit dialog sends the saved record's
+  id plus the form values, and the server falls back to the stored secret for blank
+  fields while testing the form's URL/categories — saving nothing and writing no
+  health for such override tests (row Test still tests pure saved values and writes
+  health). Covered by backend tests (torznab + qBittorrent) and frontend tests.
+- Test All deadline: the semaphore wait sat outside the per-item handler, so a
+  120 s batch expiry while tests were queued could fault Task.WhenAll (and the
+  finally block released a gate never acquired). The batch core is now extracted
+  (TestAllCoreAsync, internal, tests via InternalsVisibleTo), the gate wait sits
+  inside the handler with acquired/started flags, queued tests report "skipped:
+  batch deadline reached", started tests report "timed out", and failure-path
+  health writes are best-effort. Regression test drives the core with a 150 ms
+  deadline against six slow indexers: 4 timed out, 2 skipped, all six reported.
+- PR #9 sequencing: PR #9 still needs the user's merge first; only then does PR #10
+  rebase onto new main (dropping the integrated aa1638b correction) so its final
+  diff holds the features, not duplicate responsive-layout changes. Fresh fully
+  green Linux + Windows CI is required before PR #10 merges.
+
+## PR #10 sync onto merged main (2026-10-27, after PR #9 merged as 8d9e2e0)
+
+- Head 3042795 CI failed on both platforms in the backend test steps (failing test
+  names are not visible unauthenticated — job logs need repo access). Re-reading the
+  new deadline test found a real, deterministic bug in it: the slow fake used
+  Thread.Sleep, which blocks the enumerating thread during task startup, so only
+  one item ever started before the 150 ms deadline (actual outcome 1 timed out +
+  5 skipped, not the asserted 4 + 2). Fixed with an async delay handler that
+  yields, so all six items start, four acquire the gate and time out, two queue
+  and are skipped — the asserted outcome, deterministically.
+- Sync: branch rebuilt from new main 8d9e2e0 (tree-identical to aa1638b) by
+  cherry-picking the feature commit, the review-fixes commit, and the deadline-test
+  fix; the aa1638b correction commit is dropped. Final diff vs main verified to
+  hold only the indexer/client features (no settings-overview-grid or toolbar-cap
+  hunks from the correction).
 
 ## Next
 

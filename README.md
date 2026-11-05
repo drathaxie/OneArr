@@ -1,5 +1,63 @@
 # OneArr
 
+
+### Tracker catalog and direct RSS
+
+**RSS sources do not require an API key.** In Settings → Indexers choose
+**Add RSS feed**, enter a name and a full HTTP(S) RSS/Atom URL, then Test and
+Save. OneArr reads its latest entries, extracts torrent links or magnets and
+size/seed/hash metadata if supplied, and filters matches locally. Because
+many feeds publish *only the newest uploads*, RSS does not supply historical
+search and OneArr cannot find older releases omitted by the feed.
+
+For **Nyaa.si**, the integrated site adapter is preferable: select Nyaa from
+the catalog, or enter a URL such as `https://nyaa.si/?page=rss&c=1_2&f=2`
+in the standard indexer form. OneArr uses Nyaa's RSS search query and
+preserves category/trusted filters. No key or username is needed. Nyaa
+reports names, sizes, seeders and info hashes used by the release ranker.
+For generic RSS sources, use **Add RSS feed** rather than pasting the URL
+into a Torznab indexer; those endpoints don't support `api?t=caps`.
+
+Feeds are read-only until a user grabs an eligible release (or existing
+automatic-grab settings permit it). XML parsing prohibits DTD resolution
+and caps download size. Existing qBittorrent categories and monitored-state
+controls are unchanged.
+
+
+Settings → Indexers → **Browse tracker catalog** lists known tracker definitions from
+[Prowlarr/Indexers](https://github.com/Prowlarr/Indexers), with offline search and
+filters for privacy, language, movies and TV. The metadata-only manifest can be
+refreshed in the UI and is regenerated weekly in CI. These entries are **not**
+all configured or supported indexers: a site definition is different from a
+Torznab/Newznab API.
+
+The native **Nyaa.si** RSS adapter is supported: select Nyaa.si and choose
+**Add Nyaa (native RSS)** to fill its public RSS address, then Test and Save.
+This performs a read-only RSS test; searches use Nyaa's RSS query and do not
+require Prowlarr, Jackett, Docker or a site account. You can still configure
+existing Torznab/Newznab feeds manually, including their API keys.
+
+**TorrentLeech** has a native adapter. Select it from the catalog, choose
+**Add TorrentLeech (native)**, and enter the website username/password plus an
+optional *Alt 2FA Token* from your profile. Test signs in and verifies the
+account session; Save stores the credentials as encrypted data in OneArr's
+database. The `config/secret.key` file is required to decrypt them when
+reinstalling or restoring backups. Keep that file private and preserve it.
+
+Native TorrentLeech searches read its JSON torrent listings. Downloaded
+`.torrent` files are fetched by OneArr with the authenticated session and
+submitted directly to qBittorrent as multipart bytes; OneArr never gives
+qBittorrent the website session cookie. This is distinct from entering a
+private tracker login in the generic Torznab API-key box.
+
+Other entries still show their required configuration labels for reference
+and are **catalog-only** until their native adapters exist; no private
+credentials are collected for them. Full Cardigann engine coverage across
+the directory remains tracked in [issue #14](https://github.com/drathaxie/OneArr/issues/14).
+No website login is guaranteed to succeed when a tracker is down or enforces
+an anti-bot challenge.
+
+
 ## Windows (recommended)
 
 Install from a release. You need nothing else installed: no Docker, WSL, Git, Node.js or .NET SDK.
@@ -38,6 +96,36 @@ A self-hosted movie and TV manager built as one ASP.NET Core 10 process with a R
 - Read-only library scan of the media root.
 - Symlinks anywhere below the torrent or media root cause the import to fail closed.
 - Migration preview from Sonarr v3 (`/api/v3/series`) and Radarr v3 (`/api/v3/movie`), GET-only, followed by explicit confirmation to copy selected entries into OneArr's own database.
+
+## Automatic completed-download handling (opt-in)
+
+OneArr can now automatically **import completed qBittorrent downloads** without
+a manual approval click, but only when explicitly enabled. The default is OFF.
+This setting is separate from automatic grabbing:
+
+1. Configure and verify torrent/download roots and media roots.
+2. In **Settings → Media Management → Import paths**, turn **dry-run OFF** only
+   after confirming the paths are correct.
+3. In **Settings → Automation → Completed-download importing**, turn on the
+   dedicated automatic-import toggle and save.
+4. If desired, enable renaming in **Media Management → Naming**. Otherwise the
+   original release filename is retained.
+
+The scheduler checks every five minutes, after syncing qBittorrent. To qualify,
+a download must be 100% complete, owned by an enabled/reachable qBittorrent
+client, correctly categorized, recently observed, finished long enough for the
+file to settle, and confidently matched to a media item. Any uncertain match,
+multiple movie files, unmatched/multi-episode TV item, existing movie file,
+destination collision, stale client, changed source or inaccessible path
+requires **manual preview and confirmation** instead. Every automatic import
+passes the same stored preview and fingerprint validation as manual import.
+Hardlinks preserve seeding; verified copies are used across volumes. No source
+file is moved or deleted. No automatic upgrades or torrent cleanup occur.
+
+**Safety switches:** toggling automatic import off stops subsequent jobs;
+`import.dryRun=true` blocks all automatic physical imports regardless of
+the automation setting. Enabling automatic grabbing does not enable imports
+and enabling imports does not enable grabbing.
 
 ## Requirements
 
@@ -88,14 +176,16 @@ Optional environment variables (see `.env.example`):
 
 Without a TMDb key the app runs, and search shows a setup message instead of results.
 
-## Docker (not verified in this environment)
+## Docker (optional, not the v0.3.0 Windows path)
+
+The Windows release above is the supported path for v0.3.0 and needs no Docker, WSL, Git, Node.js, or .NET SDK. Docker remains an optional, unverified developer path only:
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build
 ```
 
-The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). It was built and started in the development sandbox, with `/health`, the UI, auth and restart persistence checked. That build needed a sandbox-specific CA workaround for package downloads; a normal host does not. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image). Bind-mounted host folders with that ownership were not tested.
+The Dockerfile is multi-stage (Node build, .NET publish, non-root ASP.NET runtime). It was built and started in a development sandbox, with `/health`, the UI, auth and restart persistence checked. That build needed a sandbox-specific CA workaround for package downloads; a normal host does not. The container's `/config` must be writable by UID 1654 (the `app` user in the .NET runtime image). Bind-mounted host folders with that ownership were not tested, and the Windows release, upgrade, and rollback behaviour in `tools/windows/INSTALL.txt` does not apply to the container.
 
 ## Tests and smoke
 

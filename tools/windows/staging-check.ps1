@@ -146,7 +146,9 @@ try {
             $dry = Invoke-RestMethod -Method Post -Uri "$base/api/import?dryRun=true" -Headers $auth
             Check 'dry-run import plans the file without writing' ($dry.dryRun -eq $true) $dry.message
             if ($done -and $allowReal) {
-                Invoke-RestMethod -Method Post -Uri "$base/api/import?dryRun=false" -Headers $auth | Out-Null
+                $preview = Invoke-RestMethod -Method Post -Uri "$base/api/queue/$($job.id)/import-preview" -Headers $auth
+                $bulkBody = @{ confirmed = $true; approvals = @(@{ jobId = $job.id; previewId = $preview.previewId }) } | ConvertTo-Json
+                Invoke-RestMethod -Method Post -Uri "$base/api/import?dryRun=false" -Headers $auth -ContentType $json -Body $bulkBody | Out-Null
                 $imported = @(Get-ChildItem (Join-Path $media 'movies') -Recurse -File).Count
                 Check 'real import wrote the file into the staging media folder' ($imported -ge 1) "$imported file(s)"
             }

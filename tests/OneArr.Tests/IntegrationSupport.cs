@@ -61,7 +61,7 @@ public sealed class FakeIndexer
 /// </summary>
 public sealed class FakeQbit
 {
-    public sealed record Torrent(string Hash, string Name, string Category, string State, double Progress, string? ContentPath);
+    public sealed record Torrent(string Hash, string Name, string Category, string State, double Progress, string? ContentPath, long DownloadSpeedBps = 0, long EtaSeconds = -1);
 
     public List<Torrent> Torrents { get; } = new();
     public List<string> Calls { get; } = new();
@@ -98,7 +98,7 @@ public sealed class FakeQbit
                 var category = Uri.UnescapeDataString(req.RequestUri.Query.Replace("?category=", ""));
                 var rows = Torrents.Where(t => t.Category == category).Select(t => new
                 {
-                    hash = t.Hash, name = t.Name, state = t.State, progress = t.Progress, content_path = t.ContentPath, category = t.Category, size = 1L,
+                    hash = t.Hash, name = t.Name, state = t.State, progress = t.Progress, content_path = t.ContentPath, category = t.Category, size = 1L, dlspeed = t.DownloadSpeedBps, eta = t.EtaSeconds,
                 });
                 return FakeHandler.Text(System.Text.Json.JsonSerializer.Serialize(rows));
             }

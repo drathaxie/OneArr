@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -71,6 +73,27 @@ public class SettingsApiTests
     }
 
     [Fact]
+    public async Task NamingPreviewEndpointRequiresAuthenticationAndDoesNotChangeFiles()
+    {
+        using var factory = new ApiFactory();
+        var anon = factory.CreateClient();
+        var sample = new { kind = "movie", template = "{Title} ({Year}) - {Quality}",
+            title = "A: Movie", originalFile = "release.mkv", year = 2026, quality = "1080p" };
+        var unauthorized = await anon.PostAsJsonAsync("/api/naming/preview", sample);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        var client = await SignedInAsync(factory);
+        var preview = await client.PostAsJsonAsync("/api/naming/preview", sample);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var json = await preview.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("A Movie (2026) - 1080p.mkv", json.GetProperty("fileName").GetString());
+        Assert.False(json.GetProperty("applied").GetBoolean());
+        var bad = await client.PostAsJsonAsync("/api/naming/preview", new {
+            kind = "movie", template = "{Title}/../../bad", title = "A Movie", originalFile = "release.mkv"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+    }
+
+    [Fact]
     public async Task DefaultsAreSafeBeforeAnySettingIsSaved()
     {
         using var factory = new ApiFactory();
@@ -81,6 +104,33 @@ public class SettingsApiTests
         Assert.True(settings.GetProperty("dryRunImport").GetBoolean(), "imports must default to dry-run");
         Assert.False(settings.GetProperty("tmdbConfigured").GetBoolean());
         Assert.False(settings.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.False(settings.GetProperty("automaticImport").GetBoolean(), "automatic completed importing defaults OFF");
+    }
+
+    [Fact]
+    public async Task AutomaticCompletedImportIsIndependentOptInAndInvalidSettingsNeverEnableIt()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(initial.GetProperty("automaticImport").GetBoolean());
+        Assert.True(initial.GetProperty("dryRunImport").GetBoolean());
+        var invalid = await client.PutAsJsonAsync("/api/settings",
+            new { automaticImport = true, torrentRoot = "not-an-absolute-path" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var after = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(after.GetProperty("automaticImport").GetBoolean());
+        var enabled = await client.PutAsJsonAsync("/api/settings", new { automaticImport = true });
+        Assert.Equal(HttpStatusCode.NoContent, enabled.StatusCode);
+        var saved = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.True(saved.GetProperty("automaticImport").GetBoolean());
+        Assert.False(saved.GetProperty("automaticGrabbing").GetBoolean());
+        Assert.True(saved.GetProperty("dryRunImport").GetBoolean(),
+            "Enabling automatic import must not silently disable the independent dry-run guard");
+        var disabled = await client.PutAsJsonAsync("/api/settings", new { automaticImport = false });
+        Assert.Equal(HttpStatusCode.NoContent, disabled.StatusCode);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/settings"))
+            .GetProperty("automaticImport").GetBoolean());
     }
 
     [Fact]
@@ -94,6 +144,35 @@ public class SettingsApiTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, get.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, put.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenamePolicyDefaultsOffAndInvalidTemplateIsRejectedAtomically()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(initial.GetProperty("renameOnImport").GetBoolean());
+        Assert.Contains("{Title}", initial.GetProperty("movieNamingTemplate").GetString());
+
+        var invalid = await client.PutAsJsonAsync("/api/settings", new {
+            renameOnImport = true, dryRunImport = false, movieNamingTemplate = "{Title}/../../evil"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var afterInvalid = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(afterInvalid.GetProperty("renameOnImport").GetBoolean());
+        Assert.True(afterInvalid.GetProperty("dryRunImport").GetBoolean());
+
+        var saved = await client.PutAsJsonAsync("/api/settings", new {
+            renameOnImport = true, movieNamingTemplate = "{Title} - {Year}",
+            seriesNamingTemplate = "{Title} - S{Season:00}E{Episode:00}"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.True(result.GetProperty("renameOnImport").GetBoolean());
+        Assert.Equal("{Title} - {Year}", result.GetProperty("movieNamingTemplate").GetString());
+        Assert.True(result.GetProperty("dryRunImport").GetBoolean(),
+            "Enabling naming must not enable automatic imports or disable dry-run.");
     }
 
     [Fact]
@@ -155,6 +234,75 @@ public class SettingsApiTests
         Assert.False(before.GetProperty("automaticGrabbing").GetBoolean());
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
         Assert.True(after.GetProperty("automaticGrabbing").GetBoolean());
+    }
+
+    [Fact]
+    public async Task QualityProfilesCanBeEditedAndDeleteIsGuardedByDefaultsAndRemainingProfiles()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/quality-profiles");
+        Assert.Equal(2, initial.GetArrayLength());
+        var first = initial[0].GetProperty("id").GetInt32();
+        var second = initial[1].GetProperty("id").GetInt32();
+
+        var invalid = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "Nope", minResolution = 2160, cutoffResolution = 720, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var badName = await client.PostAsJsonAsync("/api/quality-profiles", new {
+            name = " ", minResolution = 720, cutoffResolution = 1080, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, badName.StatusCode);
+
+        var saved = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "My 1080p", minResolution = 720, cutoffResolution = 1080, allowWebSources = false
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var profile = await saved.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("My 1080p", profile.GetProperty("name").GetString());
+        Assert.False(profile.GetProperty("allowWebSources").GetBoolean());
+
+        await client.PutAsJsonAsync("/api/settings", new { defaultMovieProfileId = first });
+        var blockedDefault = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, blockedDefault.StatusCode);
+        Assert.Contains("default", await blockedDefault.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+
+        var deleteUnused = await client.DeleteAsync($"/api/quality-profiles/{second}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteUnused.StatusCode);
+        // Even after changing the default, the only remaining profile may not be deleted.
+        var deleteLast = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, deleteLast.StatusCode);
+        Assert.Contains("last", await deleteLast.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task QualityProfileInUseByMediaIsNeverDeleted()
+    {
+        using var factory = new ApiFactory();
+        var client = await SignedInAsync(factory);
+        var profiles = await client.GetFromJsonAsync<JsonElement>("/api/quality-profiles");
+        var first = profiles[0].GetProperty("id").GetInt32();
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<OneArr.Infrastructure.Persistence.OneArrDbContext>>();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            db.MediaItems.Add(new OneArr.Domain.MediaItem {
+                MediaType = OneArr.Domain.MediaType.Movie, Provider = "tmdb", ProviderId = "123",
+                Title = "Test Film", RootFolder = "C:\\Media", QualityProfileId = first
+            });
+            await db.SaveChangesAsync();
+        }
+        var deleted = await client.DeleteAsync($"/api/quality-profiles/{first}");
+        Assert.Equal(HttpStatusCode.Conflict, deleted.StatusCode);
+        Assert.Contains("assigned", await deleted.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        // Editing is allowed and preserves stable references.
+        var edit = await client.PutAsJsonAsync($"/api/quality-profiles/{first}", new {
+            name = "Retuned", minResolution = 1080, cutoffResolution = 2160, allowWebSources = true
+        });
+        Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
+        await using var db2 = await dbFactory.CreateDbContextAsync();
+        Assert.Equal(first, (await db2.MediaItems.SingleAsync()).QualityProfileId);
     }
 
     [Fact]

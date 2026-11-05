@@ -12,15 +12,63 @@ public sealed class TorznabClient : IIndexerClient
 {
     private static readonly XNamespace Torznab = "http://torznab.com/schemas/2015/feed";
     private readonly IHttpClientFactory _factory;
+    private readonly NativeTrackerClient? _native;
+    private readonly PublicRssClient _rss;
 
-    public TorznabClient(IHttpClientFactory factory)
+    public TorznabClient(IHttpClientFactory factory, NativeTrackerClient? native = null, PublicRssClient? rss = null)
     {
         _factory = factory;
+        _native = native;
+        _rss = rss ?? new PublicRssClient(factory);
+    }
+
+    /// <summary>Nyaa's public RSS feed is a native indexer, not a Torznab API.</summary>
+    public static bool IsDirectNyaa(Uri uri)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps || uri.Host != "nyaa.si" || uri.Port != 443 ||
+            uri.AbsolutePath != "/" || uri.Fragment.Length > 0 || uri.UserInfo.Length > 0)
+            return false;
+        if (uri.Query.Length == 0) return true;
+        var query = NyaaParameters(uri);
+        return query is not null && query.TryGetValue("page", out var page) && page == "rss";
+    }
+
+    private static Dictionary<string, string>? NyaaParameters(Uri uri)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (uri.Query.Length > 512) return null;
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0]);
+            if (key is not ("page" or "q" or "c" or "f") || !parameters.TryAdd(key,
+                parts.Length == 2 ? Uri.UnescapeDataString(parts[1]) : "")) return null;
+        }
+        return parameters;
+    }
+
+    /// <summary>Nyaa's RSS supports live queries and optional category/trust filters.</summary>
+    public static string NyaaSearchPath(Uri configured, string title)
+    {
+        if (!IsDirectNyaa(configured)) throw new ExternalServiceException("Invalid Nyaa RSS address");
+        var parameters = NyaaParameters(configured);
+        var url = "?page=rss&q=" + Uri.EscapeDataString(title);
+        foreach (var key in new[] { "c", "f" })
+            if (parameters?.TryGetValue(key, out var value) == true && value.Length > 0)
+                url += "&" + key + "=" + Uri.EscapeDataString(value);
+        return url;
     }
 
     public async Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct)
     {
         var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
+        if (TrackerSecretBox.IsNative(indexer.ApiKey))
+            return await (_native ?? throw new ExternalServiceException("Native tracker engine not configured"))
+                .SearchAsync(indexer, search, ct);
+        if (IsDirectNyaa(baseUri))
+            return await SearchNyaaAsync(indexer.Name, baseUri, search, ct);
+        if (PublicRssClient.IsPublicRss(indexer.ApiKey))
+            return await _rss.SearchAsync(indexer, search, ct);
         var parameters = new List<string>
         {
             "t=" + (search.Type == MediaType.Series && search.Season is not null ? "tvsearch" : "search"),
@@ -44,6 +92,62 @@ public sealed class TorznabClient : IIndexerClient
             throw new ExternalServiceException($"Indexer '{indexer.Name}' returned HTTP {(int)response.StatusCode}");
 
         return Parse(body, indexer.Name);
+    }
+
+    private async Task<IReadOnlyList<ReleaseCandidate>> SearchNyaaAsync(string name, Uri configured, ReleaseSearch search, CancellationToken ct)
+    {
+        var client = _factory.CreateClient(OutboundHttp.TorznabClient);
+        client.BaseAddress = new Uri("https://nyaa.si/");
+        var url = NyaaSearchPath(configured, search.Title);
+        using var response = await OutboundHttp.SendWithRetryAsync(client,
+            () => new HttpRequestMessage(HttpMethod.Get, url), ct);
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalServiceException($"Nyaa RSS returned HTTP {(int)response.StatusCode}");
+        return ParseNyaaRss(await response.Content.ReadAsStringAsync(ct), name);
+    }
+
+    /// <summary>Parse Nyaa's read-only RSS response, validating torrent download URLs.</summary>
+    public static IReadOnlyList<ReleaseCandidate> ParseNyaaRss(string xml, string indexerName)
+    {
+        XDocument doc;
+        try { doc = XDocument.Parse(xml, LoadOptions.None); }
+        catch (System.Xml.XmlException) { throw new ExternalServiceException("Nyaa returned invalid RSS XML"); }
+        if (doc.Root?.Name.LocalName != "rss" || doc.Root.Element("channel") is null)
+            throw new ExternalServiceException("Nyaa did not return an RSS feed");
+        XNamespace nyaa = "https://nyaa.si/xmlns/nyaa";
+        var items = new List<ReleaseCandidate>();
+        foreach (var item in doc.Root.Element("channel")!.Elements("item"))
+        {
+            var title = item.Element("title")?.Value.Trim();
+            var url = item.Element("link")?.Value.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(title) || !UrlGuard.IsAllowedDownloadLink(url)) continue;
+            var hash = item.Element(nyaa + "infoHash")?.Value.Trim();
+            var seedText = item.Element(nyaa + "seeders")?.Value;
+            int.TryParse(seedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seeders);
+            var sizeText = item.Element(nyaa + "size")?.Value.Trim() ?? "";
+            var tokens = sizeText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            long size = 0;
+            if (tokens.Length > 0 && double.TryParse(tokens[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+            {
+                var power = tokens.Length > 1 ? tokens[1].ToLowerInvariant() switch
+                {
+                    "kib" or "kb" => 1, "mib" or "mb" => 2, "gib" or "gb" => 3,
+                    "tib" or "tb" => 4, _ => 0
+                } : 0;
+                size = number > 0 && number < long.MaxValue / Math.Pow(1024, power)
+                    ? (long)(number * Math.Pow(1024, power)) : 0;
+            }
+            DateTimeOffset? published = null;
+            if (DateTimeOffset.TryParse(item.Element("pubDate")?.Value, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var date))
+                published = date.ToUniversalTime();
+            // Nyaa is primarily an anime/TV source. Use the broad TV Torznab
+            // category so existing TV search/ranking paths can include results.
+            items.Add(new ReleaseCandidate(title, url, size, seeders,
+                string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(),
+                indexerName, [5000], published));
+        }
+        return items;
     }
 
     /// <summary>Parses a Torznab/Newznab RSS feed. Throws ExternalServiceException on invalid XML or an indexer error element.</summary>
@@ -94,8 +198,45 @@ public sealed class TorznabClient : IIndexerClient
             if (!UrlGuard.IsAllowedDownloadLink(link)) link = "";
 
             var hash = attrs.GetValueOrDefault("infohash");
-            results.Add(new ReleaseCandidate(title, link, size, seeders, string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(), indexerName, categories));
+            // Age comes from the feed's pubDate when present; naive dates are read as UTC so age
+            // never depends on the server's local timezone. Absent or unparsable means unknown.
+            DateTimeOffset? published = null;
+            var pubDate = item.Element("pubDate")?.Value?.Trim();
+            if (!string.IsNullOrEmpty(pubDate) && DateTimeOffset.TryParse(pubDate, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+                published = parsed.ToUniversalTime();
+            results.Add(new ReleaseCandidate(title, link, size, seeders, string.IsNullOrWhiteSpace(hash) ? null : hash.ToLowerInvariant(), indexerName, categories, published));
         }
         return results;
     }
+
+    /// <summary>Parses a Torznab caps document. Returns top-level categories and which search types the indexer offers.</summary>
+    public static TorznabCaps ParseCaps(string xml, string indexerName)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(xml, LoadOptions.None);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException)
+        {
+            throw new ExternalServiceException($"Indexer '{indexerName}' returned invalid XML");
+        }
+
+        if (doc.Root?.Name.LocalName != "caps")
+            throw new ExternalServiceException($"Indexer '{indexerName}' did not return a caps document");
+
+        var categories = new List<TorznabCategory>();
+        foreach (var c in doc.Descendants("category"))
+        {
+            if (!int.TryParse(c.Attribute("id")?.Value, out var id)) continue;
+            categories.Add(new TorznabCategory(id, c.Attribute("name")?.Value ?? ""));
+        }
+
+        var searching = doc.Root.Element("searching");
+        bool Available(string name) => searching?.Element(name)?.Attribute("available")?.Value == "yes";
+        return new TorznabCaps(categories, Available("search"), Available("tv-search"), Available("movie-search"));
+    }
 }
+
+public sealed record TorznabCategory(int Id, string Name);
+public sealed record TorznabCaps(IReadOnlyList<TorznabCategory> Categories, bool SearchAvailable, bool TvSearchAvailable, bool MovieSearchAvailable);

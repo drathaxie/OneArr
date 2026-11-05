@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { api, type MediaItem, type MetadataResult } from "./api";
+import { api, type MetadataResult } from "./api";
 
 type RematchSummary = { title: string; year: number | null; episodesUpdated: number; episodesAdded: number; episodesUnmonitored: number; filesUnlinked: number };
 
 /** Points an existing entry at the correct TMDb title. Files on disk are never changed; library links are cleared for a rescan. */
-export function FixMatchPanel({ item, kind, onDone, onClose }: { item: MediaItem; kind: "movie" | "series"; onDone: () => void; onClose: () => void }) {
+export function FixMatchPanel({ item, kind, onDone, onClose }: { item: { id: number; title: string; year: number | null; providerId?: string }; kind: "movie" | "series"; onDone: () => void; onClose: () => void }) {
   const [query, setQuery] = useState(item.title);
   const [results, setResults] = useState<MetadataResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -68,7 +68,7 @@ export function FixMatchPanel({ item, kind, onDone, onClose }: { item: MediaItem
           ))}
         </ul>
       )}
-      {message && <p className="muted">{message}</p>}
+      {message && <p className="muted" role="status">{message}</p>}
     </div>
   );
 }

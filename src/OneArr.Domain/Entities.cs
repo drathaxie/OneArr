@@ -4,7 +4,10 @@ public enum MediaType { Movie = 1, Series = 2 }
 
 public enum DownloadStatus { Queued = 0, Downloading = 1, Completed = 2, Imported = 3, Failed = 4, Unknown = 5, Missing = 6 }
 
-public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4, Deferred = 5 }
+public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4, Deferred = 5,
+    /// <summary>The file was imported into the library but matched no episode, so no episode was
+    /// marked available. The job stays visibly unresolved instead of reporting fully imported.</summary>
+    Unmatched = 6 }
 
 /// <summary>Movie or series. Identity is (MediaType, Provider, ProviderId) so IDs never collide across media types.</summary>
 public class MediaItem
@@ -74,6 +77,25 @@ public class IndexerConfig
     /// <summary>Server-side only. Never returned by the API.</summary>
     public string ApiKey { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    /// <summary>Whether this indexer is used for movie searches. Default true.</summary>
+    public bool MoviesEnabled { get; set; } = true;
+    /// <summary>Whether this indexer is used for TV searches. Default true.</summary>
+    public bool TvEnabled { get; set; } = true;
+    /// <summary>Search order: LOWER values are tried first; ties break by Id. Default 0 preserves Id order.</summary>
+    public int Priority { get; set; } = 0;
+}
+
+/// <summary>Diagnostic status from the last connection test of one indexer. Written only by
+/// connection tests, never by searches, so a failed search cannot masquerade as a failed test.</summary>
+public class IndexerHealth
+{
+    public int IndexerId { get; set; }
+    public DateTimeOffset? LastTestedAt { get; set; }
+    /// <summary>Healthy or Failed from the last test; null when never tested. Disabled is derived at read time.</summary>
+    public string? LastStatus { get; set; }
+    /// <summary>Sanitized failure reason from the last failed test; null when the last test passed.</summary>
+    public string? LastError { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class DownloadClientConfig
@@ -100,13 +122,57 @@ public class DownloadJob
     /// <summary>Correlation key from the download client (torrent info hash), used to detect duplicates and match queue items.</summary>
     public string? Hash { get; set; }
     public string Category { get; set; } = "";
+    /// <summary>Owning download client. NULL for jobs created before client tracking: those are matched
+    /// conservatively (hash preferred; name only when unique across all clients) and are only marked
+    /// missing when no reachable enabled client reports them.</summary>
+    public int? DownloadClientId { get; set; }
+    /// <summary>Client display name, denormalized at grab time so a job still names its client if the
+    /// client row is later deleted.</summary>
+    public string ClientName { get; set; } = "";
     public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
     public double Progress { get; set; }
     public string ClientState { get; set; } = "";
+    /// <summary>Live transfer rate in bytes per second as last reported by the owning client, 0 when unknown.</summary>
+    public long DownloadSpeedBps { get; set; }
+    /// <summary>ETA in seconds as last reported by the owning client, -1 when the client reports none.</summary>
+    public long EtaSeconds { get; set; } = -1;
     public string? ContentPath { get; set; }
     public string? Error { get; set; }
+    /// <summary>True when Status == Failed because an import failed (operator-retryable). False for
+    /// download-side failures, which keep polling the client so recovery is possible.</summary>
+    public bool ImportFailed { get; set; }
+    /// <summary>Last time the owning client (or any client, for legacy jobs) reported this job.</summary>
+    public DateTimeOffset? LastSeenAt { get; set; }
+    /// <summary>First time the job entered Completed. NULL for jobs completed before this was tracked.</summary>
+    public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Per-client reachability, upserted on every queue sync. This is what distinguishes "the
+/// client is down" from "the download is missing": a job is never marked missing because its client
+/// could not be reached.</summary>
+public class DownloadClientHealth
+{
+    public int DownloadClientId { get; set; }
+    public DateTimeOffset? LastSeenAt { get; set; }
+    /// <summary>Last sync error for this client, if the most recent poll failed. NULL when healthy.</summary>
+    public string? LastError { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A stored import preview: the plans a later apply must match exactly. The fingerprint
+/// covers every planned file's source path, size, and last-write time plus its destination, so any
+/// material change between preview and apply is caught and the apply is refused.</summary>
+public class ImportPreview
+{
+    public int Id { get; set; }
+    public int DownloadJobId { get; set; }
+    public string Fingerprint { get; set; } = "";
+    /// <summary>JSON array of ImportPlanDto (see DownloadService). Stored, not recomputed, so the
+    /// apply step can show exactly what was previewed.</summary>
+    public string PlansJson { get; set; } = "[]";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class ImportRecord
@@ -146,7 +212,7 @@ public class AppSetting
     public string Value { get; set; } = "";
 }
 
-public enum SearchOutcome { None = 0, Grabbed = 1, NoAcceptableRelease = 2, IndexerError = 3, DownloadClientError = 4, SkippedActiveDownload = 5, Rejected = 6 }
+public enum SearchOutcome { None = 0, Grabbed = 1, NoAcceptableRelease = 2, IndexerError = 3, DownloadClientError = 4, SkippedActiveDownload = 5, Rejected = 6, SkippedMissingDownload = 7 }
 
 /// <summary>
 /// Persistent per-item search state, so restarts keep backoff and never re-search an item before its next attempt is due.

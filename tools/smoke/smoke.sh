@@ -71,11 +71,14 @@ check "queue sync reads real qBittorrent state" "ag $API/api/queue | jq -e '.[0]
 DRY=$(ap "$API/api/import?dryRun=true" '')
 check "dry run plans without writing media" "echo '$DRY' | jq -e '.dryRun==true' >/dev/null && [ -z \"\$(ls -A $SCRATCH/media/movies)\" ]"
 
-ap "$API/api/import?dryRun=false" '' >/dev/null
+JOBID=$(ag $API/api/queue | jq -r '.[0].id')
+PREVIEWID=$(ap $API/api/queue/$JOBID/import-preview '' | jq -r '.previewId')
+BULK="{\"confirmed\":true,\"approvals\":[{\"jobId\":$JOBID,\"previewId\":$PREVIEWID}]}"
+ap "$API/api/import?dryRun=false" "$BULK" >/dev/null
 check "real import hardlinks or copies into media root" "[ -f '$SCRATCH/media/movies/The Matrix (1999)/The.Matrix.1999.2160p.BluRay.x265-GRP.mkv' ]"
 check "seeding source retained" "[ -f '$SCRATCH/torrents/onearr-movies/The.Matrix.1999.2160p.BluRay.x265-GRP.mkv' ]"
 check "job marked imported" "ag $API/api/queue | jq -e '.[0].status==\"Imported\"' >/dev/null"
-ap "$API/api/import?dryRun=false" '' >/dev/null
+ap "$API/api/import?dryRun=false" "$BULK" >/dev/null
 check "re-running import is idempotent" "[ \"\$(ls -A '$SCRATCH/media/movies/The Matrix (1999)' | wc -l)\" = 1 ]"
 
 PREVIEW=$(ap $API/api/migration/preview '{"kind":"radarr","baseUrl":"http://127.0.0.1:9003","apiKey":"fixture-key"}')

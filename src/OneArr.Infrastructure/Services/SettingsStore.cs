@@ -40,4 +40,31 @@ public sealed class SettingsStore
         }
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>
+    /// Writes several settings in one context and one SaveChanges, so a multi-field settings save
+    /// commits together instead of one row at a time. Callers must validate every value BEFORE calling
+    /// this: anything that throws here after SaveChanges has already changed earlier rows.
+    /// </summary>
+    public async Task SetManyAsync(IReadOnlyDictionary<string, string?> values, CancellationToken ct = default)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        foreach (var (key, value) in values)
+        {
+            var existing = await db.Settings.FindAsync([key], ct);
+            if (value is null)
+            {
+                if (existing is not null) db.Settings.Remove(existing);
+            }
+            else if (existing is null)
+            {
+                db.Settings.Add(new AppSetting { Key = key, Value = value });
+            }
+            else
+            {
+                existing.Value = value;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+    }
 }

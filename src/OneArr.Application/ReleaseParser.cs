@@ -91,7 +91,7 @@ public sealed partial class ReleaseParser : IReleaseParser
 
         // Title is everything before the first structural marker (year, SxxEyy, resolution, source).
         var markers = new List<int>();
-        foreach (var m in new[] { epMatch.Success ? epMatch.Index : -1, resMatch.Success ? resMatch.Index : -1, srcMatch.Success ? srcMatch.Index : -1, yearMatch.Success ? yearMatch.Index : -1 })
+        foreach (var m in new[] { epMatch.Success ? epMatch.Index : -1, altEpisodeIndex(name), seasonPack ? SeasonPackRx.Match(name).Index : -1, resMatch.Success ? resMatch.Index : -1, srcMatch.Success ? srcMatch.Index : -1, yearMatch.Success ? yearMatch.Index : -1 })
             if (m > 0) markers.Add(m);
         var titleEnd = markers.Count > 0 ? markers.Min() : name.Length;
         var rawTitle = name[..titleEnd].Replace('.', ' ').Replace('_', ' ').Trim(' ', '-', '(', ')', '[', ']');
@@ -115,6 +115,8 @@ public sealed partial class ReleaseParser : IReleaseParser
         var chars = value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray();
         return new string(chars);
     }
+
+    private static int altEpisodeIndex(string name) { var match = AltEpisodeRx.Match(name); return match.Success ? match.Index : -1; }
 
     [GeneratedRegex(@"\s{2,}")]
     private static partial Regex MultiSpace();

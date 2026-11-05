@@ -12,8 +12,11 @@ public class OneArrDbContext : DbContext
     public DbSet<Episode> Episodes => Set<Episode>();
     public DbSet<QualityProfile> QualityProfiles => Set<QualityProfile>();
     public DbSet<IndexerConfig> Indexers => Set<IndexerConfig>();
+    public DbSet<IndexerHealth> IndexerHealth => Set<IndexerHealth>();
     public DbSet<DownloadClientConfig> DownloadClients => Set<DownloadClientConfig>();
     public DbSet<DownloadJob> DownloadJobs => Set<DownloadJob>();
+    public DbSet<DownloadClientHealth> DownloadClientHealth => Set<DownloadClientHealth>();
+    public DbSet<ImportPreview> ImportPreviews => Set<ImportPreview>();
     public DbSet<ImportRecord> ImportRecords => Set<ImportRecord>();
     public DbSet<FileRecord> FileRecords => Set<FileRecord>();
     public DbSet<JobHistory> JobHistories => Set<JobHistory>();
@@ -52,8 +55,26 @@ public class OneArrDbContext : DbContext
         b.Entity<DownloadJob>(e =>
         {
             e.HasIndex(x => x.Hash);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => new { x.MediaItemId, x.EpisodeId, x.Status });
+            e.HasIndex(x => x.DownloadClientId);
             e.Property(x => x.MediaType).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+        });
+
+        b.Entity<DownloadClientHealth>(e =>
+        {
+            e.HasKey(x => x.DownloadClientId);
+        });
+
+        b.Entity<IndexerHealth>(e =>
+        {
+            e.HasKey(x => x.IndexerId);
+        });
+
+        b.Entity<ImportPreview>(e =>
+        {
+            e.HasIndex(x => x.DownloadJobId);
         });
 
         b.Entity<ImportRecord>(e =>
