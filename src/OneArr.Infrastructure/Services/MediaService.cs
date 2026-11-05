@@ -170,6 +170,9 @@ public sealed class MediaService
         item.Overview = details.Overview;
         item.PosterPath = details.PosterPath;
         item.LibraryReviewedUtc = null;
+        // Presence was established for the old identity. A library scan must verify it for the new match.
+        item.HasFile = false;
+        foreach (var episode in item.Episodes) episode.HasFile = false;
 
         var episodesUpdated = 0;
         var episodesAdded = 0;

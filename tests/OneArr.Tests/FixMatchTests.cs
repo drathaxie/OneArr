@@ -49,7 +49,7 @@ public class FixMatchTests
         var series = new MediaItem
         {
             MediaType = MediaType.Series, Provider = "tmdb", ProviderId = "111", Title = "Wrong Show", Year = 2001, Monitored = true,
-            QualityProfileId = profile.Id, RootFolder = Root, CreatedAt = DateTimeOffset.UtcNow, LibraryReviewedUtc = DateTimeOffset.UtcNow,
+            QualityProfileId = profile.Id, RootFolder = Root, CreatedAt = DateTimeOffset.UtcNow, LibraryReviewedUtc = DateTimeOffset.UtcNow, HasFile = true,
         };
         db.MediaItems.Add(series);
         await db.SaveChangesAsync();
@@ -90,7 +90,9 @@ public class FixMatchTests
         Assert.Equal("222", item.ProviderId);
         Assert.Equal("Right Show", item.Title);
         Assert.Null(item.LibraryReviewedUtc);
+        Assert.False(item.HasFile);
         var episodes = await db.Episodes.Where(e => e.MediaItemId == seriesId).ToDictionaryAsync(e => e.EpisodeNumber);
+        Assert.All(episodes.Values, episode => Assert.False(episode.HasFile));
         Assert.Equal(ep1, episodes[1].Id);
         Assert.Equal("Pilot", episodes[1].Title);
         Assert.Equal(ep2, episodes[2].Id);
@@ -131,6 +133,7 @@ public class FixMatchTests
         {
             var profile = await db.QualityProfiles.FirstAsync();
             var movie = new MediaItem { MediaType = MediaType.Movie, Provider = "tmdb", ProviderId = "333", Title = "Wrong Film", Year = 1999, Monitored = true, QualityProfileId = profile.Id, RootFolder = Root, CreatedAt = DateTimeOffset.UtcNow };
+            movie.HasFile = true;
             db.MediaItems.Add(movie);
             await db.SaveChangesAsync();
             db.MediaFiles.Add(new MediaFile { Path = Root + "/film.mkv", PathKey = Root + "/film.mkv", MediaItemId = movie.Id, Status = MediaFileStatus.Present });
@@ -146,6 +149,7 @@ public class FixMatchTests
         var item = await check.MediaItems.SingleAsync(m => m.Id == movieId);
         Assert.Equal("Right Film", item.Title);
         Assert.Equal("444", item.ProviderId);
+        Assert.False(item.HasFile);
         Assert.Null((await check.MediaFiles.SingleAsync()).MediaItemId);
     }
 
