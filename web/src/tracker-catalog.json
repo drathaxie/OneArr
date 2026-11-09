@@ -1,6 +1,6 @@
 {
   "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
-  "sourceMetadataHash": "a6290f2e26085734",
+  "sourceMetadataHash": "690025c112977cf8",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -361,7 +361,6 @@
     "definitions/v11/phoenixpt-api.yml",
     "definitions/v11/phoenixpt.yml",
     "definitions/v11/pier720.yml",
-    "definitions/v11/pignetwork.yml",
     "definitions/v11/pixelcove.yml",
     "definitions/v11/pixelcove2fa.yml",
     "definitions/v11/playletpt.yml",
@@ -411,6 +410,7 @@
     "definitions/v11/railgunpt.yml",
     "definitions/v11/rainbowtracker.yml",
     "definitions/v11/rastastugan-api.yml",
+    "definitions/v11/redangel.yml",
     "definitions/v11/redstartorrent.yml",
     "definitions/v11/reelflix-api.yml",
     "definitions/v11/retromoviesclub-api.yml",
@@ -438,6 +438,7 @@
     "definitions/v11/sewerpt.yml",
     "definitions/v11/sextorrent-api.yml",
     "definitions/v11/sexypics.yml",
+    "definitions/v11/shadow-api.yml",
     "definitions/v11/shadowbit.yml",
     "definitions/v11/shakaw.yml",
     "definitions/v11/shanaproject.yml",
@@ -564,7 +565,6 @@
     "definitions/v11/xingyung.yml",
     "definitions/v11/xloli-api.yml",
     "definitions/v11/xloli.yml",
-    "definitions/v11/xtorrenty.yml",
     "definitions/v11/xtremebytes.yml",
     "definitions/v11/xwtclassics.yml",
     "definitions/v11/xwtclassics2fa.yml",
@@ -580,6 +580,7 @@
     "definitions/v11/zenith.yml",
     "definitions/v11/zmpt-api.yml",
     "definitions/v11/zmpt.yml",
+    "definitions/v11/zootoons.yml",
     "definitions/v11/zrpt.yml",
     "definitions/v11/ztracker.yml",
     "definitions/v12/blueroms.yml",
@@ -1438,7 +1439,7 @@
       "name": "Concertos (API)",
       "privacy": "private",
       "language": "en-US",
-      "movies": false,
+      "movies": true,
       "tv": true
     },
     {
@@ -3514,14 +3515,6 @@
       "tv": true
     },
     {
-      "path": "definitions/v11/pignetwork.yml",
-      "name": "PigNetwork (猪猪网)",
-      "privacy": "private",
-      "language": "zh-CN",
-      "movies": true,
-      "tv": true
-    },
-    {
       "path": "definitions/v11/pixelcove.yml",
       "name": "PixelCove",
       "privacy": "private",
@@ -3914,6 +3907,14 @@
       "tv": true
     },
     {
+      "path": "definitions/v11/redangel.yml",
+      "name": "Red Angel",
+      "privacy": "private",
+      "language": "hu-HU",
+      "movies": true,
+      "tv": true
+    },
+    {
       "path": "definitions/v11/redstartorrent.yml",
       "name": "Red Star Torrent",
       "privacy": "private",
@@ -4128,6 +4129,14 @@
       "language": "en-US",
       "movies": false,
       "tv": false
+    },
+    {
+      "path": "definitions/v11/shadow-api.yml",
+      "name": "Shadow (API)",
+      "privacy": "private",
+      "language": "ro-RO",
+      "movies": true,
+      "tv": true
     },
     {
       "path": "definitions/v11/shadowbit.yml",
@@ -5138,14 +5147,6 @@
       "tv": true
     },
     {
-      "path": "definitions/v11/xtorrenty.yml",
-      "name": "xTorrenty",
-      "privacy": "private",
-      "language": "pl-PL",
-      "movies": true,
-      "tv": true
-    },
-    {
       "path": "definitions/v11/xtremebytes.yml",
       "name": "Xtreme Bytes",
       "privacy": "private",
@@ -5262,6 +5263,14 @@
       "name": "ZmPT (织梦)",
       "privacy": "private",
       "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/zootoons.yml",
+      "name": "ZooToons",
+      "privacy": "private",
+      "language": "en-US",
       "movies": true,
       "tv": true
     },
