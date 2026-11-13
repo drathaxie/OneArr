@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using OneArr.Domain;
+using OneArr.Infrastructure.Files;
 
 namespace OneArr.Infrastructure.Library;
 
@@ -97,7 +98,7 @@ public static partial class LibraryMatcher
         var fileKey = LibraryPaths.Key(file.FullPath, index.Windows);
         var resolution = ParseResolution(file.RelativePath);
 
-        if (SampleTag().IsMatch(fileName)) return Unmatched(file, type, "Looks like a sample file");
+        if (SampleFiles.IsSample(file.RelativePath)) return Unmatched(file, type, "Looks like a sample file");
 
         return type == MediaType.Movie
             ? MatchMovie(file, index, folders, fileName, fileKey, resolution)
@@ -270,9 +271,6 @@ public static partial class LibraryMatcher
         new(file, MatchOutcome.Unmatched, reason, type);
 
     public sealed record ParsedTitle(string Title, int? Year);
-
-    [GeneratedRegex(@"(?i)(?<![a-z0-9])sample(?![a-z0-9])")]
-    private static partial Regex SampleTag();
 
     [GeneratedRegex(@"\((?<y>(?:19|20)\d{2})\)")]
     private static partial Regex ParenYear();

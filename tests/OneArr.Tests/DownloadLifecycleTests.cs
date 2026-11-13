@@ -77,6 +77,48 @@ public class DownloadLifecycleTests
     private static void AgeFile(string path) => File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
 
     [Fact]
+    public async Task PreviewAndApply_ExcludeSamplesThatCompeteWithTheRealEpisode()
+    {
+        using var world = await WorldAsync();
+        var (series, episodes) = await world.AddSeriesAsync("Show", 1);
+        var real = world.Dirs.WriteFile("torrents/Show/Show.S01E01.mkv", "episode-bytes");
+        var sample = world.Dirs.WriteFile("torrents/Show/sample-Show.S01E01.mkv", "sample-bytes");
+        AgeFile(real); AgeFile(sample);
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "true");
+        var job = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(real));
+        var service = PreviewService(world);
+        var preview = await service.PreviewImportAsync(job, default);
+        var plan = Assert.Single(preview.Plans);
+        Assert.NotEqual("reject", plan.PlannedAction);
+        await service.ApplyPreviewAsync(job, preview.PreviewId, default);
+        Assert.Equal("episode-bytes", await File.ReadAllTextAsync(plan.DestinationPath!));
+        Assert.Equal("sample-bytes", await File.ReadAllTextAsync(sample));
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, job)).Status);
+        await using var db = world.Db.CreateDbContext();
+        Assert.Single(await db.ImportRecords.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SampleOnlyDownload_FailsVisiblyWithoutImportingOrChangingTheSource()
+    {
+        using var world = await WorldAsync();
+        var movie = await world.AddMovieAsync("Dune", 2021);
+        var sample = world.Dirs.WriteFile("torrents/Dune/sample-Dune.2021.mkv", "sample-bytes");
+        AgeFile(sample);
+        var job = await AddJobAsync(world, movie, null, MediaType.Movie, "Dune.2021",
+            DownloadStatus.Completed, 1, "aa01", Path.GetDirectoryName(sample));
+        await Assert.ThrowsAsync<ArgumentException>(() => PreviewService(world).PreviewImportAsync(job, default));
+        var summary = await world.Downloads.ImportCompletedAsync(false, default);
+        Assert.Equal(1, summary.Failed);
+        var failed = await GetJobAsync(world, job);
+        Assert.Equal(DownloadStatus.Failed, failed.Status);
+        Assert.Contains("samples", failed.Error);
+        Assert.Equal("sample-bytes", await File.ReadAllTextAsync(sample));
+        Assert.Empty(Directory.GetFiles(world.Dirs.Media, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task TwoClientsWithSameTorrentName_DoNotConfuseJobs()
     {
         using var world = await WorldAsync();

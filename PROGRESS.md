@@ -1,5 +1,21 @@
 # PROGRESS
 
+## Fix match and sample filtering continuation (2026-11-04)
+
+- Integrated `fix-match-and-samples` with main at `bd45cd5`, retaining the direct movie/series manager,
+  client path mappings, naming previews and opt-in automatic completed-download importer.
+- Fix match is available inside the existing manager. It preserves episode IDs and download history,
+  unlinks library records and clears old availability flags, and requires a library review before automatic grabbing.
+- One shared sample rule filters library matching, manual import previews, apply and automatic import candidates.
+  Sample-only bulk imports fail visibly; a manual preview explains that no importable files remain.
+- Local verification: production frontend build passed; all 67 frontend tests passed, including five new manager
+  regressions. Backend run: 380 passed and one test-fixture failure; after supplying the release quality needed
+  by the naming template, both new lifecycle regressions passed. All 381 applicable backend cases have passed
+  across these runs. Six symbolic-link containment cases could not run here because link creation is unavailable.
+- CI passed on the original `8211d90` branch. Fresh CI and Windows snapshot checks are required for this integration.
+  No installed app update or real-library acceptance was performed. Copy-only import and post-seeding cleanup
+  remain separate work; this change preserves existing hardlink/copy policy and never deletes source downloads.
+
 Status as of commit d7f0ea6 (CI green). Only items marked VERIFIED were executed. Everything else is labelled.
 
 ## Goal
