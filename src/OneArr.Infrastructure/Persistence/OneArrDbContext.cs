@@ -27,6 +27,7 @@ public class OneArrDbContext : DbContext
     public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
     public DbSet<MediaFileEpisode> MediaFileEpisodes => Set<MediaFileEpisode>();
     public DbSet<LibraryScanPlan> LibraryScanPlans => Set<LibraryScanPlan>();
+    public DbSet<ProblemDismissal> ProblemDismissals => Set<ProblemDismissal>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -119,6 +120,8 @@ public class OneArrDbContext : DbContext
             e.HasOne(x => x.MediaFile).WithMany(f => f.EpisodeLinks).HasForeignKey(x => x.MediaFileId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Episode>().WithMany().HasForeignKey(x => x.EpisodeId).OnDelete(DeleteBehavior.Cascade);
         });
+
+        b.Entity<ProblemDismissal>(e => e.HasIndex(x => x.Key).IsUnique());
 
         b.Entity<FileRecord>(e => e.HasIndex(x => x.Path).IsUnique());
         b.Entity<AppSetting>(e => e.HasKey(x => x.Key));
