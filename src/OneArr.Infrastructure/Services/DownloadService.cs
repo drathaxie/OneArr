@@ -223,7 +223,9 @@ public sealed class DownloadService
             .Take(pageSize)
             .Select(j => j.Id)
             .ToListAsync(ct);
-        int considered = 0, imported = 0, deferred = 0, failed = 0;
+        // "considered" counts jobs inspected (bounded by the page). "attempted" counts jobs the pass actually tries to import.
+        // Only attempts are budgeted, so held jobs at the front of a page cannot hide importable jobs behind them.
+        int considered = 0, attempted = 0, imported = 0, deferred = 0, failed = 0;
         foreach (var id in pending)
         {
             ct.ThrowIfCancellationRequested();
@@ -261,7 +263,7 @@ public sealed class DownloadService
                       Math.Abs((health.LastSeenAt.Value - job.LastSeenAt.Value).TotalSeconds) > 5
                         ? "This torrent was not confirmed in the download client's latest queue poll"
                         : AutoImportReviewReason(job, media, owner, plans, now, target);
-                if (why is not null) { deferred++; if (considered >= 5) break; continue; }
+                if (why is not null) { deferred++; continue; }
 
                 // Store exactly the verified plans. Apply recomputes and
                 // rechecks the fingerprint; a changed source fails closed.
@@ -277,13 +279,14 @@ public sealed class DownloadService
                 if (!await _settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct) ||
                     await _settings.GetBoolAsync(SettingKeys.DryRunImport, true, ct)) break;
 
+                attempted++;
                 await ApplyPreviewAsync(id, preview.Id, ct);
                 await using var resultDb = await _db.CreateDbContextAsync(ct);
                 var result = await resultDb.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == id, ct);
                 if (result.Status == DownloadStatus.Imported) imported++;
                 else if (result.Status == DownloadStatus.Failed) failed++;
                 else deferred++;
-                if (considered >= 5) break;
+                if (attempted >= 5) break;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException

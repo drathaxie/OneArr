@@ -792,6 +792,39 @@ public class DownloadLifecycleTests
         Assert.Empty(await db.ImportRecords.Where(r => r.DownloadJobId == jobId).ToListAsync());
     }
 
+    /// <summary>
+    /// A job that is deliberately held back for review must not use up the pass's import budget. Otherwise a few stuck jobs at the
+    /// front of the queue hide every later job, and a newer, importable download is never reached.
+    /// </summary>
+    [Fact]
+    public async Task AutomaticImport_HeldJobsDoNotStarveImportableJobsBehindThem()
+    {
+        using var world = await WorldAsync();
+        var dune = await world.AddMovieAsync("Dune", 2021);
+        var arrival = await world.AddMovieAsync("Arrival", 2016);
+        for (var i = 0; i < 7; i++)
+        {
+            // Filename belongs to a different movie, so every one of these is held for review.
+            var held = world.Dirs.WriteFile($"torrents/held{i}/Other.Movie.{i}.2021.1080p.mkv", "wrong-movie");
+            AgeFile(held);
+            var heldId = await AddJobAsync(world, dune, null, MediaType.Movie, "Dune.2021.1080p",
+                DownloadStatus.Completed, 1, $"hold{i:D2}", Path.GetDirectoryName(held));
+            await ReadyForAutoImportAsync(world, heldId, MediaType.Movie);
+        }
+        var good = world.Dirs.WriteFile("torrents/good/Arrival.2016.1080p.mkv", "arrival-bytes");
+        AgeFile(good);
+        var goodId = await AddJobAsync(world, arrival, null, MediaType.Movie, "Arrival.2016.1080p",
+            DownloadStatus.Completed, 1, "good01", Path.GetDirectoryName(good));
+        await ReadyForAutoImportAsync(world, goodId, MediaType.Movie);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        await world.Downloads.SyncQueueAsync(default);
+
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+
+        Assert.Equal(1, result.Imported);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, goodId)).Status);
+    }
+
     [Fact]
     public async Task AutomaticImport_WrongEpisodeAndUnmatchedFilesRequireManualReview()
     {
