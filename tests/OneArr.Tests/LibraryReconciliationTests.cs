@@ -197,6 +197,14 @@ public class LibraryMatcherTests
     }
 
     [Fact]
+    public void Episode_tag_followed_directly_by_a_release_word_still_parses()
+    {
+        // Common scene names put the quality tag straight after the episode number, with no separator.
+        Assert.Equal([(4, 18)], LibraryMatcher.ParseEpisodes("Supernatural.S04E18WEBRip.1080p.EAC3.hevc-d3g.mkv"));
+        Assert.Equal([(1, 2)], LibraryMatcher.ParseEpisodes("Show.S01E02HDTV.mkv"));
+    }
+
+    [Fact]
     public void Titles_compare_without_accents_case_or_punctuation()
     {
         Assert.Equal(LibraryMatcher.NormalizeTitle("Amélie: Édition"), LibraryMatcher.NormalizeTitle("amelie  edition"));

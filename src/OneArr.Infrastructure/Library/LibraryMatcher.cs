@@ -287,7 +287,7 @@ public static partial class LibraryMatcher
     [GeneratedRegex(@"(?i)tmdb(?:id)?[-=](?<id>\d+)")]
     private static partial Regex TmdbTag();
 
-    [GeneratedRegex(@"(?i)(?<![a-z0-9])S(?<s>\d{1,2})E(?<e>\d{1,3})(?<tail>-\d{1,3}(?!\d)|(?:[-_]?E\d{1,3})+)?(?![a-z0-9])")]
+    [GeneratedRegex(@"(?i)(?<![a-z0-9])S(?<s>\d{1,2})E(?<e>\d{1,3})(?<tail>-\d{1,3}(?!\d)|(?:[-_]?E\d{1,3})+)?(?!\d)")]
     private static partial Regex EpisodeTag();
 
     [GeneratedRegex(@"(?i)(?<![a-z0-9])(?<s>\d{1,2})x(?<e>\d{1,3})(?![a-z0-9])")]
