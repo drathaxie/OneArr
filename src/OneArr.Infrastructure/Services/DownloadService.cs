@@ -444,7 +444,9 @@ public sealed class DownloadService
         List<string> files;
         try
         {
-            files = ListFiles(await ResolveContentPathAsync(job, torrentRoot, ct), torrentRoot);
+            var contentPath = await ResolveContentPathAsync(job, torrentRoot, ct);
+            RequireVisibleContent(contentPath, torrentRoot);
+            files = ListFiles(contentPath, torrentRoot);
         }
         catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException)
         {
@@ -869,7 +871,7 @@ public sealed class DownloadService
         }
         var relFolder = RelativeFolder(media, job, db);
         var contentPath = await ResolveContentPathAsync(job, torrentRoot, ct);
-        RequireVisibleContent(contentPath);
+        RequireVisibleContent(contentPath, torrentRoot);
         var files = ListFiles(contentPath, torrentRoot);
         var plans = new List<ImportPlanDto>();
         var episodes = media.MediaType == MediaType.Series
@@ -1012,11 +1014,17 @@ public sealed class DownloadService
     /// A download folder OneArr cannot see is a configuration problem, not an empty download. Reporting it as "no media" hides the
     /// cause, so it is named here, with the setting that usually fixes it.
     /// </summary>
-    public static void RequireVisibleContent(string contentPath)
+    public static void RequireVisibleContent(string contentPath, string torrentRoot)
     {
         var full = Path.GetFullPath(contentPath);
         if (!File.Exists(full) && !Directory.Exists(full))
             throw new ArgumentException($"The download folder is not visible to OneArr: {full}. Check the download path mapping for this client in Settings.");
+        // Files outside the torrent root are dropped silently when listed. Say so, with both paths, instead.
+        var inside = true;
+        try { SafeImporter.CanonicalUnder(torrentRoot, full); }
+        catch { inside = false; }
+        if (!inside)
+            throw new ArgumentException($"The download folder {full} is outside the Torrent download root {Path.GetFullPath(torrentRoot)}. Set the Torrent download root in Settings (or the client's path mapping) so it contains the folder qBittorrent saves to.");
     }
 
     public static List<string> ListFiles(string contentPath, string torrentRoot)
