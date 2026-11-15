@@ -21,7 +21,8 @@ public sealed record PlannedMissing(string Path, string Key, MediaType MediaType
 /// <summary>A previously linked file whose status cannot be decided. Its availability is kept as it was, and automation pauses.</summary>
 public sealed record PlannedUnknown(string Path, string Key, MediaType MediaType, int MediaItemId, int MediaFileId, string Reason);
 
-public sealed record ReviewItem(string Path, MediaType MediaType, string Reason, List<int> CandidateIds);
+/// <summary>A file that was not linked. A parsed title lets the operator search TMDb and add the missing entry.</summary>
+public sealed record ReviewItem(string Path, MediaType MediaType, string Reason, List<int> CandidateIds, string? SuggestedTitle = null, int? SuggestedYear = null);
 
 /// <summary>The reviewed result of a scan. Storing it is the only write a preview makes, and it is never applied without revalidation.</summary>
 public sealed record ScanPlan(
@@ -466,7 +467,7 @@ public sealed class LibraryReconciler
                     break;
                 default:
                     unmatchedCount++;
-                    if (unmatched.Count < _reviewListLimit) unmatched.Add(new ReviewItem(file.FullPath, type, match.Reason, []));
+                    if (unmatched.Count < _reviewListLimit) unmatched.Add(new ReviewItem(file.FullPath, type, match.Reason, [], match.SuggestedTitle, match.SuggestedYear));
                     break;
             }
         }

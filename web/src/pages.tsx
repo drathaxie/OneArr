@@ -429,6 +429,15 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
     } catch (e) { setMessage((e as Error).message); }
   }
 
+  async function refreshMetadata() {
+    setMessage(null);
+    try {
+      const r = await api<{ title: string; episodesAdded: number; episodesUpdated: number; episodesUnmonitored: number; needsLibraryScan: boolean }>("POST", `/api/media/${mediaId}/refresh-metadata`);
+      setMessage(`Refreshed ${r.title}: ${r.episodesAdded} episode(s) added, ${r.episodesUpdated} updated, ${r.episodesUnmonitored} no longer listed.${r.needsLibraryScan ? " New episodes may already be on disk: run a library preview and apply. Automatic grabbing waits for that." : ""}`);
+      reload();
+    } catch (e) { setMessage((e as Error).message); }
+  }
+
   function toggleSeason(seasonNumber: number, monitored: boolean) {
     api("PATCH", `/api/media/${mediaId}/seasons/${seasonNumber}`, { monitored })
       .then(() => reload()).catch((e: Error) => setMessage(e.message));
@@ -479,6 +488,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           <div className="row">
             <button className="small" onClick={() => patch({ monitored: !data.monitored })}>{data.monitored ? "Unmonitor" : "Monitor"}</button>
             <button className="small" onClick={() => setShowFixMatch(!showFixMatch)}>Fix match</button>
+            <button className="small" onClick={refreshMetadata} title="Update the title and episode list from TMDb. Files and links are kept.">Refresh metadata</button>
             <button className="small" onClick={() => setShowReleases(!showReleases)}>{showReleases ? "Hide releases" : "Search releases"}</button>
           </div>
           <form className="row" style={{ marginTop: ".5rem" }} onSubmit={(e) => { e.preventDefault(); if (root !== null) patch({ rootFolder: root }); }}>

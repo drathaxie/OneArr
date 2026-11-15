@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OneArr.Application;
+using OneArr.Infrastructure.Library;
 using OneArr.Domain;
 using OneArr.Infrastructure.Persistence;
 using OneArr.Infrastructure.Services;
@@ -181,5 +182,105 @@ public class FixMatchTests
         var (seriesId, _, _, _, _) = await SeedWrongMatchAsync(factory);
 
         await Assert.ThrowsAsync<ArgumentException>(() => media.RematchAsync(seriesId, "not-a-number", default));
+    }
+
+    [Fact]
+    public async Task Refreshing_adds_new_episodes_keeps_links_and_reopens_review_only_when_episodes_are_added()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        var (seriesId, ep1, ep2, ep3, fileId) = await SeedWrongMatchAsync(factory);
+        await using (var db = factory.CreateDbContext())
+        {
+            var series = await db.MediaItems.SingleAsync(m => m.Id == seriesId);
+            series.ProviderId = "555";
+            series.LibraryReviewedUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        // The show now has season 1 episode 4 and a season 0 special.
+        meta.Catalog["555"] = ("Wrong Show", 2001,
+        [
+            new SeasonInfo(0, [new EpisodeInfo(1, "s1", "Special", null)]),
+            new SeasonInfo(1, [new EpisodeInfo(1, "e1", "Old 1", null), new EpisodeInfo(2, "e2", "Old 2", null), new EpisodeInfo(3, "e3", "Old 3", null), new EpisodeInfo(4, "e4", "New", null)]),
+        ]);
+
+        var result = await media.RefreshMetadataAsync(seriesId, default);
+
+        // The new season 1 episode and the season 0 special.
+        Assert.Equal(2, result.EpisodesAdded);
+        Assert.True(result.NeedsLibraryScan);
+        await using var db2 = factory.CreateDbContext();
+        var item = await db2.MediaItems.SingleAsync(m => m.Id == seriesId);
+        Assert.Null(item.LibraryReviewedUtc);
+        var episodes = await db2.Episodes.Where(e => e.MediaItemId == seriesId).ToListAsync();
+        Assert.Equal(ep1, episodes.Single(e => e.SeasonNumber == 1 && e.EpisodeNumber == 1).Id);
+        Assert.Equal(ep2, episodes.Single(e => e.SeasonNumber == 1 && e.EpisodeNumber == 2).Id);
+        Assert.Equal(ep3, episodes.Single(e => e.SeasonNumber == 1 && e.EpisodeNumber == 3).Id);
+        Assert.False(episodes.Single(e => e.SeasonNumber == 0).Monitored, "specials are not monitored by default");
+        Assert.Equal(1, await db2.MediaFileEpisodes.CountAsync(l => l.MediaFileId == fileId));
+        Assert.True(await db2.DownloadJobs.AnyAsync(j => j.EpisodeId == ep1));
+    }
+
+    [Fact]
+    public async Task A_refresh_that_adds_nothing_keeps_the_review_flag_and_the_links()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        var (seriesId, _, _, _, _) = await SeedWrongMatchAsync(factory);
+        await using (var db = factory.CreateDbContext())
+        {
+            var series = await db.MediaItems.SingleAsync(m => m.Id == seriesId);
+            series.ProviderId = "555";
+            await db.SaveChangesAsync();
+        }
+        var reviewed = DateTimeOffset.UtcNow;
+        await using (var db = factory.CreateDbContext())
+        {
+            (await db.MediaItems.SingleAsync(m => m.Id == seriesId)).LibraryReviewedUtc = reviewed;
+            await db.SaveChangesAsync();
+        }
+        meta.Catalog["555"] = ("Wrong Show", 2001, [new SeasonInfo(1, [new EpisodeInfo(1, "e1", "Renamed", null), new EpisodeInfo(2, "e2", "Renamed", null), new EpisodeInfo(3, "e3", "Renamed", null)])]);
+
+        var result = await media.RefreshMetadataAsync(seriesId, default);
+
+        Assert.False(result.NeedsLibraryScan);
+        await using var check = factory.CreateDbContext();
+        Assert.NotNull((await check.MediaItems.SingleAsync(m => m.Id == seriesId)).LibraryReviewedUtc);
+        Assert.Equal(1, await check.MediaFileEpisodes.CountAsync());
+        Assert.Equal("Renamed", (await check.Episodes.FirstAsync(e => e.SeasonNumber == 1 && e.EpisodeNumber == 1)).Title);
+    }
+
+    [Fact]
+    public async Task Adding_a_series_with_all_seasons_does_not_monitor_specials()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        meta.Catalog["777"] = ("New Show", 2020,
+        [
+            new SeasonInfo(0, [new EpisodeInfo(1, "sp1", "Special", null)]),
+            new SeasonInfo(1, [new EpisodeInfo(1, "a1", "Pilot", null)]),
+        ]);
+        int profileId;
+        await using (var db = factory.CreateDbContext()) profileId = (await db.QualityProfiles.FirstAsync()).Id;
+
+        var added = await media.AddAsync(new AddMediaRequest(MediaType.Series, "777", profileId, Root, true, null, MonitorAllSeasons: true), default);
+
+        await using var check = factory.CreateDbContext();
+        var episodes = await check.Episodes.Where(e => e.MediaItemId == added.Item.Id).ToListAsync();
+        Assert.False(episodes.Single(e => e.SeasonNumber == 0).Monitored);
+        Assert.True(episodes.Single(e => e.SeasonNumber == 1).Monitored);
+    }
+
+    [Fact]
+    public void An_unmatched_series_carries_its_parsed_title_so_it_can_be_added()
+    {
+        var file = new CandidateFile(Root + "/Rey.Mysterio.vs.The.Darkness.2022.S01E01.Enygma.1080p.HMAX.WEB-DL.mkv",
+            "Rey.Mysterio.vs.The.Darkness.2022.S01.1080p.HMAX/Rey.Mysterio.vs.The.Darkness.2022.S01E01.Enygma.1080p.HMAX.WEB-DL.mkv", 10);
+
+        var match = LibraryMatcher.Match(file, MediaType.Series, [], [], windows: false);
+
+        Assert.Equal(MatchOutcome.Unmatched, match.Outcome);
+        Assert.Equal("Rey Mysterio vs The Darkness", match.SuggestedTitle);
+        Assert.Equal(2022, match.SuggestedYear);
     }
 }
