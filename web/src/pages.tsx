@@ -1214,6 +1214,7 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
                       {p.actions.includes("preview") && p.jobId && <button className="small primary" onClick={() => openPreview(p.jobId!)}>Preview import</button>}
                       {p.actions.includes("retry") && p.jobId && <button className="small" onClick={() => run("Retry import", `/api/queue/${p.jobId}/retry-import`, undefined, "Retry this failed import? It applies the latest import preview; generate a fresh preview first if the files changed. Nothing is deleted.")}>Retry failed import</button>}
                       {p.actions.includes("clear-missing") && p.jobId && <button className="small" onClick={() => run("Clear missing", `/api/queue/${p.jobId}/clear-missing`, undefined, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}
+                      {p.actions.includes("dismiss") && p.dismissKey && <button className="small" onClick={() => run("Dismiss", "/api/activity/problems/dismiss", { key: p.dismissKey }, "Dismiss this problem? Nothing on disk, in qBittorrent, or in the catalog is changed. It comes back only if the download's status or error changes, or if its import fails again.")}>Dismiss</button>}
                     </div>
                   </td>
                 </tr>

@@ -298,3 +298,17 @@ public class LibraryScanPlan
     public DateTimeOffset? AppliedUtc { get; set; }
     public string PlanJson { get; set; } = "";
 }
+
+/// <summary>
+/// An operator's "fixed it" for a problem that blocks nothing (a failed import, an unmatched file). The problem stays hidden while
+/// its version is unchanged, so a new failure of the same download still shows.
+/// </summary>
+public class ProblemDismissal
+{
+    public int Id { get; set; }
+    /// <summary>Problem kind and record id, for example "import-failed:42".</summary>
+    public string Key { get; set; } = "";
+    /// <summary>What the problem looked like when dismissed. A different value brings the problem back.</summary>
+    public string Version { get; set; } = "";
+    public DateTimeOffset DismissedUtc { get; set; }
+}

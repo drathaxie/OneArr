@@ -19,6 +19,7 @@ public static class ApiEndpoints
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
     public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
     public sealed record RematchBody(string? ProviderId);
+    public sealed record DismissProblemBody(string? Key);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId, bool SeasonPackOnly = false);
     public sealed record GrabBody(int MediaItemId, int? EpisodeId, string Title, string Link, string? InfoHash, int? DownloadClientId = null, bool SeasonPackOnly = false);
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
@@ -683,6 +684,8 @@ public static class ApiEndpoints
         {
             await using var c = await db.CreateDbContextAsync(ct);
             var problems = new List<object>();
+            var dismissed = await c.ProblemDismissals.AsNoTracking().ToDictionaryAsync(d => d.Key, d => d.Version, ct);
+            bool Hidden(string key, string version) => dismissed.TryGetValue(key, out var v) && v == version;
             var clients = await c.DownloadClients.AsNoTracking().Where(x => x.Enabled).ToListAsync(ct);
             var health = await c.DownloadClientHealth.AsNoTracking().ToListAsync(ct);
             foreach (var cl in clients)
@@ -701,10 +704,12 @@ public static class ApiEndpoints
                         problems.Add(new { kind = "download-missing", title = $"Download missing from qBittorrent: {j.ReleaseTitle}", detail = "The torrent is no longer reported by its client. Clear it in Queue to grab again; nothing is deleted.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh", "clear-missing" } });
                         break;
                     case DownloadStatus.Failed when j.ImportFailed:
-                        problems.Add(new { kind = "import-failed", title = $"Import failed: {j.ReleaseTitle}", detail = j.Error ?? "See import records for the per-file reason.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "preview", "retry" } });
+                        if (!Hidden($"import-failed:{j.Id}", JobVersion(j)))
+                            problems.Add(new { kind = "import-failed", title = $"Import failed: {j.ReleaseTitle}", detail = j.Error ?? "See import records for the per-file reason.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "preview", "retry", "dismiss" }, dismissKey = $"import-failed:{j.Id}" });
                         break;
                     case DownloadStatus.Failed:
-                        problems.Add(new { kind = "download-failed", title = $"Download failed in qBittorrent: {j.ReleaseTitle}", detail = j.Error ?? j.ClientState, jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
+                        if (!Hidden($"download-failed:{j.Id}", JobVersion(j)))
+                            problems.Add(new { kind = "download-failed", title = $"Download failed in qBittorrent: {j.ReleaseTitle}", detail = j.Error ?? j.ClientState, jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh", "dismiss" }, dismissKey = $"download-failed:{j.Id}" });
                         break;
                 }
                 if (j.Status == DownloadStatus.Completed && j.MediaItemId is int mid && !string.IsNullOrWhiteSpace(mediaRoot))
@@ -741,15 +746,60 @@ public static class ApiEndpoints
                     problems.Add(new { kind = "client-disabled", title = $"Download client disabled or removed: {j.ReleaseTitle}", detail = "This download stays with its original client and is never matched against other clients. Re-enable the client to resume sync.", jobId = (int?)j.Id, clientId = j.DownloadClientId, actions = new[] { "refresh" } });
             }
             var unmatched = await c.ImportRecords.AsNoTracking().Where(r => r.Action == ImportAction.Unmatched).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
-            foreach (var r in unmatched)
-                problems.Add(new { kind = "import-unmatched", title = "Imported file matched no episode", detail = $"{r.SourcePath} → {r.DestinationPath}", jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview" } });
+            foreach (var r in unmatched.Where(r => !Hidden($"import-unmatched:{r.Id}", RecordVersion)))
+                problems.Add(new { kind = "import-unmatched", title = "Imported file matched no episode", detail = $"{r.SourcePath} → {r.DestinationPath}", jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "dismiss" }, dismissKey = $"import-unmatched:{r.Id}" });
             var deferred = await c.ImportRecords.AsNoTracking().Where(r => r.Action == ImportAction.Deferred).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
-            foreach (var r in deferred)
-                problems.Add(new { kind = "file-deferred", title = "Import deferred: file still changing", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry" } });
+            foreach (var r in deferred.Where(r => !Hidden($"file-deferred:{r.Id}", RecordVersion)))
+                problems.Add(new { kind = "file-deferred", title = "Import deferred: file still changing", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry", "dismiss" }, dismissKey = $"file-deferred:{r.Id}" });
             var badVerify = await c.ImportRecords.AsNoTracking().Where(r => !r.Success && r.Message != null && r.Message.Contains("Verification")).OrderByDescending(r => r.Id).Take(50).ToListAsync(ct);
-            foreach (var r in badVerify)
-                problems.Add(new { kind = "import-verification-failed", title = "Import failed verification", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry" } });
+            foreach (var r in badVerify.Where(r => !Hidden($"import-verification-failed:{r.Id}", RecordVersion)))
+                problems.Add(new { kind = "import-verification-failed", title = "Import failed verification", detail = r.SourcePath, jobId = r.DownloadJobId, clientId = (int?)null, actions = new[] { "preview", "retry", "dismiss" }, dismissKey = $"import-verification-failed:{r.Id}" });
             return Results.Ok(problems);
+        });
+
+        // Hides a problem the operator has fixed by hand. It changes nothing on disk, in qBittorrent, or in the catalog, and only
+        // covers problems that block nothing: a Missing or offline download must be resolved, not dismissed.
+        api.MapPost("/activity/problems/dismiss", async (DismissProblemBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            var parts = (body.Key ?? "").Split(':');
+            if (parts.Length != 2 || !int.TryParse(parts[1], out var id)) return Results.BadRequest(new { error = "Unknown problem" });
+
+            await using var c = await db.CreateDbContextAsync(ct);
+            string version;
+            switch (parts[0])
+            {
+                case "import-failed":
+                case "download-failed":
+                {
+                    var job = await c.DownloadJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id, ct);
+                    if (job is null) return Results.NotFound();
+                    var isImport = parts[0] == "import-failed";
+                    if (job.Status != DownloadStatus.Failed || job.ImportFailed != isImport)
+                        return Results.Conflict(new { error = "This download is no longer in that failed state. Refresh the list." });
+                    version = JobVersion(job);
+                    break;
+                }
+                case "import-unmatched":
+                    if (!await c.ImportRecords.AnyAsync(r => r.Id == id && r.Action == ImportAction.Unmatched, ct)) return Results.NotFound();
+                    version = RecordVersion;
+                    break;
+                case "file-deferred":
+                    if (!await c.ImportRecords.AnyAsync(r => r.Id == id && r.Action == ImportAction.Deferred, ct)) return Results.NotFound();
+                    version = RecordVersion;
+                    break;
+                case "import-verification-failed":
+                    if (!await c.ImportRecords.AnyAsync(r => r.Id == id && !r.Success && r.Message != null && r.Message.Contains("Verification"), ct)) return Results.NotFound();
+                    version = RecordVersion;
+                    break;
+                default:
+                    return Results.BadRequest(new { error = "This problem cannot be dismissed. Resolve it in Queue or Settings instead." });
+            }
+
+            var existing = await c.ProblemDismissals.FirstOrDefaultAsync(d => d.Key == body.Key, ct);
+            if (existing is null) c.ProblemDismissals.Add(new ProblemDismissal { Key = body.Key!, Version = version, DismissedUtc = DateTimeOffset.UtcNow });
+            else { existing.Version = version; existing.DismissedUtc = DateTimeOffset.UtcNow; }
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(new { message = "Problem dismissed. Nothing on disk, in qBittorrent, or in the catalog was changed." });
         });
 
         // Explicit stuck-download reconciliation: a Missing job blocks automatic and manual grabs
@@ -1419,6 +1469,12 @@ public static class ApiEndpoints
         var cut = trimmed.LastIndexOf('/');
         return cut <= 0 ? "" : trimmed[..cut];
     }
+
+    /// <summary>What a download problem looked like. Status, import flag and error text; a retry or a new failure changes it and reopens the problem.</summary>
+    private static string JobVersion(DownloadJob j) => $"{j.Status}|{j.ImportFailed}|{j.Error}";
+
+    /// <summary>Import records never change once written, so a dismissal of one stays until it is removed.</summary>
+    private const string RecordVersion = "record";
 
     private static MediaType ParseType(string type) => type.ToLowerInvariant() switch
     {

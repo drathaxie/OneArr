@@ -322,6 +322,8 @@ export interface Problem {
   jobId: number | null;
   clientId: number | null;
   actions: string[];
+  /** Set when the problem can be dismissed; the server recomputes the rest from this key. */
+  dismissKey?: string;
 }
 
 export interface ImportPlan {
