@@ -277,11 +277,12 @@ public class TmdbProviderTests
     }
 
     [Fact]
-    public async Task SeriesSeasonsFixtureSkipsSpecials()
+    public async Task SeriesSeasonsFixtureIncludesSpecialsAsSeasonZero()
     {
         var map = new Dictionary<string, string>
         {
             ["tv/1399"] = Fixture("tmdb_tv_show.json"),
+            ["tv/1399/season/0"] = "{\"episodes\":[{\"episode_number\":1,\"id\":9001,\"name\":\"Special\",\"air_date\":\"2009-12-25\"}]}",
             ["tv/1399/season/1"] = Fixture("tmdb_tv_season1.json"),
             ["tv/1399/season/2"] = Fixture("tmdb_tv_season2.json"),
         };
@@ -292,9 +293,11 @@ public class TmdbProviderTests
         });
         var tmdb = new TmdbMetadataProvider(new FakeFactory(handler), () => Task.FromResult<string?>("0123456789abcdef"));
         var seasons = await tmdb.GetSeasonsAsync("1399", CancellationToken.None);
-        Assert.Equal(new[] { 1, 2 }, seasons.Select(s => s.SeasonNumber));
-        Assert.Equal(2, seasons[0].Episodes.Count);
-        Assert.Equal("5001", seasons[0].Episodes[0].ProviderId);
+        // TMDb tracks specials as season 0. They are fetched so they can be matched and, if chosen, monitored.
+        Assert.Equal(new[] { 0, 1, 2 }, seasons.Select(s => s.SeasonNumber));
+        Assert.Equal("9001", seasons[0].Episodes.Single().ProviderId);
+        Assert.Equal(2, seasons[1].Episodes.Count);
+        Assert.Equal("5001", seasons[1].Episodes[0].ProviderId);
     }
 }
 

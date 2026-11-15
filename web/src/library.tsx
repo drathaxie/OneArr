@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, formatBytes } from "./api";
+import { api, formatBytes, type MetadataResult, type QualityProfile } from "./api";
 
 type Root = { id: number; mediaType: string; path: string; label: string | null; lastState: string; lastMessage: string | null; lastSuccessfulScanUtc: string | null };
 type Mapping = { id?: number; mediaType: string; sourcePrefix: string; targetPrefix: string };
 type Status = { windows: boolean; automation: { allowed: boolean; reason: string }; roots: Root[]; mappings: Mapping[] };
-type Entry = { path: string; key?: string; method?: string; reason?: string; mediaType?: string; candidateIds?: number[] };
+type Entry = { path: string; key?: string; method?: string; reason?: string; mediaType?: string; candidateIds?: number[]; suggestedTitle?: string | null; suggestedYear?: number | null };
 type RootReport = { id: number; path: string; state: string; message: string | null; filesFound: number; skippedReparsePoints: number; unreadableFolders: number; complete: boolean; incompleteReason: string | null };
 type Plan = {
   planId: number;
@@ -149,15 +149,15 @@ export function LibraryPanel({ showMappings = true }: { showMappings?: boolean }
             {result.skipped.length > 0 && <ul>{result.skipped.map((s, i) => <li key={i} className="muted">{s}</li>)}</ul>}
           </div>
         )}
-        {plan && <PlanView plan={plan} unchecked={unchecked} onToggle={toggle} busy={busy} onApply={apply} acknowledge={acknowledge} onAcknowledge={setAcknowledge} />}
+        {plan && <PlanView plan={plan} unchecked={unchecked} onToggle={toggle} busy={busy} onApply={apply} acknowledge={acknowledge} onAcknowledge={setAcknowledge} roots={status.roots} />}
       </div>
     </>
   );
 }
 
-function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAcknowledge }: {
+function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAcknowledge, roots }: {
   plan: Plan; unchecked: Set<string>; onToggle: (path: string) => void; busy: boolean; onApply: () => void;
-  acknowledge: boolean; onAcknowledge: (value: boolean) => void;
+  acknowledge: boolean; onAcknowledge: (value: boolean) => void; roots: Root[];
 }) {
   const p = plan.plan;
   const selected = selectedCount(plan, unchecked);
@@ -225,7 +225,12 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
       {p.unmatched.length > 0 && (
         <>
           <h2>Unmatched (not linked)</h2>
-          <ul>{p.unmatched.slice(0, PAGE_LIMIT).map((u) => <li key={u.path}><span className="muted">{u.path}</span> — {u.reason}</li>)}</ul>
+          <ul>{p.unmatched.slice(0, PAGE_LIMIT).map((u) => (
+            <li key={u.path} className="row spread">
+              <span><span className="muted">{u.path}</span> — {u.reason}</span>
+              {u.suggestedTitle && <AddFromUnmatched entry={u} roots={roots} />}
+            </li>
+          ))}</ul>
           {p.unmatched.length > PAGE_LIMIT && <p className="muted">Showing the first {PAGE_LIMIT} of {p.unmatched.length}.</p>}
         </>
       )}
@@ -382,5 +387,55 @@ export function RootFolderTool({ kind, onChanged }: { kind: "movie" | "series"; 
       </div>
       {message && <p className="muted">{message}</p>}
     </details>
+  );
+}
+
+/** Adds a catalog entry for an unmatched file, so its episodes or movie can be linked on the next scan. Files are never touched. */
+function AddFromUnmatched({ entry, roots }: { entry: Entry; roots: Root[] }) {
+  const type = entry.mediaType === "Series" ? "series" : "movie";
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(entry.suggestedTitle ?? "");
+  const [results, setResults] = useState<MetadataResult[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const root = roots.find((r) => r.mediaType.toLowerCase() === type && entry.path.toLowerCase().startsWith(r.path.toLowerCase()));
+
+  async function search() {
+    setMessage(null);
+    try {
+      setResults(await api<MetadataResult[]>("GET", `/api/metadata/search?type=${type}&q=${encodeURIComponent(query)}`));
+    } catch (e) { setMessage((e as Error).message); }
+  }
+
+  async function add(r: MetadataResult) {
+    if (!root) { setMessage("No library folder of this type contains this file. Add its folder first."); return; }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const profiles = await api<QualityProfile[]>("GET", "/api/quality-profiles");
+      if (profiles.length === 0) throw new Error("Create a quality profile in Settings first");
+      await api("POST", "/api/media", { type, providerId: r.providerId, qualityProfileId: profiles[0].id, rootFolder: root.path, monitored: true, seasons: null, allSeasons: true });
+      setMessage(`Added ${r.title}. Run Preview scan again to link its files.`);
+      setResults([]);
+    } catch (e) { setMessage((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  if (!open) return <button className="small" onClick={() => { setOpen(true); void search(); }}>Find on TMDb</button>;
+  return (
+    <div style={{ width: "100%" }}>
+      <div className="row">
+        <input aria-label="Search TMDb for unmatched file" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 220 }} />
+        <button className="small" onClick={search}>Search</button>
+        <button className="small" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      {results.length > 0 && <ul>{results.map((r) => (
+        <li key={r.providerId} className="row spread">
+          <span>{r.title}{r.year ? ` (${r.year})` : ""} <span className="muted">TMDb {r.providerId}</span></span>
+          <button className="small primary" disabled={busy} onClick={() => add(r)}>Add to catalog</button>
+        </li>
+      ))}</ul>}
+      {message && <p className="muted">{message}</p>}
+    </div>
   );
 }

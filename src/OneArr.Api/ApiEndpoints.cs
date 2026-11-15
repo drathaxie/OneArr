@@ -297,6 +297,23 @@ public static class ApiEndpoints
             });
         });
 
+        // Refreshes title and episode list from TMDb. Links are kept; new episodes reopen the review so grabbing waits for a scan.
+        api.MapPost("/media/{id:int}/refresh-metadata", async (int id, MediaService media, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await media.RefreshMetadataAsync(id, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or ProviderNotConfiguredException or ArgumentException)
+            {
+                return Results.BadRequest(new { error = OutboundHttp.Redact(ex.Message) });
+            }
+        });
+
         // Fix match: points an existing entry at the correct TMDb title. Library links are cleared for re-checking; files are not touched.
         api.MapPut("/media/{id:int}/match", async (int id, RematchBody body, MediaService media, CancellationToken ct) =>
         {

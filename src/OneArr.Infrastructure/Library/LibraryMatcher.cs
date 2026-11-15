@@ -72,7 +72,9 @@ public sealed record FileMatch(
     IReadOnlyList<int>? EpisodeIds = null,
     IReadOnlyList<int>? CandidateIds = null,
     string? Method = null,
-    int? Resolution = null);
+    int? Resolution = null,
+    string? SuggestedTitle = null,
+    int? SuggestedYear = null);
 
 /// <summary>
 /// Identifies a file from its path alone. Rules, strongest first: the catalog's known legacy folder, a TMDb id in the path,
@@ -123,12 +125,12 @@ public static partial class LibraryMatcher
 
         var source = folders.Length > 0 && ParseTitle(folders[^1]).Year is not null ? folders[^1] : fileName;
         var parsed = ParseTitle(source);
-        if (parsed.Year is not int year) return Unmatched(file, MediaType.Movie, "No year in the folder or file name, so the movie cannot be identified safely");
+        if (parsed.Year is not int year) return Unmatched(file, MediaType.Movie, "No year in the folder or file name, so the movie cannot be identified safely", parsed.Title, null);
 
         var candidates = index.MovieByTitleYear.GetValueOrDefault(TitleYearKey(parsed.Title, year)) ?? [];
         if (candidates.Count == 1) return Linked(file, MediaType.Movie, candidates[0].Id, [], "title-year", resolution);
         if (candidates.Count > 1) return Ambiguous(file, MediaType.Movie, $"'{parsed.Title} ({year})' matches several movies", candidates.Select(m => m.Id).ToList());
-        return Unmatched(file, MediaType.Movie, $"No catalog movie titled '{parsed.Title} ({year})'");
+        return Unmatched(file, MediaType.Movie, $"No catalog movie titled '{parsed.Title} ({year})'", parsed.Title, year);
     }
 
     private static FileMatch MatchSeries(CandidateFile file, CatalogIndex index, string[] folders, string fileName, string fileKey, int? resolution)
@@ -158,7 +160,7 @@ public static partial class LibraryMatcher
                 var sameTitle = index.SeriesByTitle.GetValueOrDefault(NormalizeTitle(parsed.Title)) ?? [];
                 candidates = sameTitle.Where(s => parsed.Year is null || s.Year == parsed.Year).ToList();
                 method = parsed.Year is null ? "title-only" : "title-year";
-                if (candidates.Count == 0) return Unmatched(file, MediaType.Series, $"No catalog series titled '{parsed.Title}'");
+                if (candidates.Count == 0) return Unmatched(file, MediaType.Series, $"No catalog series titled '{parsed.Title}'", parsed.Title, parsed.Year);
             }
         }
 
@@ -267,8 +269,8 @@ public static partial class LibraryMatcher
     private static FileMatch Ambiguous(CandidateFile file, MediaType type, string reason, IReadOnlyList<int> candidates) =>
         new(file, MatchOutcome.Ambiguous, reason, type, CandidateIds: candidates);
 
-    private static FileMatch Unmatched(CandidateFile file, MediaType type, string reason) =>
-        new(file, MatchOutcome.Unmatched, reason, type);
+    private static FileMatch Unmatched(CandidateFile file, MediaType type, string reason, string? suggestedTitle = null, int? suggestedYear = null) =>
+        new(file, MatchOutcome.Unmatched, reason, type, SuggestedTitle: suggestedTitle, SuggestedYear: suggestedYear);
 
     public sealed record ParsedTitle(string Title, int? Year);
 

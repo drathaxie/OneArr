@@ -67,7 +67,7 @@ public sealed class TmdbMetadataProvider : IMetadataProvider
         foreach (var s in seasons.EnumerateArray())
         {
             var number = s.GetProperty("season_number").GetInt32();
-            if (number <= 0) continue; // Specials are excluded in v1 (see scope).
+            // Season 0 holds specials. TMDb tracks them, so they are fetched; new specials start unmonitored.
             var season = await GetJsonAsync($"tv/{id}/season/{number}", ct);
             var eps = new List<EpisodeInfo>();
             if (season.TryGetProperty("episodes", out var episodes))
