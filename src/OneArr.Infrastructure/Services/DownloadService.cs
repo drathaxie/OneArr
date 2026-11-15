@@ -868,7 +868,9 @@ public sealed class DownloadService
             throw new ArgumentException("Root folder is outside the configured media root");
         }
         var relFolder = RelativeFolder(media, job, db);
-        var files = ListFiles(await ResolveContentPathAsync(job, torrentRoot, ct), torrentRoot);
+        var contentPath = await ResolveContentPathAsync(job, torrentRoot, ct);
+        RequireVisibleContent(contentPath);
+        var files = ListFiles(contentPath, torrentRoot);
         var plans = new List<ImportPlanDto>();
         var episodes = media.MediaType == MediaType.Series
             ? await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == media.Id).ToListAsync(ct)
@@ -1004,6 +1006,17 @@ public sealed class DownloadService
         return string.IsNullOrWhiteSpace(json)
             ? job.ContentPath
             : DownloadPathMapper.Map(DownloadPathMapper.Read(json), job.ContentPath, torrentRoot);
+    }
+
+    /// <summary>
+    /// A download folder OneArr cannot see is a configuration problem, not an empty download. Reporting it as "no media" hides the
+    /// cause, so it is named here, with the setting that usually fixes it.
+    /// </summary>
+    public static void RequireVisibleContent(string contentPath)
+    {
+        var full = Path.GetFullPath(contentPath);
+        if (!File.Exists(full) && !Directory.Exists(full))
+            throw new ArgumentException($"The download folder is not visible to OneArr: {full}. Check the download path mapping for this client in Settings.");
     }
 
     public static List<string> ListFiles(string contentPath, string torrentRoot)
