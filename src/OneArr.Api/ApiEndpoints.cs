@@ -580,7 +580,7 @@ public static class ApiEndpoints
                     j.Id, j.MediaItemId, j.EpisodeId, j.MediaType, j.ReleaseTitle, j.Hash, j.Category,
                     j.DownloadClientId, j.ClientName, j.Status, j.Progress, j.ClientState,
                     j.DownloadSpeedBps, j.EtaSeconds, j.ContentPath, j.Error, j.ImportFailed,
-                    j.LastSeenAt, j.CompletedAt, j.CreatedAt, j.UpdatedAt,
+                    j.LastSeenAt, j.CompletedAt, j.CreatedAt, j.UpdatedAt, j.ImportHoldReason, j.ImportCheckedAt,
                     importReady = j.Status == DownloadStatus.Completed && j.ContentPath != null,
                 }),
                 clients = clients.Select(cl => new

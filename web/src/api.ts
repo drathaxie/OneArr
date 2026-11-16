@@ -289,6 +289,9 @@ export interface Job {
   error: string | null;
   importFailed: boolean;
   importReady: boolean;
+  /** Why automatic import last held this job, in plain words; null when it was not held. */
+  importHoldReason?: string | null;
+  importCheckedAt?: string | null;
   lastSeenAt: string | null;
   completedAt: string | null;
   createdAt: string;

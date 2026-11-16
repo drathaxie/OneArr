@@ -263,7 +263,12 @@ public sealed class DownloadService
                       Math.Abs((health.LastSeenAt.Value - job.LastSeenAt.Value).TotalSeconds) > 5
                         ? "This torrent was not confirmed in the download client's latest queue poll"
                         : AutoImportReviewReason(job, media, owner, plans, now, target);
-                if (why is not null) { deferred++; continue; }
+                if (why is not null)
+                {
+                    await RecordHoldAsync(id, why, now, ct);
+                    deferred++;
+                    continue;
+                }
 
                 // Store exactly the verified plans. Apply recomputes and
                 // rechecks the fingerprint; a changed source fails closed.
@@ -283,6 +288,7 @@ public sealed class DownloadService
                 await ApplyPreviewAsync(id, preview.Id, ct);
                 await using var resultDb = await _db.CreateDbContextAsync(ct);
                 var result = await resultDb.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == id, ct);
+                if (result.Status != DownloadStatus.Completed) await RecordHoldAsync(id, null, now, ct);
                 if (result.Status == DownloadStatus.Imported) imported++;
                 else if (result.Status == DownloadStatus.Failed) failed++;
                 else deferred++;
@@ -293,7 +299,8 @@ public sealed class DownloadService
                 or InvalidOperationException or StalePreviewException)
             {
                 // Never use the destructive older bulk engine as a fallback.
-                // The job remains Completed for explicit review/retry.
+                // The job remains Completed for explicit review/retry, and the reason is shown on it.
+                await RecordHoldAsync(id, ex.Message, now, ct);
                 deferred++;
             }
         }
@@ -304,6 +311,19 @@ public sealed class DownloadService
     /// <summary>Pure fail-closed eligibility for fully completed, recently
     /// observed, unequivocally mapped media. Anything needing judgment is
     /// left for the existing manual preview/apply UI.</summary>
+    /// <summary>
+    /// Stores why automatic import held a job (null clears it), so the queue can show the reason instead of a bare
+    /// "Ready to import". Only these two columns change; nothing about the download or its files does.
+    /// </summary>
+    private async Task RecordHoldAsync(int jobId, string? reason, DateTimeOffset now, CancellationToken ct)
+    {
+        var text = reason is { Length: > 500 } ? reason[..500] : reason;
+        await using var db = await _db.CreateDbContextAsync(ct);
+        await db.DownloadJobs.Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
+            .SetProperty(j => j.ImportHoldReason, text)
+            .SetProperty(j => j.ImportCheckedAt, now), ct);
+    }
+
     internal static string? AutoImportReviewReason(
         DownloadJob job, MediaItem? media, DownloadClientConfig? owner,
         IReadOnlyList<ImportPlanDto> plans, DateTimeOffset now, Episode? episode)

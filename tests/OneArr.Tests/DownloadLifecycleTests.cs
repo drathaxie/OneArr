@@ -803,6 +803,7 @@ public class DownloadLifecycleTests
         using var world = await WorldAsync();
         var dune = await world.AddMovieAsync("Dune", 2021);
         var arrival = await world.AddMovieAsync("Arrival", 2016);
+        var heldIds = new List<int>();
         for (var i = 0; i < 7; i++)
         {
             // Filename belongs to a different movie, so every one of these is held for review.
@@ -811,6 +812,7 @@ public class DownloadLifecycleTests
             var heldId = await AddJobAsync(world, dune, null, MediaType.Movie, "Dune.2021.1080p",
                 DownloadStatus.Completed, 1, $"hold{i:D2}", Path.GetDirectoryName(held));
             await ReadyForAutoImportAsync(world, heldId, MediaType.Movie);
+            heldIds.Add(heldId);
         }
         var good = world.Dirs.WriteFile("torrents/good/Arrival.2016.1080p.mkv", "arrival-bytes");
         AgeFile(good);
@@ -823,7 +825,17 @@ public class DownloadLifecycleTests
         var result = await world.Downloads.AutoImportCompletedAsync(default);
 
         Assert.Equal(1, result.Imported);
-        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, goodId)).Status);
+        var goodJob = await GetJobAsync(world, goodId);
+        Assert.Equal(DownloadStatus.Imported, goodJob.Status);
+        Assert.Null(goodJob.ImportHoldReason);
+        // Every held job says why, so the queue no longer shows a bare "Ready to import".
+        foreach (var heldId in heldIds)
+        {
+            var held = await GetJobAsync(world, heldId);
+            Assert.Equal(DownloadStatus.Completed, held.Status);
+            Assert.Equal("Movie filename does not match the media item", held.ImportHoldReason);
+            Assert.NotNull(held.ImportCheckedAt);
+        }
     }
 
     [Fact]
