@@ -134,8 +134,14 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Hash")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("ImportCheckedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("ImportFailed")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ImportHoldReason")
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("TEXT");

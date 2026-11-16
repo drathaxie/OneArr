@@ -263,7 +263,12 @@ public sealed class DownloadService
                       Math.Abs((health.LastSeenAt.Value - job.LastSeenAt.Value).TotalSeconds) > 5
                         ? "This torrent was not confirmed in the download client's latest queue poll"
                         : AutoImportReviewReason(job, media, owner, plans, now, target);
-                if (why is not null) { deferred++; continue; }
+                if (why is not null)
+                {
+                    await RecordHoldAsync(id, why, now, ct);
+                    deferred++;
+                    continue;
+                }
 
                 // Store exactly the verified plans. Apply recomputes and
                 // rechecks the fingerprint; a changed source fails closed.
@@ -283,6 +288,7 @@ public sealed class DownloadService
                 await ApplyPreviewAsync(id, preview.Id, ct);
                 await using var resultDb = await _db.CreateDbContextAsync(ct);
                 var result = await resultDb.DownloadJobs.AsNoTracking().FirstAsync(j => j.Id == id, ct);
+                if (result.Status != DownloadStatus.Completed) await RecordHoldAsync(id, null, now, ct);
                 if (result.Status == DownloadStatus.Imported) imported++;
                 else if (result.Status == DownloadStatus.Failed) failed++;
                 else deferred++;
@@ -293,7 +299,8 @@ public sealed class DownloadService
                 or InvalidOperationException or StalePreviewException)
             {
                 // Never use the destructive older bulk engine as a fallback.
-                // The job remains Completed for explicit review/retry.
+                // The job remains Completed for explicit review/retry, and the reason is shown on it.
+                await RecordHoldAsync(id, ex.Message, now, ct);
                 deferred++;
             }
         }
@@ -304,6 +311,19 @@ public sealed class DownloadService
     /// <summary>Pure fail-closed eligibility for fully completed, recently
     /// observed, unequivocally mapped media. Anything needing judgment is
     /// left for the existing manual preview/apply UI.</summary>
+    /// <summary>
+    /// Stores why automatic import held a job (null clears it), so the queue can show the reason instead of a bare
+    /// "Ready to import". Only these two columns change; nothing about the download or its files does.
+    /// </summary>
+    private async Task RecordHoldAsync(int jobId, string? reason, DateTimeOffset now, CancellationToken ct)
+    {
+        var text = reason is { Length: > 500 } ? reason[..500] : reason;
+        await using var db = await _db.CreateDbContextAsync(ct);
+        await db.DownloadJobs.Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
+            .SetProperty(j => j.ImportHoldReason, text)
+            .SetProperty(j => j.ImportCheckedAt, now), ct);
+    }
+
     internal static string? AutoImportReviewReason(
         DownloadJob job, MediaItem? media, DownloadClientConfig? owner,
         IReadOnlyList<ImportPlanDto> plans, DateTimeOffset now, Episode? episode)
@@ -442,17 +462,19 @@ public sealed class DownloadService
 
         var relFolder = RelativeFolder(media, job, db);
         List<string> files;
+        ContentListing? listing = null;
         try
         {
             var contentPath = await ResolveContentPathAsync(job, torrentRoot, ct);
             RequireVisibleContent(contentPath, torrentRoot);
-            files = ListFiles(contentPath, torrentRoot);
+            listing = DescribeContent(contentPath, torrentRoot);
+            files = listing.Importable;
         }
         catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or IOException)
         {
             return await FailJobOrReportAsync(db, job, "Download path mapping: " + ex.Message, dryRun, ct);
         }
-        if (files.Count == 0) return await FailJobOrReportAsync(db, job, "No media files found in the completed download (samples are excluded)", dryRun, ct);
+        if (files.Count == 0) return await FailJobOrReportAsync(db, job, listing?.Explain() ?? "No importable media files in the completed download", dryRun, ct);
 
         int considered = 0, imported = 0, failed = 0, planned = 0;
         var jobFailed = false;
@@ -872,7 +894,8 @@ public sealed class DownloadService
         var relFolder = RelativeFolder(media, job, db);
         var contentPath = await ResolveContentPathAsync(job, torrentRoot, ct);
         RequireVisibleContent(contentPath, torrentRoot);
-        var files = ListFiles(contentPath, torrentRoot);
+        var listing = DescribeContent(contentPath, torrentRoot);
+        var files = listing.Importable;
         var plans = new List<ImportPlanDto>();
         var episodes = media.MediaType == MediaType.Series
             ? await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == media.Id).ToListAsync(ct)
@@ -901,7 +924,7 @@ public sealed class DownloadService
                     "Multiple source files would resolve to the same destination; change the naming template", conflict: true)
                 : p).ToList();
         if (plans.Count == 0)
-            throw new ArgumentException("No importable media files found in the completed download (samples are excluded); nothing to preview");
+            throw new ArgumentException(listing.Explain() + ". Nothing to preview");
         return (job, plans);
     }
 
@@ -1027,21 +1050,78 @@ public sealed class DownloadService
             throw new ArgumentException($"The download folder {full} is outside the Torrent download root {Path.GetFullPath(torrentRoot)}. Set the Torrent download root in Settings (or the client's path mapping) so it contains the folder qBittorrent saves to.");
     }
 
-    public static List<string> ListFiles(string contentPath, string torrentRoot)
+    public static List<string> ListFiles(string contentPath, string torrentRoot) =>
+        DescribeContent(contentPath, torrentRoot).Importable;
+
+    /// <summary>
+    /// Lists the importable files in a download and counts everything that was left out, so an empty result can say why:
+    /// no files at all, no video files, only samples, files outside the torrent root, or a folder OneArr cannot read.
+    /// The rules are unchanged: samples and files outside the root are never imported, and links are not followed.
+    /// </summary>
+    public static ContentListing DescribeContent(string contentPath, string torrentRoot)
     {
         var full = Path.GetFullPath(contentPath);
-        if (File.Exists(full)) return SafeImporter.IsMediaFile(full) && !SampleFiles.IsSample(full) ? [full] : [];
-        if (!Directory.Exists(full)) return [];
-        // Boundary-correct containment: a file under D:\Downloads2 must not pass a D:\Downloads
-        // root. SafeImporter.CanonicalUnder appends the separator before comparing; a raw
-        // StartsWith here would accept the sibling directory.
-        return Directory.EnumerateFiles(full, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
-            .Where(f => SafeImporter.IsMediaFile(f) && !SampleFiles.IsSample(f))
-            .Where(f =>
+        var importable = new List<string>();
+        int files = 0, videos = 0, samples = 0, outside = 0;
+        var unreadable = false;
+
+        IEnumerable<string> candidates;
+        if (File.Exists(full))
+        {
+            candidates = [full];
+        }
+        else if (Directory.Exists(full))
+        {
+            // Enumeration below skips folders it cannot read without saying so. Probe the top folder so that case is reported.
+            try
             {
-                try { SafeImporter.CanonicalUnder(torrentRoot, f); return true; }
-                catch { return false; }
-            })
-            .ToList();
+                using var probe = Directory.EnumerateFileSystemEntries(full).GetEnumerator();
+                probe.MoveNext();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                unreadable = true;
+            }
+            // Boundary-correct containment is checked per file below: a file under D:\Downloads2 must not pass a D:\Downloads
+            // root. SafeImporter.CanonicalUnder appends the separator before comparing; a raw StartsWith would accept the sibling.
+            candidates = Directory.EnumerateFiles(full, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint });
+        }
+        else
+        {
+            candidates = [];
+        }
+
+        foreach (var file in candidates)
+        {
+            files++;
+            if (!SafeImporter.IsMediaFile(file)) continue;
+            videos++;
+            if (SampleFiles.IsSample(file)) { samples++; continue; }
+            try { SafeImporter.CanonicalUnder(torrentRoot, file); }
+            catch { outside++; continue; }
+            importable.Add(file);
+        }
+        return new ContentListing(full, importable, files, videos, samples, outside, unreadable);
+    }
+}
+
+/// <summary>What a download folder held, and why each left-out file was left out.</summary>
+public sealed record ContentListing(string Path, List<string> Importable, int Files, int VideoFiles, int Samples, int OutsideRoot, bool Unreadable)
+{
+    /// <summary>A plain account of an empty result: the folder checked and what was found there.</summary>
+    public string Explain()
+    {
+        var parts = new List<string>
+        {
+            $"No importable video in {Path}",
+            $"{Files} file(s) found, {VideoFiles} video file(s), {Samples} skipped as samples, {OutsideRoot} outside the Torrent download root",
+        };
+        if (Unreadable)
+            parts.Add("OneArr could not read this folder. Check that the account running OneArr can open it");
+        else if (Files == 0)
+            parts.Add("The folder is empty as OneArr sees it. Check that qBittorrent finished moving the files here");
+        else if (VideoFiles == 0)
+            parts.Add("None of the files is a video file OneArr imports");
+        return string.Join(". ", parts);
     }
 }

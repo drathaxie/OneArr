@@ -1182,7 +1182,10 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
                     <td>{Math.round(j.progress * 100)}%</td>
                     <td>{formatSpeed(j.downloadSpeedBps)}</td>
                     <td>{formatEta(j.etaSeconds)}</td>
-                    <td>{j.status === "Imported" ? "Imported" : j.importReady ? "Ready to import" : j.status === "Completed" ? "Completed" : "—"}</td>
+                    <td>
+                      {j.status === "Imported" ? "Imported" : j.importReady ? "Ready to import" : j.status === "Completed" ? "Completed" : "—"}
+                      {j.importReady && j.importHoldReason && <div className="muted" style={{ fontSize: ".85em", maxWidth: 360 }}>Held: {j.importHoldReason}</div>}
+                    </td>
                     <td>
                       <div className="row">
                         {j.importReady && <button className="small primary" onClick={() => openPreview(j.id)}>Preview import</button>}

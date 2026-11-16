@@ -141,6 +141,10 @@ public class DownloadJob
     /// <summary>True when Status == Failed because an import failed (operator-retryable). False for
     /// download-side failures, which keep polling the client so recovery is possible.</summary>
     public bool ImportFailed { get; set; }
+    /// <summary>Why automatic import last held this completed job, in plain words. Null when it was not held.</summary>
+    public string? ImportHoldReason { get; set; }
+    /// <summary>When automatic import last inspected this job.</summary>
+    public DateTimeOffset? ImportCheckedAt { get; set; }
     /// <summary>Last time the owning client (or any client, for legacy jobs) reported this job.</summary>
     public DateTimeOffset? LastSeenAt { get; set; }
     /// <summary>First time the job entered Completed. NULL for jobs completed before this was tracked.</summary>
