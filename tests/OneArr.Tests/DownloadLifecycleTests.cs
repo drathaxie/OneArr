@@ -384,7 +384,8 @@ public class DownloadLifecycleTests
         var job = await GetJobAsync(world, jobId);
         Assert.Equal(DownloadStatus.Failed, job.Status);
         Assert.True(job.ImportFailed);
-        Assert.Contains("No media files", job.Error);
+        // The failure names the cause: the folder is not visible to OneArr.
+        Assert.Contains("not visible to OneArr", job.Error);
     }
 
     [Fact]
