@@ -1,6 +1,6 @@
 {
   "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
-  "sourceMetadataHash": "690025c112977cf8",
+  "sourceMetadataHash": "5b259d0bf2b262dd",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -85,6 +85,7 @@
     "definitions/v11/bwtorrents.yml",
     "definitions/v11/byrbt.yml",
     "definitions/v11/byrutor.yml",
+    "definitions/v11/bytepeer.yml",
     "definitions/v11/c411.yml",
     "definitions/v11/cangbaoge.yml",
     "definitions/v11/capybarabr.yml",
@@ -110,6 +111,7 @@
     "definitions/v11/crnaberza2fa.yml",
     "definitions/v11/crt2fa.yml",
     "definitions/v11/cspt.yml",
+    "definitions/v11/cyanbug-api.yml",
     "definitions/v11/cyanbug.yml",
     "definitions/v11/cyclingarchiveclub.yml",
     "definitions/v11/czteam-api.yml",
@@ -194,6 +196,7 @@
     "definitions/v11/hdbao-api.yml",
     "definitions/v11/hdbao.yml",
     "definitions/v11/hdc.yml",
+    "definitions/v11/hdchina.yml",
     "definitions/v11/hdclone.yml",
     "definitions/v11/hddolby.yml",
     "definitions/v11/hdfans.yml",
@@ -227,7 +230,6 @@
     "definitions/v11/hqmusic.yml",
     "definitions/v11/hudbt.yml",
     "definitions/v11/huntorrent.yml",
-    "definitions/v11/hxpt.yml",
     "definitions/v11/ilcorsaroblu.yml",
     "definitions/v11/immortuos.yml",
     "definitions/v11/indietorrents.yml",
@@ -325,6 +327,7 @@
     "definitions/v11/newstudiol.yml",
     "definitions/v11/nicept-api.yml",
     "definitions/v11/nicept.yml",
+    "definitions/v11/nightbloom-api.yml",
     "definitions/v11/nipponsei.yml",
     "definitions/v11/nirvana.yml",
     "definitions/v11/njtupt.yml",
@@ -1307,6 +1310,14 @@
       "tv": false
     },
     {
+      "path": "definitions/v11/bytepeer.yml",
+      "name": "BytePeer",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
+    },
+    {
       "path": "definitions/v11/c411.yml",
       "name": "C411",
       "privacy": "private",
@@ -1501,6 +1512,14 @@
     {
       "path": "definitions/v11/cspt.yml",
       "name": "Caishen (财神)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/cyanbug-api.yml",
+      "name": "cyanbug (大青虫) (API)",
       "privacy": "private",
       "language": "zh-CN",
       "movies": true,
@@ -2179,6 +2198,14 @@
       "tv": true
     },
     {
+      "path": "definitions/v11/hdchina.yml",
+      "name": "HDChina",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
       "path": "definitions/v11/hdclone.yml",
       "name": "HDClone",
       "privacy": "private",
@@ -2441,14 +2468,6 @@
       "language": "hu-HU",
       "movies": true,
       "tv": true
-    },
-    {
-      "path": "definitions/v11/hxpt.yml",
-      "name": "HxPT (好学)",
-      "privacy": "private",
-      "language": "zh-CN",
-      "movies": false,
-      "tv": false
     },
     {
       "path": "definitions/v11/ilcorsaroblu.yml",
@@ -3225,6 +3244,14 @@
       "language": "zh-CN",
       "movies": false,
       "tv": false
+    },
+    {
+      "path": "definitions/v11/nightbloom-api.yml",
+      "name": "NightBloom (API)",
+      "privacy": "private",
+      "language": "en-US",
+      "movies": true,
+      "tv": true
     },
     {
       "path": "definitions/v11/nipponsei.yml",
