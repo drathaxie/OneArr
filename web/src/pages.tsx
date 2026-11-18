@@ -1071,7 +1071,9 @@ function fileNameOf(path: string): string {
 
 // Activity: Queue, History, and Problems tabs over the same download jobs. Speed and ETA are
 // only ever shown when the client reported them; a dash means unknown, never an invented value.
-// Previewing an import never writes anything; applying one requires the preview id plus an
+// Previewing an import never writes anything in the library or the torrent folder; the one
+// exception is a packed (RAR) download, which is extracted to staging outside the torrent
+// folder so the video inside can be shown. Applying one requires the preview id plus an
 // explicit confirmation, and a plan that changed since the preview is refused with a fresh one.
 export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "problems" }) {
   const { data: queue, error, reload } = useLoad<QueueData>("/api/queue");
@@ -1155,7 +1157,7 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
             ? "Automatic completed-download importing is OFF. Finished downloads require Preview import → Apply import, or opt in under Settings → Automation."
             : importSettings.dryRunImport
               ? "Automatic completed-download importing is blocked by dry-run mode. Manually preview and apply, or review Settings → Media Management → Import paths."
-              : "Automatic importing is enabled. Eligible downloads are checked on the five-minute schedule; ambiguous or conflicting files still require Preview import → Apply import."}
+              : "Automatic importing is enabled. Eligible downloads are checked on the five-minute schedule; ambiguous or conflicting files still require Preview import → Apply import. Packed (RAR) downloads are extracted automatically on the same schedule, one at a time, outside the torrent folder so seeding is not affected."}
         </p>
       )}
       <div className="row" role="tablist" aria-label="Activity sections">
@@ -1183,7 +1185,7 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
                     <td>{formatSpeed(j.downloadSpeedBps)}</td>
                     <td>{formatEta(j.etaSeconds)}</td>
                     <td>
-                      {j.status === "Imported" ? "Imported" : j.importReady ? "Ready to import" : j.status === "Completed" ? "Completed" : "—"}
+                      {j.status === "Imported" ? "Imported" : j.importReady ? (j.importHoldReason?.startsWith("Packed (RAR)") ? "Packed (RAR)" : "Ready to import") : j.status === "Completed" ? "Completed" : "—"}
                       {j.importReady && j.importHoldReason && <div className="muted" style={{ fontSize: ".85em", maxWidth: 360 }}>Held: {j.importHoldReason}</div>}
                     </td>
                     <td>
@@ -1243,7 +1245,7 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
               <h2>Import preview</h2>
               <button onClick={() => { setPreviewJobId(null); setPreview(null); }}>Close</button>
             </div>
-            <p className="muted">A preview never moves, links, copies, renames, or deletes anything. Applying it requires confirmation below, and refuses if any file changed since this preview.</p>
+            <p className="muted">A preview never moves, links, copies, renames, or deletes anything in the library or the torrent folder. A packed (RAR) download is extracted to a staging folder outside the torrent folder so the video inside can be shown; the torrent folder itself is never changed. Applying it requires confirmation below, and refuses if any file changed since this preview.</p>
             {previewBusy && <p className="muted">Planning import…</p>}
             {preview && preview.plans.length === 0 && <p className="muted">No media files found for this download.</p>}
             {preview && preview.plans.length > 0 && (

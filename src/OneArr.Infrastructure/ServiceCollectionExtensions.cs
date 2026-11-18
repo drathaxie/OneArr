@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIndexerClient, TorznabClient>();
         services.AddSingleton<IDownloadClient, QBittorrentClient>();
         services.AddSingleton<IImporter, SafeImporter>();
+        services.AddSingleton<IArchiveExtractor, SharpCompressArchiveExtractor>();
         services.AddSingleton<ILibraryFileSystem, LocalLibraryFileSystem>();
         services.AddSingleton<LibraryReconciler>();
         services.AddSingleton<ILegacyArrReader, LegacyArrReader>();

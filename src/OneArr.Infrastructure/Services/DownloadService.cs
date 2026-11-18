@@ -14,7 +14,9 @@ namespace OneArr.Infrastructure.Services;
 public sealed record ImportRunSummary(int FilesConsidered, int Imported, int Failed, int DryRun, string Message);
 
 /// <summary>One file in an import preview. PlannedAction is hardlink, copy, skip, defer, or reject.
-/// Nothing in a preview moves, links, copies, renames, or deletes anything.</summary>
+/// Nothing in a preview moves, links, copies, renames, or deletes anything in the library or the
+/// torrent folder. The one write a preview can make is extracting a packed (RAR) download into a
+/// staging folder outside the torrent folder, so the video inside can be shown.</summary>
 public sealed record ImportPlanDto(
     string SourcePath,
     string? DestinationPath,
@@ -63,14 +65,16 @@ public sealed class DownloadService
     private readonly SettingsStore _settings;
     private readonly TimeProvider _time;
     private readonly TimeSpan _quietPeriod;
+    private readonly IArchiveExtractor _archives;
 
-    public DownloadService(IDbContextFactory<OneArrDbContext> db, IDownloadClient client, IImporter importer, SettingsStore settings, TimeProvider time)
+    public DownloadService(IDbContextFactory<OneArrDbContext> db, IDownloadClient client, IImporter importer, SettingsStore settings, TimeProvider time, IArchiveExtractor? archives = null)
     {
         _db = db;
         _client = client;
         _importer = importer;
         _settings = settings;
         _time = time;
+        _archives = archives ?? new SharpCompressArchiveExtractor();
         // Preview planning must defer exactly like the real import does. In production the
         // importer uses the 30 s default; tests use a zero period for speed.
         _quietPeriod = (importer as SafeImporter)?.QuietPeriod ?? SafeImporter.DefaultQuietPeriod;
@@ -199,6 +203,10 @@ public sealed class DownloadService
     /// stored preview, fingerprint recheck and SafeImporter as manual Apply.
     /// Missing setting, dry-run setting, stale qBit observation and ambiguous
     /// media all fail closed. The torrent source is never moved or removed.
+    /// A completed download that holds only a RAR archive is extracted to
+    /// staging (outside the torrent folder, so seeding is not affected) and
+    /// imported the same way; a failed extraction leaves the job Completed
+    /// with the reason shown, never Imported.
     /// </summary>
     public async Task<ImportRunSummary> AutoImportCompletedAsync(CancellationToken ct)
     {
@@ -474,7 +482,42 @@ public sealed class DownloadService
         {
             return await FailJobOrReportAsync(db, job, "Download path mapping: " + ex.Message, dryRun, ct);
         }
-        if (files.Count == 0) return await FailJobOrReportAsync(db, job, listing?.Explain() ?? "No importable media files in the completed download", dryRun, ct);
+        if (files.Count == 0)
+        {
+            // A download that holds only an archive has no video to import until
+            // the archive is opened. A dry run only peeks inside (nothing is
+            // written); a real run extracts to staging, outside the torrent
+            // folder, then imports the video inside through the usual importer.
+            if (listing is not null && _archives.HasArchive(listing.Path))
+            {
+                try
+                {
+                    if (dryRun)
+                    {
+                        var inside = await _archives.ListMediaAsync(listing.Path, torrentRoot, ct);
+                        return inside.Count == 0
+                            ? await FailJobOrReportAsync(db, job, "Packed (RAR): the archive contains no video OneArr imports", dryRun, ct)
+                            : new ImportRunSummary(0, 0, 0, inside.Count,
+                                $"Packed (RAR): {inside.Count} video file(s) inside the archive; enable automatic import in Settings → Automation, or use Preview import to extract and import it");
+                    }
+                    files = [.. await _archives.ExtractMediaAsync(listing.Path, torrentRoot, job.Id, ct)];
+                }
+                catch (ArchiveExtractionException ex)
+                {
+                    return await FailJobOrReportAsync(db, job, ex.Message, dryRun, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    return await FailJobOrReportAsync(db, job, "Packed (RAR): extraction failed (" + ex.GetType().Name + ": " + Truncate(ex.Message, 200) + ")", dryRun, ct);
+                }
+                if (files.Count == 0)
+                    return await FailJobOrReportAsync(db, job, "Packed (RAR): the archive contains no video OneArr imports", dryRun, ct);
+            }
+            else
+            {
+                return await FailJobOrReportAsync(db, job, listing?.Explain() ?? "No importable media files in the completed download", dryRun, ct);
+            }
+        }
 
         int considered = 0, imported = 0, failed = 0, planned = 0;
         var jobFailed = false;
@@ -557,6 +600,8 @@ public sealed class DownloadService
                     tracked.Status = DownloadStatus.Imported;
                     tracked.ImportFailed = false;
                     tracked.Error = null;
+                    // The video is in the library now; the staging copy is redundant.
+                    _archives.CleanupStaging(torrentRoot, job.Id);
                 }
             }
         }
@@ -861,6 +906,8 @@ public sealed class DownloadService
                     tracked.Status = DownloadStatus.Imported;
                     tracked.ImportFailed = false;
                     tracked.Error = null;
+                    // The video is in the library now; the staging copy is redundant.
+                    _archives.CleanupStaging(torrentRoot, job.Id);
                 }
             }
         }
@@ -896,6 +943,30 @@ public sealed class DownloadService
         RequireVisibleContent(contentPath, torrentRoot);
         var listing = DescribeContent(contentPath, torrentRoot);
         var files = listing.Importable;
+        if (files.Count == 0 && _archives.HasArchive(listing.Path))
+        {
+            // A download that holds only an archive has no video to plan until
+            // the archive is opened. Extracting here is the same path the
+            // automatic import pass uses: staging outside the torrent folder,
+            // so seeding is not affected and the torrent folder is untouched.
+            // A preview still never moves, links, copies, renames, or deletes
+            // anything in the library or the torrent folder; extraction is
+            // the one write, into staging, and it is what the preview shows.
+            try
+            {
+                files = [.. await _archives.ExtractMediaAsync(listing.Path, torrentRoot, job.Id, ct)];
+            }
+            catch (ArchiveExtractionException ex)
+            {
+                throw new ArgumentException(ex.Message, ex);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new ArgumentException("Packed (RAR): extraction failed (" + ex.GetType().Name + ": " + Truncate(ex.Message, 200) + ")", ex);
+            }
+            if (files.Count == 0)
+                throw new ArgumentException("Packed (RAR): the archive contains no video OneArr imports");
+        }
         var plans = new List<ImportPlanDto>();
         var episodes = media.MediaType == MediaType.Series
             ? await db.Episodes.AsNoTracking().Where(e => e.MediaItemId == media.Id).ToListAsync(ct)

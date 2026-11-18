@@ -147,7 +147,7 @@ public sealed class TestWorld : IDisposable
 
     private readonly Microsoft.Data.Sqlite.SqliteConnection _keepAlive;
 
-    public TestWorld(SearchPolicy? policy = null)
+    public TestWorld(SearchPolicy? policy = null, IArchiveExtractor? archives = null)
     {
         (Db, _keepAlive) = TestDb.Create();
         Time = new ManualTime(new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero));
@@ -159,7 +159,7 @@ public sealed class TestWorld : IDisposable
         Settings = new SettingsStore(Db);
         var ranker = new ReleaseRanker(new ReleaseParser());
         Releases = new ReleaseService(Db, new TorznabClient(factory), ranker, new QBittorrentClient(factory), Time);
-        Downloads = new DownloadService(Db, new QBittorrentClient(factory), new SafeImporter(TimeSpan.Zero), Settings, Time);
+        Downloads = new DownloadService(Db, new QBittorrentClient(factory), new SafeImporter(TimeSpan.Zero), Settings, Time, archives);
         Library = new LibraryReconciler(Db, new LocalLibraryFileSystem(), Time);
         Search = new WantedSearchService(Db, Releases, Settings, Time, Policy, Library);
         Runner = new JobRunner(Db, Time);

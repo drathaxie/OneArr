@@ -1,5 +1,101 @@
 # PROGRESS
 
+## Automatic Packed (RAR) extraction + import (branch `auto-extract-rar-import`, 2026-11-18, NOT merged)
+
+User report: completed qBittorrent downloads that hold only a RAR archive sat "Packed (RAR)" in
+Activity and needed one manual Preview import click each ("it can only do one at a time, it also
+needs me to manually click import on each one"). Investigation found there was NO archive handling
+anywhere in the repo at main d314fd7: no extractor, no "Packed (RAR)" string, and a preview of a
+RAR-only download failed with "No importable video" — the manual path in the screenshot did not
+exist in the checked-out code. So this branch builds the extraction path, it does not just wire
+up an existing one.
+
+- **Extractor (new):** `src/OneArr.Infrastructure/Files/ArchiveExtractor.cs` — `IArchiveExtractor`
+  backed by SharpCompress 0.50.10 (pure managed C#, RAR 1.5–5.0 including multi-volume, no
+  external unrar/7z/WinRAR binary needed). First-part detection only (plain `.rar` or
+  `.part01.rar`; `.part02.rar`/`.r00` are volumes, never archives of their own). Samples inside
+  an archive are skipped like samples outside one. Entry paths inside an archive are untrusted:
+  any entry that would escape staging is refused. Extraction is idempotent (an entry already
+  extracted at the expected size is left alone), writes via a temp file + move so a partial
+  entry is never left looking complete, and refuses up front when the staging volume cannot
+  hold the videos inside.
+- **Staging / seeding:** extraction lands in `<TorrentRoot>/.onearr-extract/<jobId>/` — under the
+  torrent root (so the existing SafeImporter containment check still passes) but OUTSIDE the
+  torrent's own folder. The torrent folder and the archive files are only ever read, never
+  written, moved, or deleted. Staging is removed once the job is marked Imported.
+- **Wiring:** `DownloadService.PlanJobAsync` (manual Preview + the automatic pass share it) and
+  the bulk `ImportJobAsync` engine extract when a completed download has no importable video
+  but holds an archive, then import the extracted video through the existing SafeImporter /
+  preview-and-confirm pipeline. A dry run only peeks inside (lists the video, writes nothing).
+- **Order / sequencing:** the automatic import pass is unchanged in shape — one `foreach`, one
+  job at a time, deterministic Id order (oldest first in practice), rotating 20-job pages, max
+  5 attempts per five-minute pass, and the per-named-job JobRunner lock still serializes
+  scheduled and manual imports. A job already Imported is never re-processed (the pass only
+  queries Completed jobs).
+- **Failure handling, fail-closed:** corrupt / unreadable / incomplete (missing volume) /
+  password-protected / no-video archives throw `ArchiveExtractionException`, an
+  `ArgumentException`, so the automatic pass records it as the job's hold reason and the
+  preview endpoint returns it as a 400. The job stays Completed with a reason in Activity
+  (e.g. `Packed (RAR): show.s01e01.rar is password-protected; OneArr cannot extract it without
+  a password.`), never Imported, never silently dropped, and a failed extraction leaves no
+  staging folder behind. An extracted video that matches no episode follows the existing
+  unmatched-import handling — it is imported but the job stays unresolved, never invented.
+- **Gate:** no new toggle. Packed auto-import rides the existing automatic-import gate
+  (Settings → Automation → "Automatically import confidently matched completed downloads",
+  still off by default, and still blocked while dry-run is on). Automatic GRABBING stays OFF;
+  nothing here touches grabbing, monitoring, or torrent deletion.
+- **UI copy:** Activity's Import column shows "Packed (RAR)" when the hold reason is a packed
+  failure; the auto-import note says packed downloads are extracted automatically on the same
+  schedule, one at a time, outside the torrent folder; the preview dialog and the Settings →
+  Automation copy say the same. The manual "Preview import" button still works and reuses the
+  same extraction (idempotent), so it cannot double-process a job the automatic pass is
+  handling.
+- **Tests:** `tests/OneArr.Tests/ArchiveExtractorTests.cs` (new: first-part detection, garbage
+  archive fails with a "Packed (RAR)" reason, staging contract, cleanup removes only its own
+  folder) and six new tests in `DownloadLifecycleTests.cs` (packed job auto-imported via the
+  scheduler; two packed jobs imported sequentially in Id order with max concurrency 1; corrupt
+  archive stays held with a reason and is not imported; already-Imported packed job is not
+  re-processed; Preview shows the extracted video and applies; dry run reports the video
+  without extracting). Pipeline tests use a stub extractor (a real RAR fixture cannot be made
+  in the sandbox — no rar/7z tooling there), so extraction of a REAL archive is proven only by
+  the Windows acceptance run below.
+- **Verification run in the sandbox:** `dotnet build OneArr.slnx -c Release` — 0 errors
+  (1 pre-existing xUnit analyzer warning at DownloadLifecycleTests.cs:474, untouched here).
+  Backend tests: `dotnet test` / `dotnet vstest` could NOT run in this sandbox — the vstest
+  testhost process starts but its handshake never completes (failed to connect after 90 s and
+  after 180 s, even for one trivial test; loopback TCP itself works). The 12 new tests were
+  instead run in-process with a small reflection runner against the same test assembly
+  (`/tmp/testrunner`, not part of the repo): all 12 pass (6 extractor + 6 pipeline). The full
+  suite through the same runner: 294 passed / 68 failed on this branch vs 282 passed / 68
+  failed on clean main — the +12 is exactly the new tests, and the 68 failures are identical
+  on both trees (Windows-only tests run on Linux, API tests that need the solution root from
+  the runner's working directory), i.e. zero regressions. CI is the authoritative backend
+  run. Frontend: `npm test` — 68/68 pass (15 files, including the new Packed (RAR) Activity
+  test; two existing activity tests needed a getAllByRole fix because the new fixture job adds
+  a second "Preview import" button); `npm run build` (`tsc --noEmit && vite build`) passes.
+  NOT run: a real RAR extraction, and the Windows PC run.
+
+### Windows acceptance for this branch (run on the real PC, with the real library)
+
+Safety rules: keep automatic grabbing OFF throughout; do not delete any torrent; seeding must
+stay intact (check qBittorrent still shows the torrents seeding afterwards).
+
+1. Build/install this branch's build, confirm Settings → Automation still reads automatic
+   importing ON (as configured) and grabbing OFF.
+2. Let one five-minute scheduler pass run. Confirm the six Demon Slayer S03 Packed jobs
+   (S03E01, E02, E05, E06, E09, E10) go from "Packed (RAR)" to Imported, in order, with no
+   manual Preview click — and that each episode file lands in the library and the matching
+   episode is marked available.
+3. Confirm seeding is intact: in qBittorrent the six torrents still show seeding, and the
+   torrent folders on disk are unchanged (the `.rar` files still there, nothing added inside
+   them). The staging folder `<TorrentRoot>\.onearr-extract` should be empty/gone after import.
+4. Bad archive check: leave (or stage) one corrupt or password-protected RAR download completed.
+   Confirm it stays Completed with a "Packed (RAR): ..." reason in Activity, is NOT marked
+   Imported, and is NOT retried in a tight loop (one hold entry per pass, no repeated failures
+   flooding History).
+5. Manual path check: pick one remaining Packed job (if any) and use Preview import → Apply
+   import; confirm it imports and does not double-import a job the automatic pass already took.
+
 ## Fix match and sample filtering continuation (2026-11-04)
 
 - Integrated `fix-match-and-samples` with main at `bd45cd5`, retaining the direct movie/series manager,

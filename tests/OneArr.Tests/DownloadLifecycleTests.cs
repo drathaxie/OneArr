@@ -40,6 +40,13 @@ public class DownloadLifecycleTests
         return world;
     }
 
+    private static async Task<TestWorld> WorldAsync(IArchiveExtractor archives)
+    {
+        var world = new TestWorld(archives: archives);
+        await world.ConfigureAsync(automaticGrab: false);
+        return world;
+    }
+
     private static async Task<int> AddClientAsync(TestWorld world, string name, string host, FakeQbit fake)
     {
         world.Http.Route(host, fake.Respond);
@@ -73,6 +80,67 @@ public class DownloadLifecycleTests
 
     private static DownloadService PreviewService(TestWorld world) =>
         new(world.Db, new QBittorrentClient(new FakeFactory(world.Http)), new SafeImporter(TimeSpan.FromSeconds(30)), world.Settings, world.Time);
+
+    private static DownloadService PreviewService(TestWorld world, IArchiveExtractor archives) =>
+        new(world.Db, new QBittorrentClient(new FakeFactory(world.Http)), new SafeImporter(TimeSpan.FromSeconds(30)), world.Settings, world.Time, archives);
+
+    /// <summary>
+    /// Pretends to be the RAR extractor so the import pipeline can be tested without a real
+    /// archive file: the test writes the "video inside the archive" as a plain file and tells
+    /// the stub which torrent folder it belongs to. Extraction copies that file into the same
+    /// staging folder the real extractor uses, so the staging/seeding contract is exercised
+    /// for real. A short delay while extracting proves the pass never runs two extractions
+    /// at once (MaxConcurrency would rise above 1 if it did).
+    /// </summary>
+    private sealed class StubArchiveExtractor : IArchiveExtractor
+    {
+        private readonly Dictionary<string, string> _videoByFolder = new(StringComparer.OrdinalIgnoreCase);
+        private int _concurrent;
+
+        public List<int> ExtractCalls { get; } = new();
+        public int MaxConcurrency { get; private set; }
+
+        public void Pack(string folder, string videoFile) => _videoByFolder[Path.GetFullPath(folder)] = videoFile;
+
+        public bool HasArchive(string contentPath) =>
+            Directory.Exists(contentPath) && Directory.EnumerateFiles(contentPath, "*.rar", SearchOption.TopDirectoryOnly).Any();
+
+        public Task<IReadOnlyList<ArchiveMediaEntry>> ListMediaAsync(string contentPath, string torrentRoot, CancellationToken ct)
+        {
+            if (!_videoByFolder.TryGetValue(Path.GetFullPath(contentPath), out var video)) return Task.FromResult<IReadOnlyList<ArchiveMediaEntry>>([]);
+            var info = new FileInfo(video);
+            return Task.FromResult<IReadOnlyList<ArchiveMediaEntry>>(
+                [new ArchiveMediaEntry(Path.GetFileName(video), info.Length, null)]);
+        }
+
+        public async Task<IReadOnlyList<string>> ExtractMediaAsync(string contentPath, string torrentRoot, int jobId, CancellationToken ct)
+        {
+            var now = Interlocked.Increment(ref _concurrent);
+            MaxConcurrency = Math.Max(MaxConcurrency, now);
+            try
+            {
+                await Task.Delay(25, ct);
+                ExtractCalls.Add(jobId);
+                if (!_videoByFolder.TryGetValue(Path.GetFullPath(contentPath), out var video)) return [];
+                var staging = SharpCompressArchiveExtractor.StagingDirectory(torrentRoot, jobId);
+                Directory.CreateDirectory(staging);
+                var target = Path.Combine(staging, Path.GetFileName(video));
+                File.Copy(video, target, overwrite: true);
+                // A fixed timestamp, like the real extractor's entry time: a
+                // second extraction must produce the same fingerprint, or the
+                // apply's stale-preview check refuses it.
+                File.SetLastWriteTimeUtc(target, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                return [target];
+            }
+            finally { Interlocked.Decrement(ref _concurrent); }
+        }
+
+        public void CleanupStaging(string torrentRoot, int jobId)
+        {
+            var staging = SharpCompressArchiveExtractor.StagingDirectory(torrentRoot, jobId);
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+        }
+    }
 
     private static void AgeFile(string path) => File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
 
@@ -1084,5 +1152,171 @@ public class DownloadLifecycleTests
         using var world = new TestWorld(); // no ConfigureAsync: defaults, as a fresh install sees them
         Assert.False(await world.Settings.GetBoolAsync(SettingKeys.AutomaticGrab, false));
         Assert.True(await world.Settings.GetBoolAsync(SettingKeys.DryRunImport, true));
+    }
+
+    // --- Packed (RAR) downloads -------------------------------------------------
+    // The user's report: completed downloads that hold only a RAR archive sat
+    // "Packed (RAR)" and needed one manual Preview import click each. These
+    // tests prove the automatic import pass now extracts and imports them
+    // on its own, in sequence, and fails closed when the archive is bad.
+
+    private static (string Folder, string Rar) WritePackedFolder(TestWorld world, string folder, string rarName)
+    {
+        var dir = Path.Combine(world.Dirs.Torrents, folder);
+        Directory.CreateDirectory(dir);
+        var rar = Path.Combine(dir, rarName);
+        File.WriteAllText(rar, "not a real rar archive");
+        return (dir, rar);
+    }
+
+    [Fact]
+    public async Task AutomaticImport_PackedRarJob_IsExtractedAndImportedAutomatically()
+    {
+        var stub = new StubArchiveExtractor();
+        using var world = await WorldAsync(stub);
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var video = world.Dirs.WriteFile("packed-source/Show.S01E01.mkv", "packed-episode-bytes");
+        var (folder, rar) = WritePackedFolder(world, "Show", "show.s01e01.rar");
+        stub.Pack(folder, video);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Completed, 1, "aa01", folder);
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Series);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        var scheduler = new BackgroundScheduler(world.Runner, world.Downloads,
+            world.Settings, world.Search, NullLogger<BackgroundScheduler>.Instance);
+        await scheduler.RunPassAsync(5, default);
+
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        // Extraction runs twice for one import by design (plan, then the
+        // apply's re-plan and fingerprint recheck); the second is an
+        // idempotent skip, so only the distinct order is asserted here.
+        Assert.Equal([jobId], stub.ExtractCalls.Distinct().ToList());
+        await using var db = world.Db.CreateDbContext();
+        var record = await db.ImportRecords.SingleAsync(r => r.DownloadJobId == jobId && r.Success);
+        Assert.Equal("packed-episode-bytes", await File.ReadAllTextAsync(record.DestinationPath!));
+        // The archive is untouched and the staging copy is cleaned up once imported.
+        Assert.Equal("not a real rar archive", await File.ReadAllTextAsync(rar));
+        Assert.False(Directory.Exists(SharpCompressArchiveExtractor.StagingDirectory(world.Dirs.Torrents, jobId)));
+    }
+
+    [Fact]
+    public async Task AutomaticImport_TwoPackedJobs_AreImportedSequentiallyNotConcurrently()
+    {
+        var stub = new StubArchiveExtractor();
+        using var world = await WorldAsync(stub);
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var jobIds = new List<int>();
+        for (var i = 0; i < 2; i++)
+        {
+            var video = world.Dirs.WriteFile($"packed-source/Show.S01E0{i + 1}.mkv", $"packed-episode-{i + 1}-bytes");
+            var (folder, _) = WritePackedFolder(world, $"Packed{i + 1}", $"show.s01e0{i + 1}.rar");
+            stub.Pack(folder, video);
+            var jobId = await AddJobAsync(world, series, episodes[i], MediaType.Series, $"Show.S01E0{i + 1}.1080p.WEB",
+                DownloadStatus.Completed, 1, $"bb0{i + 1}", folder);
+            await ReadyForAutoImportAsync(world, jobId, MediaType.Series);
+            jobIds.Add(jobId);
+        }
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        await world.Downloads.SyncQueueAsync(default);
+
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+
+        Assert.Equal(2, result.Imported);
+        // Each job is extracted twice by design (plan, then the apply's
+        // re-plan); the distinct order proves they ran one at a time, oldest
+        // first, and MaxConcurrency proves never at the same time.
+        Assert.Equal(jobIds, stub.ExtractCalls.Distinct().ToList());
+        Assert.Equal(1, stub.MaxConcurrency);
+        foreach (var jobId in jobIds)
+            Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+    }
+
+    [Fact]
+    public async Task AutomaticImport_CorruptPackedJob_StaysHeldWithReasonAndIsNotImported()
+    {
+        using var world = await WorldAsync();
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var (folder, _) = WritePackedFolder(world, "Bad", "show.s01e01.rar");
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Completed, 1, "aa01", folder);
+        await ReadyForAutoImportAsync(world, jobId, MediaType.Series);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+        await world.Downloads.SyncQueueAsync(default);
+
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+
+        Assert.Equal(0, result.Imported);
+        var job = await GetJobAsync(world, jobId);
+        Assert.Equal(DownloadStatus.Completed, job.Status);
+        Assert.StartsWith("Packed (RAR)", job.ImportHoldReason);
+        Assert.Empty(Directory.GetFiles(world.Dirs.Media, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task AutomaticImport_AlreadyImportedPackedJob_IsNotReprocessed()
+    {
+        var stub = new StubArchiveExtractor();
+        using var world = await WorldAsync(stub);
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var video = world.Dirs.WriteFile("packed-source/Show.S01E01.mkv", "packed-episode-bytes");
+        var (folder, _) = WritePackedFolder(world, "Show", "show.s01e01.rar");
+        stub.Pack(folder, video);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Imported, 1, "aa01", folder);
+        await world.Settings.SetAsync(SettingKeys.AutomaticImport, "true");
+
+        var result = await world.Downloads.AutoImportCompletedAsync(default);
+
+        Assert.Equal(0, result.Imported);
+        Assert.Empty(stub.ExtractCalls);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        Assert.False(Directory.Exists(SharpCompressArchiveExtractor.StagingDirectory(world.Dirs.Torrents, jobId)));
+    }
+
+    [Fact]
+    public async Task PreviewImport_PackedJob_ShowsExtractedVideoAndApplies()
+    {
+        var stub = new StubArchiveExtractor();
+        using var world = await WorldAsync(stub);
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var video = world.Dirs.WriteFile("packed-source/Show.S01E01.mkv", "packed-episode-bytes");
+        var (folder, rar) = WritePackedFolder(world, "Show", "show.s01e01.rar");
+        stub.Pack(folder, video);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Completed, 1, "aa01", folder);
+        var service = PreviewService(world, stub);
+
+        var preview = await service.PreviewImportAsync(jobId, default);
+        var plan = Assert.Single(preview.Plans);
+        Assert.Contains(".onearr-extract", plan.SourcePath);
+        Assert.NotEqual("reject", plan.PlannedAction);
+        await service.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        Assert.Equal("packed-episode-bytes", await File.ReadAllTextAsync(plan.DestinationPath!));
+        Assert.Equal("not a real rar archive", await File.ReadAllTextAsync(rar));
+        Assert.False(Directory.Exists(SharpCompressArchiveExtractor.StagingDirectory(world.Dirs.Torrents, jobId)));
+    }
+
+    [Fact]
+    public async Task ImportCompleted_DryRun_PackedJobReportsVideoWithoutExtracting()
+    {
+        var stub = new StubArchiveExtractor();
+        using var world = await WorldAsync(stub);
+        var (series, episodes) = await world.AddSeriesAsync("Show", 2);
+        var video = world.Dirs.WriteFile("packed-source/Show.S01E01.mkv", "packed-episode-bytes");
+        var (folder, _) = WritePackedFolder(world, "Show", "show.s01e01.rar");
+        stub.Pack(folder, video);
+        var jobId = await AddJobAsync(world, series, episodes[0], MediaType.Series, "Show.S01E01.1080p.WEB",
+            DownloadStatus.Completed, 1, "aa01", folder);
+
+        var summary = await world.Downloads.ImportCompletedAsync(dryRun: true, default);
+
+        Assert.Equal(1, summary.DryRun);
+        Assert.Equal(0, summary.Imported);
+        Assert.Empty(stub.ExtractCalls);
+        Assert.Equal(DownloadStatus.Completed, (await GetJobAsync(world, jobId)).Status);
+        Assert.Empty(Directory.GetFiles(world.Dirs.Media, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(SharpCompressArchiveExtractor.StagingDirectory(world.Dirs.Torrents, jobId)));
     }
 }

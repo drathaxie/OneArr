@@ -30,6 +30,14 @@ const queue = {
       contentPath: "/data/torrents/Dune", error: "One or more files failed to import", importFailed: true, importReady: false,
       lastSeenAt: null, completedAt: null, createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z",
     },
+    {
+      id: 4, mediaItemId: 13, episodeId: 6, mediaType: "Series", releaseTitle: "Show S01E03",
+      hash: "dd04", category: "onearr-tv", downloadClientId: 1, clientName: "qbit", status: "Completed",
+      progress: 1, clientState: "stalledUP", downloadSpeedBps: 0, etaSeconds: -1,
+      contentPath: "/data/torrents/ShowE03", error: null, importFailed: false, importReady: true,
+      importHoldReason: "Packed (RAR): show.s01e03.rar is password-protected; OneArr cannot extract it without a password.",
+      lastSeenAt: null, completedAt: null, createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z",
+    },
   ],
   clients: [{ id: 1, name: "qbit", enabled: true, lastSeenAt: null, lastError: null }],
 };
@@ -94,13 +102,13 @@ describe("activity", () => {
     // The completed job reports no speed/ETA: dashes, not invented numbers.
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getByText("Failed (import failed)")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Preview import" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Preview import" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Retry import" })).toBeTruthy();
   });
 
   it("opens the preview dialog and applies only with an explicit confirmation", async () => {
     render(<Activity />);
-    fireEvent.click(await screen.findByRole("button", { name: "Preview import" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Preview import" }))[0]);
     await screen.findByRole("dialog", { name: "Import preview" });
     expect(screen.getByText("Show - S01E01.mkv")).toBeTruthy();
     expect(screen.getByText(/hardlink/)).toBeTruthy();
@@ -108,6 +116,13 @@ describe("activity", () => {
     await waitFor(() => {
       expect(calls.some((c) => c.method === "POST" && c.path === "/api/queue/1/import-apply" && (c.body as { confirmed?: boolean }).confirmed === true)).toBe(true);
     });
+  });
+
+  it("shows Packed (RAR) for a held packed download, with the reason", async () => {
+    render(<Activity />);
+    await screen.findByText("Show S01E03");
+    expect(screen.getByText("Packed (RAR)")).toBeTruthy();
+    expect(screen.getByText(/Held: Packed \(RAR\): show\.s01e03\.rar is password-protected/)).toBeTruthy();
   });
 
   it("lists history and problems with safe actions", async () => {

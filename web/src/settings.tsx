@@ -1016,6 +1016,9 @@ function AutomaticImportForm({ data, onSaved }: { data: SettingsData; onSaved: (
       <p className="muted">Separate from automatic grabbing. Every five minutes, OneArr reviews completed qBittorrent jobs.
         Only recently verified downloads with unambiguous movie or episode matches can be imported.
         Files are hardlinked where possible or copied and verified; the torrent source is never moved or deleted.
+        Packed (RAR) downloads are extracted automatically as part of this, one at a time, to a staging folder
+        outside the torrent folder so seeding is not affected; a corrupt, incomplete, or password-protected
+        archive stays held with the reason shown instead of being imported.
         Conflicts, existing movies, multi-episode files, uncertain matches and incomplete torrents still require manual review.</p>
       <p className={dryRun ? "error" : "muted"}>
         {dryRun
