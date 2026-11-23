@@ -1,6 +1,6 @@
 {
   "source": "Prowlarr/Indexers + Prowlarr/Prowlarr",
-  "sourceMetadataHash": "5b259d0bf2b262dd",
+  "sourceMetadataHash": "16088265af8a8604",
   "definitionPaths": [
     "definitions/v11/0dayfiles-api.yml",
     "definitions/v11/0daykiev.yml",
@@ -410,6 +410,7 @@
     "definitions/v11/racing4everyone-api.yml",
     "definitions/v11/racing4us.yml",
     "definitions/v11/racingforme.yml",
+    "definitions/v11/railgunpt-api.yml",
     "definitions/v11/railgunpt.yml",
     "definitions/v11/rainbowtracker.yml",
     "definitions/v11/rastastugan-api.yml",
@@ -524,6 +525,7 @@
     "definitions/v11/totheglory.yml",
     "definitions/v11/totheglory2fa.yml",
     "definitions/v11/tr4ker.yml",
+    "definitions/v11/trackerformers.yml",
     "definitions/v11/trackermk.yml",
     "definitions/v11/trackerzero.yml",
     "definitions/v11/traht.yml",
@@ -3910,6 +3912,14 @@
       "tv": true
     },
     {
+      "path": "definitions/v11/railgunpt-api.yml",
+      "name": "RailgunPT (API)",
+      "privacy": "private",
+      "language": "zh-CN",
+      "movies": true,
+      "tv": true
+    },
+    {
       "path": "definitions/v11/railgunpt.yml",
       "name": "RailgunPT",
       "privacy": "private",
@@ -4818,6 +4828,14 @@
       "name": "TR4KER",
       "privacy": "semi-private",
       "language": "fr-FR",
+      "movies": true,
+      "tv": true
+    },
+    {
+      "path": "definitions/v11/trackerformers.yml",
+      "name": "Trackerformers",
+      "privacy": "private",
+      "language": "de-DE",
       "movies": true,
       "tv": true
     },
