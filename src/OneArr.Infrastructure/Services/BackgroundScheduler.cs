@@ -16,15 +16,17 @@ public sealed class BackgroundScheduler : BackgroundService
     private readonly DownloadService _downloads;
     private readonly SettingsStore _settings;
     private readonly WantedSearchService _search;
+    private readonly MediaService? _media;
     private readonly ILogger<BackgroundScheduler> _log;
 
-    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log)
+    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null)
     {
         _runner = runner;
         _downloads = downloads;
         _settings = settings;
         _search = search;
         _log = log;
+        _media = media;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -58,6 +60,11 @@ public sealed class BackgroundScheduler : BackgroundService
     public async Task RunPassAsync(int tick, CancellationToken ct)
     {
         await _runner.TryRunAsync("queue-sync", async t => $"Updated {await _downloads.SyncQueueAsync(t)} job(s)", ct);
+
+        // Series episode lists are refreshed from TMDb in small batches, so new episodes appear without a manual refresh.
+        // Five series every five minutes keeps each burst of TMDb calls small and covers about 700 series every 12 hours.
+        if (tick % 5 == 2 && _media is not null)
+            await _runner.TryRunAsync("metadata-refresh", t => _media.RefreshDueSeriesAsync(5, TimeSpan.FromHours(12), t), ct);
 
         // Wanted search runs every 15 minutes, and only when automatic grabbing is switched on.
         if (tick % 15 == 0 && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))

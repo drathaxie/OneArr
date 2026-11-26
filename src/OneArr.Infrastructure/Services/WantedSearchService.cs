@@ -21,6 +21,14 @@ public sealed record SearchPolicy
     public TimeSpan AfterGrabInterval { get; init; } = TimeSpan.FromHours(24);
     /// <summary>Wait before reconsidering an item whose previous download is missing from qBittorrent.</summary>
     public TimeSpan MissingDownloadInterval { get; init; } = TimeSpan.FromHours(1);
+    /// <summary>
+    /// Episodes whose air date is within this many days are "recently aired": searched before the backlog, and retried on
+    /// <see cref="RecentRetryInterval"/> instead of <see cref="NoReleaseInterval"/>. TMDb gives an air date but no air time,
+    /// so an evening episode counts as aired hours before its release exists.
+    /// </summary>
+    public int RecentAirDays { get; init; } = 2;
+    /// <summary>Retry spacing for a recently aired episode that has no acceptable release yet.</summary>
+    public TimeSpan RecentRetryInterval { get; init; } = TimeSpan.FromHours(1);
 }
 
 public sealed record WantedSearchSummary(bool Enabled, int Considered, int Searched, int Grabbed, int Skipped, string Message)
@@ -90,7 +98,11 @@ public sealed class WantedSearchService
             searched++;
             var outcome = await SearchAndGrabAsync(c, ct);
             if (outcome.Outcome == SearchOutcome.Grabbed) grabbed++;
-            await RecordAsync(c, outcome.Outcome, outcome.Message, _time.GetUtcNow(), ct, outcome.NextDelay);
+            // A just-aired episode usually has no release for a few hours. Look again soon rather than in six hours.
+            var delay = outcome.Outcome == SearchOutcome.NoAcceptableRelease && IsRecentlyAired(c, today)
+                ? TimeSpan.FromTicks(Math.Min(outcome.NextDelay.Ticks, _policy.RecentRetryInterval.Ticks))
+                : outcome.NextDelay;
+            await RecordAsync(c, outcome.Outcome, outcome.Message, _time.GetUtcNow(), ct, delay);
         }
 
         var message = $"Considered {candidates.Count}, searched {searched}, grabbed {grabbed}, skipped {skipped}";
@@ -142,7 +154,10 @@ public sealed class WantedSearchService
         return delay > _policy.ErrorMaxDelay ? _policy.ErrorMaxDelay : delay;
     }
 
-    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, bool HasMissingDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt);
+    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, bool HasMissingDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt, DateOnly? AirDate, bool NeverSearched);
+
+    private bool IsRecentlyAired(Candidate c, DateOnly today) =>
+        c.AirDate is DateOnly aired && aired >= today.AddDays(-_policy.RecentAirDays);
 
     private async Task<List<Candidate>> DueCandidatesAsync(DateOnly today, DateTimeOffset now, CancellationToken ct)
     {
@@ -155,7 +170,7 @@ public sealed class WantedSearchService
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
                               where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today
-                              select new { EpisodeId = e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber }).ToListAsync(ct);
+                              select new { EpisodeId = e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate }).ToListAsync(ct);
 
         var states = await db.SearchAttempts.AsNoTracking().ToDictionaryAsync(s => s.ItemKey, ct);
         var active = (await db.DownloadJobs.AsNoTracking()
@@ -172,17 +187,23 @@ public sealed class WantedSearchService
         {
             var key = $"movie:{m.Id}";
             if (!IsDue(states, key, now)) continue;
-            list.Add(new Candidate(m.Id, null, key, active.Contains(((int?)m.Id, (int?)null)), missing.Contains(((int?)m.Id, (int?)null)), FailuresOf(states, key), m.Title, NextOf(states, key, now)));
+            list.Add(new Candidate(m.Id, null, key, active.Contains(((int?)m.Id, (int?)null)), missing.Contains(((int?)m.Id, (int?)null)), FailuresOf(states, key), m.Title, NextOf(states, key, now), null, !states.ContainsKey(key)));
         }
         foreach (var e in episodes)
         {
             var key = $"episode:{e.EpisodeId}";
             if (!IsDue(states, key, now)) continue;
-            list.Add(new Candidate(e.MediaItemId, e.EpisodeId, key, active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), missing.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), FailuresOf(states, key), $"{e.Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", NextOf(states, key, now)));
+            list.Add(new Candidate(e.MediaItemId, e.EpisodeId, key, active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), missing.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), FailuresOf(states, key), $"{e.Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", NextOf(states, key, now), e.AirDate, !states.ContainsKey(key)));
         }
 
-        // Never-searched items first, then the ones that have waited longest.
-        return list.OrderBy(c => c.NextAttemptAt).ThenBy(c => c.Title, StringComparer.OrdinalIgnoreCase).ToList();
+        // Recently aired episodes first, then items never searched, then the backlog by how long it has waited.
+        // Ordering only by due time put a just-aired episode behind every overdue backlog item, so with more than
+        // MaxSearchesPerRun overdue items a new episode could wait hours.
+        return list
+            .OrderBy(c => IsRecentlyAired(c, today) ? 0 : c.NeverSearched ? 1 : 2)
+            .ThenBy(c => c.NextAttemptAt)
+            .ThenBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static bool IsDue(Dictionary<string, SearchAttempt> states, string key, DateTimeOffset now) =>

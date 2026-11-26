@@ -30,6 +30,8 @@ public class MediaItem
     public string? LegacySource { get; set; }
     /// <summary>Set when a complete library scan has checked this item. Null for items that existed before reconciliation.</summary>
     public DateTimeOffset? LibraryReviewedUtc { get; set; }
+    /// <summary>When the title and episode list were last fetched from TMDb. Null means never since this field existed.</summary>
+    public DateTimeOffset? MetadataRefreshedUtc { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<Season> Seasons { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();

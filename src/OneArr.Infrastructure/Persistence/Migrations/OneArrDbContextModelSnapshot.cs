@@ -574,6 +574,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("MetadataRefreshedUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
 
