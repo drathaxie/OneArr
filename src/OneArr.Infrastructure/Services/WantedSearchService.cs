@@ -162,6 +162,7 @@ public sealed class WantedSearchService
     private async Task<List<Candidate>> DueCandidatesAsync(DateOnly today, DateTimeOffset now, CancellationToken ct)
     {
         await using var db = await _db.CreateDbContextAsync(ct);
+        var tomorrow = today.AddDays(1);
 
         var movies = await db.MediaItems.AsNoTracking()
             .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
@@ -169,8 +170,11 @@ public sealed class WantedSearchService
             .ToListAsync(ct);
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today
-                              select new { EpisodeId = e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate }).ToListAsync(ct);
+                              where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
+                              select new { EpisodeId = e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
+        // An exact air time decides "aired" when known (an evening episode is not searched that morning); otherwise the date does.
+        // Tomorrow's date is loaded because a show airing in Asia or Australia is already out the previous day in UTC.
+        episodes = episodes.Where(e => Episode.HasAired(e.AirDate, e.AirDateUtc, now)).ToList();
 
         var states = await db.SearchAttempts.AsNoTracking().ToDictionaryAsync(s => s.ItemKey, ct);
         var active = (await db.DownloadJobs.AsNoTracking()

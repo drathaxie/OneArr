@@ -16,7 +16,7 @@ Windows PC with the real library. Local logs on that PC have not been reviewed f
 | Specials (season 0), unmonitored by default | Done; unverified against a live show |
 | Manual "Refresh metadata" | Done |
 | Scheduled refresh of series episode lists | **This branch** (every 5 min, 5 series, 12 h cycle) |
-| Air *times* | Missing: TMDb gives a date only, so "aired" is approximate |
+| Air *times* | **This branch**: exact times from TVmaze (matched by TVDB/IMDb id, used only when within a day of TMDb's date); falls back to the date |
 | Movie digital/physical release dates | Missing |
 
 ### Library
@@ -75,16 +75,15 @@ Three causes in the code; this branch fixes the first two and softens the third.
 2. **New episodes waited behind the backlog.** The search queue was ordered by due time and each run searches 10
    items, so any overdue backlog item went first. Fixed: recently aired, then never searched, then backlog.
 3. **"Aired" is a date, not a time.** An evening episode counted as aired that morning (UTC), was searched before
-   any release existed, and then waited 6 hours. Softened: hourly retries for 2 days after the air date. The real fix
-   is air times (see below).
+   any release existed, and then waited 6 hours. Fixed: exact air times from TVmaze (South Park: 22:00 New York, which is
+   03:00 UTC the next day), plus hourly retries for 2 days after airing, plus RSS sync.
 
 ## Next, in proposed order
 
 1. ~~RSS sync~~: on this branch. Turn it on per indexer in Settings → Indexers → Edit → "RSS sync".
 2. **Log viewer and diagnostics export.** Show recent warnings and errors in the app, plus a "download diagnostics"
    button, so problems on the PC can be read without sharing folders.
-3. **Air times.** Get exact air timestamps (for example from TVmaze, which publishes them) so "aired" means aired.
-   Needs a decision: TVmaze is a second metadata source.
+3. ~~Air times~~: on this branch (TVmaze). Filled in by the next metadata refresh of each series (within 12 hours).
 4. **Ignore list for unmatched extras**, and a simple specials monitor toggle per season.
 5. **Quality profiles with source tiers and size limits**, then upgrades that replace a file safely (recycle bin).
 6. **Subtitles and extras on import.**

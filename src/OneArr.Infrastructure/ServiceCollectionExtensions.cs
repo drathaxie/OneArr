@@ -36,6 +36,10 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient(NativeTrackerClient.ClientName, c => c.Timeout = TimeSpan.FromSeconds(25))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false });
         services.AddHttpClient(OutboundHttp.LegacyClient, c => c.Timeout = TimeSpan.FromSeconds(20));
+        // TVmaze's show lookup answers with a redirect whose Location holds the show id; it is read, not followed.
+        services.AddHttpClient(TvmazeAirTimeProvider.ClientName, c => c.Timeout = TimeSpan.FromSeconds(15))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddSingleton<IAirTimeProvider, TvmazeAirTimeProvider>();
 
         services.AddSingleton<IReleaseParser, ReleaseParser>();
         services.AddSingleton<IReleaseRanker, ReleaseRanker>();

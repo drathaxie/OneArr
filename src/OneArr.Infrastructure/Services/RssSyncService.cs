@@ -149,18 +149,19 @@ public sealed class RssSyncService
 
     private async Task<Wanted> WantedAsync(OneArrDbContext db, CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
+        var now = _time.GetUtcNow();
+        var tomorrow = DateOnly.FromDateTime(now.UtcDateTime).AddDays(1);
         var busy = (await db.DownloadJobs.AsNoTracking().Where(j => Blocking.Contains(j.Status))
             .Select(j => new ValueTuple<int?, int?>(j.MediaItemId, j.EpisodeId)).ToListAsync(ct)).ToHashSet();
 
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today
-                              select new { e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber }).ToListAsync(ct);
+                              where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
+                              select new { e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
         var byEpisode = new Dictionary<(string, int, int), (int, int?)>();
         foreach (var e in episodes)
         {
-            if (busy.Contains(((int?)e.MediaItemId, (int?)e.Id))) continue;
+            if (busy.Contains(((int?)e.MediaItemId, (int?)e.Id)) || !Episode.HasAired(e.AirDate, e.AirDateUtc, now)) continue;
             byEpisode.TryAdd((ReleaseParser.NormalizeTitle(e.Title), e.SeasonNumber, e.EpisodeNumber), (e.MediaItemId, e.Id));
         }
 

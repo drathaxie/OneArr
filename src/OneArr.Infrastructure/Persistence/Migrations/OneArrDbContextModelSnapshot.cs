@@ -195,6 +195,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("AirDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("AirDateUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("EpisodeNumber")
                         .HasColumnType("INTEGER");
 
@@ -609,6 +612,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TvmazeId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("Year")
                         .HasColumnType("INTEGER");

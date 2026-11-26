@@ -20,6 +20,20 @@ public interface IMetadataProvider
     Task<IReadOnlyList<SeasonInfo>> GetSeasonsAsync(string providerId, CancellationToken ct);
 }
 
+/// <summary>An episode's exact first-air moment, for deciding when it has really aired.</summary>
+public sealed record EpisodeAirTime(int Season, int Episode, DateTimeOffset AirsUtc);
+
+/// <summary>
+/// Exact air times. TMDb gives an air date only, so an evening episode looks aired from midnight UTC. This source is
+/// looked up by the TVDB or IMDb id TMDb reports, never by title.
+/// </summary>
+public interface IAirTimeProvider
+{
+    /// <summary>The provider's show id, or null when it does not know the show.</summary>
+    Task<int?> FindShowAsync(int? tvdbId, string? imdbId, CancellationToken ct);
+    Task<IReadOnlyList<EpisodeAirTime>> GetAirTimesAsync(int showId, CancellationToken ct);
+}
+
 public interface IIndexerClient
 {
     Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct);

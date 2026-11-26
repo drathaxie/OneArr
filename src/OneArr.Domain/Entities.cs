@@ -32,6 +32,8 @@ public class MediaItem
     public DateTimeOffset? LibraryReviewedUtc { get; set; }
     /// <summary>When the title and episode list were last fetched from TMDb. Null means never since this field existed.</summary>
     public DateTimeOffset? MetadataRefreshedUtc { get; set; }
+    /// <summary>TVmaze show id, found from the TVDB/IMDb id TMDb reports. Used only for exact air times.</summary>
+    public int? TvmazeId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<Season> Seasons { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();
@@ -56,8 +58,17 @@ public class Episode
     public string ProviderId { get; set; } = "";
     public string Title { get; set; } = "";
     public DateOnly? AirDate { get; set; }
+    /// <summary>Exact first-air moment from TVmaze, when it agrees with <see cref="AirDate"/>. Null means only the date is known.</summary>
+    public DateTimeOffset? AirDateUtc { get; set; }
     public bool Monitored { get; set; } = true;
     public bool HasFile { get; set; }
+
+    /// <summary>
+    /// Whether the episode has aired. With an exact air time that moment must have passed; with a date only, the date must be
+    /// today or earlier (UTC), as before.
+    /// </summary>
+    public static bool HasAired(DateOnly? airDate, DateTimeOffset? airDateUtc, DateTimeOffset now) =>
+        airDateUtc is DateTimeOffset exact ? exact <= now : airDate is DateOnly d && d <= DateOnly.FromDateTime(now.UtcDateTime);
 }
 
 public class QualityProfile
