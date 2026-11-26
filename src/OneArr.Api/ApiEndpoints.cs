@@ -25,7 +25,7 @@ public static class ApiEndpoints
     // ApiKey/Password are null-or-empty on PUT to mean "keep the stored secret"; a non-empty value replaces it.
     // Priority: LOWER values are searched first; ties break by Id. Default 0 preserves Id order.
     public sealed record IndexerBody(string Name, string BaseUrl, string? ApiKey, bool Enabled, bool MoviesEnabled = true, bool TvEnabled = true, int Priority = 0,
-        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null);
+        string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null, bool? RssSync = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null);
@@ -396,7 +396,7 @@ public static class ApiEndpoints
             var secret = body.Protocol == "rss" ? PublicRssClient.ProtocolMarker :
                 body.TrackerId is not null ? CreateNativeSecret(body.TrackerId, body.TrackerSettings, secrets, null, body.BaseUrl)
                 : body.ApiKey ?? "";
-            var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = secret, Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority };
+            var row = new IndexerConfig { Name = body.Name.Trim(), BaseUrl = body.BaseUrl.Trim(), ApiKey = secret, Enabled = body.Enabled, MoviesEnabled = body.MoviesEnabled, TvEnabled = body.TvEnabled, Priority = body.Priority, RssSync = body.RssSync ?? false };
             c.Indexers.Add(row);
             await c.SaveChangesAsync(ct);
             return Results.Created($"/api/indexers/{row.Id}", IndexerDto(row, null));
@@ -439,6 +439,8 @@ public static class ApiEndpoints
             row.MoviesEnabled = body.MoviesEnabled;
             row.TvEnabled = body.TvEnabled;
             row.Priority = body.Priority;
+            // Omitted means unchanged, so older clients and the quick enable toggle never switch RSS sync off.
+            if (body.RssSync is bool rss) row.RssSync = rss;
             await c.SaveChangesAsync(ct);
             var h = await c.IndexerHealth.AsNoTracking().FirstOrDefaultAsync(x => x.IndexerId == id, ct);
             return Results.Ok(IndexerDto(row, h));
@@ -1019,6 +1021,17 @@ public static class ApiEndpoints
                 return message;
             }, ct);
             return ran ? Results.Ok(new { message }) : Results.Conflict(new { error = "A wanted search is already running" });
+        });
+
+        api.MapPost("/automation/rss-sync", async (RssSyncService rss, JobRunner runner, CancellationToken ct) =>
+        {
+            string? message = null;
+            var ran = await runner.TryRunAsync("rss-sync", async t =>
+            {
+                message = (await rss.RunOnceAsync(t)).ToString();
+                return message;
+            }, ct);
+            return ran ? Results.Ok(new { message }) : Results.Conflict(new { error = "An RSS sync is already running" });
         });
 
         api.MapGet("/automation/search-attempts", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
@@ -1654,7 +1667,8 @@ public static class ApiEndpoints
         protocol = TrackerSecretBox.IsNative(i.ApiKey) ? "TorrentLeech" :
             PublicRssClient.IsPublicRss(i.ApiKey) ? "RSS" :
             Uri.TryCreate(i.BaseUrl, UriKind.Absolute, out var nyaaUrl) && TorznabClient.IsDirectNyaa(nyaaUrl) ? "Nyaa RSS" : "Torznab",
-        i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority,
+        i.Enabled, i.MoviesEnabled, i.TvEnabled, i.Priority, i.RssSync,
+        rssSupported = !TrackerSecretBox.IsNative(i.ApiKey),
         hasKey = i.ApiKey.Length > 0 && !PublicRssClient.IsPublicRss(i.ApiKey),
         healthStatus = !i.Enabled ? "Disabled" : h is null ? "Not tested" : h.LastStatus ?? "Not tested",
         lastTestedAt = h?.LastTestedAt,

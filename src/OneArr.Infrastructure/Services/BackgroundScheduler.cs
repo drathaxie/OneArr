@@ -17,9 +17,10 @@ public sealed class BackgroundScheduler : BackgroundService
     private readonly SettingsStore _settings;
     private readonly WantedSearchService _search;
     private readonly MediaService? _media;
+    private readonly RssSyncService? _rss;
     private readonly ILogger<BackgroundScheduler> _log;
 
-    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null)
+    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null, RssSyncService? rss = null)
     {
         _runner = runner;
         _downloads = downloads;
@@ -27,6 +28,7 @@ public sealed class BackgroundScheduler : BackgroundService
         _search = search;
         _log = log;
         _media = media;
+        _rss = rss;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -69,6 +71,10 @@ public sealed class BackgroundScheduler : BackgroundService
         // Wanted search runs every 15 minutes, and only when automatic grabbing is switched on.
         if (tick % 15 == 0 && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))
             await _runner.TryRunAsync("wanted-search", async t => (await _search.RunOnceAsync(t)).ToString(), ct);
+
+        // RSS sync reads the newest releases of opted-in indexers every 15 minutes, offset from the wanted search.
+        if (tick % 15 == 7 && _rss is not null && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))
+            await _runner.TryRunAsync("rss-sync", async t => (await _rss.RunOnceAsync(t)).ToString(), ct);
 
         if (tick % 5 == 0)
         {

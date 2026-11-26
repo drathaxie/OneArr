@@ -85,6 +85,8 @@ public class IndexerConfig
     public bool TvEnabled { get; set; } = true;
     /// <summary>Search order: LOWER values are tried first; ties break by Id. Default 0 preserves Id order.</summary>
     public int Priority { get; set; } = 0;
+    /// <summary>Opt-in: poll this indexer's recent-releases feed and grab wanted items from it. Default off.</summary>
+    public bool RssSync { get; set; }
 }
 
 /// <summary>Diagnostic status from the last connection test of one indexer. Written only by

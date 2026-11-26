@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<JobRunner>();
         services.AddSingleton(new SearchPolicy());
         services.AddSingleton<WantedSearchService>();
+        services.AddSingleton<RssSyncService>();
         services.AddHostedService<BackgroundScheduler>();
         return services;
     }

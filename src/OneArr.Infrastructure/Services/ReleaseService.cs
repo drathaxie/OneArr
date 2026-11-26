@@ -83,6 +83,20 @@ public sealed class ReleaseService
         return new ReleaseSearchResult(decisions, errors, outcomes);
     }
 
+    /// <summary>Rank releases found elsewhere (RSS sync) against one wanted movie or episode, best first,
+    /// with the same rules as a search.</summary>
+    public async Task<IReadOnlyList<ReleaseDecision>> EvaluateAsync(int mediaItemId, int? episodeId, IEnumerable<ReleaseCandidate> candidates, CancellationToken ct)
+    {
+        var (target, _, _) = await BuildTargetAsync(mediaItemId, episodeId, ct);
+        return candidates
+            .DistinctBy(c => (c.Title.ToLowerInvariant(), c.Link))
+            .Select(c => _ranker.Evaluate(c, target))
+            .OrderByDescending(d => d.Accepted)
+            .ThenByDescending(d => d.Score)
+            .ThenByDescending(d => d.Candidate.Seeders)
+            .ToList();
+    }
+
     public async Task<DownloadJob> GrabAsync(GrabRequest request, CancellationToken ct)
     {
         if (!UrlGuard.IsAllowedDownloadLink(request.Link)) throw new ArgumentException("Link must be a magnet or http(s) URL");

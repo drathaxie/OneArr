@@ -94,6 +94,43 @@ public sealed class TorznabClient : IIndexerClient
         return Parse(body, indexer.Name);
     }
 
+    /// <summary>
+    /// Newest releases for RSS sync. Torznab: a query-less search in the TV and/or movie categories (Jackett and Prowlarr
+    /// answer it with their latest releases). Nyaa: the unfiltered feed. Generic RSS: the feed itself. Native trackers have
+    /// no recent feed here, so they return null and stay search-only.
+    /// </summary>
+    public async Task<IReadOnlyList<ReleaseCandidate>?> RecentAsync(IndexerConfig indexer, CancellationToken ct)
+    {
+        var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
+        if (TrackerSecretBox.IsNative(indexer.ApiKey)) return null;
+        if (IsDirectNyaa(baseUri))
+        {
+            var nyaa = _factory.CreateClient(OutboundHttp.TorznabClient);
+            nyaa.BaseAddress = new Uri("https://nyaa.si/");
+            using var feed = await OutboundHttp.SendWithRetryAsync(nyaa, () => new HttpRequestMessage(HttpMethod.Get, NyaaSearchPath(baseUri, "")), ct);
+            if (!feed.IsSuccessStatusCode)
+                throw new ExternalServiceException($"Nyaa RSS returned HTTP {(int)feed.StatusCode}");
+            return ParseNyaaRss(await feed.Content.ReadAsStringAsync(ct), indexer.Name);
+        }
+        if (PublicRssClient.IsPublicRss(indexer.ApiKey))
+            return await _rss.FetchAsync(indexer.BaseUrl, indexer.Name, indexer.TvEnabled ? MediaType.Series : MediaType.Movie, ct);
+
+        var categories = new List<string>();
+        if (indexer.TvEnabled) categories.Add("5000");
+        if (indexer.MoviesEnabled) categories.Add("2000");
+        if (categories.Count == 0) return [];
+        var relative = "api?t=search&cat=" + Uri.EscapeDataString(string.Join(",", categories)) + "&apikey=" + Uri.EscapeDataString(indexer.ApiKey);
+        var client = _factory.CreateClient(OutboundHttp.TorznabClient);
+        client.BaseAddress = new Uri(baseUri, "/");
+        using var response = await OutboundHttp.SendWithRetryAsync(client, () => new HttpRequestMessage(HttpMethod.Get, relative), ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            throw new ExternalServiceException($"Indexer '{indexer.Name}' is rate limiting; try again later");
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalServiceException($"Indexer '{indexer.Name}' returned HTTP {(int)response.StatusCode}");
+        return Parse(body, indexer.Name);
+    }
+
     private async Task<IReadOnlyList<ReleaseCandidate>> SearchNyaaAsync(string name, Uri configured, ReleaseSearch search, CancellationToken ct)
     {
         var client = _factory.CreateClient(OutboundHttp.TorznabClient);

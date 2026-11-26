@@ -36,7 +36,7 @@ Windows PC with the real library. Local logs on that PC have not been reviewed f
 |---|---|
 | Wanted search (scheduled, rate-limited, backoff) | Done |
 | New episodes searched before the backlog; hourly retries for 2 days after airing | **This branch** |
-| RSS sync (grab from indexers' recent feeds) | Missing: the main reason Sonarr picks up new episodes within minutes |
+| RSS sync (grab from indexers' recent feeds) | **This branch**: opt-in per indexer (off by default), every 15 min, single episodes and movies only |
 | Indexers: Torznab, Nyaa, generic RSS | Done |
 | TorrentLeech native | Partial |
 | Quality profiles | Partial: resolution only; no source tiers, size limits, custom formats |
@@ -80,8 +80,7 @@ Three causes in the code; this branch fixes the first two and softens the third.
 
 ## Next, in proposed order
 
-1. **RSS sync.** Poll each indexer's recent-releases feed every 15 minutes and grab releases that match wanted items.
-   This is how Sonarr gets new episodes within minutes, and it costs far fewer indexer queries than per-item searches.
+1. ~~RSS sync~~: on this branch. Turn it on per indexer in Settings → Indexers → Edit → "RSS sync".
 2. **Log viewer and diagnostics export.** Show recent warnings and errors in the app, plus a "download diagnostics"
    button, so problems on the PC can be read without sharing folders.
 3. **Air times.** Get exact air timestamps (for example from TVmaze, which publishes them) so "aired" means aired.
@@ -91,5 +90,5 @@ Three causes in the code; this branch fixes the first two and softens the third.
 6. **Subtitles and extras on import.**
 7. **Calendar and notifications.**
 
-Decisions needed from you: whether to add TVmaze as a second metadata source for air times; whether RSS sync should
-start on all indexers or only the ones you mark for it.
+Decided 2026-11-26: use the best source for each job rather than TMDb for everything (TVmaze for air times); RSS sync
+runs only on indexers you mark for it.

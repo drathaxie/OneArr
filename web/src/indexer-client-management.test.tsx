@@ -169,6 +169,20 @@ describe("Indexer management", () => {
     expect(put.body!.apiKey).toBe("");
   });
 
+  it("RSS sync is off by default and is saved when turned on for one indexer", async () => {
+    routes["PUT /api/indexers/7"] = () => ({ status: 200, body: {} });
+    await renderSettings();
+    await openSection("Indexers", "Indexers (Torznab / RSS)");
+    await screen.findByText("Zulu");
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const toggle = within(screen.getByRole("dialog")).getByLabelText("RSS sync") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/api/indexers/7")).toBe(true));
+    expect(calls.find((c) => c.method === "PUT" && c.path === "/api/indexers/7")!.body!.rssSync).toBe(true);
+  });
+
   it("edits and tests encrypted private tracker credentials without revealing stored secrets", async () => {
     routes["GET /api/indexers"] = () => ({ body: [{
       id: 42, name: "TorrentLeech", baseUrl: "https://www.torrentleech.org/",

@@ -23,6 +23,10 @@ public interface IMetadataProvider
 public interface IIndexerClient
 {
     Task<IReadOnlyList<ReleaseCandidate>> SearchAsync(IndexerConfig indexer, ReleaseSearch search, CancellationToken ct);
+
+    /// <summary>The indexer's newest releases, without a query (RSS sync). Null when this kind of indexer has no recent feed.</summary>
+    Task<IReadOnlyList<ReleaseCandidate>?> RecentAsync(IndexerConfig indexer, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ReleaseCandidate>?>(null);
 }
 
 public interface IDownloadClient

@@ -351,6 +351,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<int>("Priority")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("RssSync")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("TvEnabled")
                         .HasColumnType("INTEGER");
 
