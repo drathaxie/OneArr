@@ -17,7 +17,7 @@ public static class ApiEndpoints
 {
     public sealed record SetupRequest(string Password);
     public sealed record AddMediaBody(string Type, string ProviderId, int QualityProfileId, string? RootFolder, bool Monitored, List<int>? Seasons, bool? AllSeasons);
-    public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder);
+    public sealed record PatchMediaBody(bool? Monitored, int? QualityProfileId, string? RootFolder, bool? IsAnime = null);
     public sealed record RematchBody(string? ProviderId);
     public sealed record DismissProblemBody(string? Key);
     public sealed record SearchBody(int MediaItemId, int? EpisodeId, bool SeasonPackOnly = false);
@@ -251,7 +251,7 @@ public static class ApiEndpoints
         });
 
         api.MapPatch("/media/{id:int}", async (int id, PatchMediaBody body, MediaService media, CancellationToken ct) =>
-            await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct) ? Results.NoContent() : Results.NotFound());
+            await media.UpdateAsync(id, body.Monitored, body.QualityProfileId, body.RootFolder, ct, body.IsAnime) ? Results.NoContent() : Results.NotFound());
 
         api.MapPatch("/media/{id:int}/seasons/{season:int}", async (int id, int season, PatchMediaBody body, MediaService media, CancellationToken ct) =>
             body.Monitored is bool m && await media.UpdateSeasonMonitoredAsync(id, season, m, ct) ? Results.NoContent() : Results.NotFound());
@@ -286,7 +286,7 @@ public static class ApiEndpoints
                 item.Id, item.ProviderId, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
                 item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
                 availability = seriesAvailability,
-                item.TheatricalReleaseDate, item.DigitalReleaseDate, item.PhysicalReleaseDate,
+                item.TheatricalReleaseDate, item.DigitalReleaseDate, item.PhysicalReleaseDate, item.IsAnime,
                 releasedForSearch = item.MediaType != MediaType.Movie || MediaItem.MovieAvailable(item.TheatricalReleaseDate, item.DigitalReleaseDate, item.PhysicalReleaseDate, today),
                 alternateTitles = item.AlternateTitleList(),
                 availableEpisodes = item.MediaType == MediaType.Series ? availableEpisodes : (int?)null,

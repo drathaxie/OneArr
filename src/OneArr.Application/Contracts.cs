@@ -85,7 +85,7 @@ public sealed record SeasonInfo(int SeasonNumber, IReadOnlyList<EpisodeInfo> Epi
 
 public sealed record EpisodeInfo(int EpisodeNumber, string ProviderId, string Title, DateOnly? AirDate);
 
-public sealed record ReleaseSearch(MediaType Type, string Title, int? Year, int? Season, int? Episode, string Category);
+public sealed record ReleaseSearch(MediaType Type, string Title, int? Year, int? Season, int? Episode, string Category, int? AbsoluteEpisode = null);
 
 public sealed record ReleaseCandidate(
     string Title,
@@ -107,7 +107,8 @@ public sealed record ParsedRelease(
     bool IsSeasonPack,
     bool IsCam,
     bool IsUnsafeName,
-    int Revision = 1);
+    int Revision = 1,
+    IReadOnlyList<int>? AbsoluteEpisodes = null);
 
 public sealed record ReleaseTarget(
     MediaType Type,
@@ -122,7 +123,8 @@ public sealed record ReleaseTarget(
     IReadOnlyList<string>? Aliases = null,
     IReadOnlySet<string>? Blocklisted = null,
     string? CurrentSource = null,
-    int CurrentRevision = 1);
+    int CurrentRevision = 1,
+    int? AbsoluteEpisode = null);
 
 public sealed record ReleaseDecision(
     ReleaseCandidate Candidate,

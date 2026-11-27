@@ -493,6 +493,8 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
           <p className="muted">Root folder: <code>{data.rootFolder}</code>{data.legacyPath ? <> · imported from <code>{data.legacyPath}</code> ({data.legacySource})</> : ""}</p>
           <div className="row">
             <button className="small" onClick={() => patch({ monitored: !data.monitored })}>{data.monitored ? "Unmonitor" : "Monitor"}</button>
+            {isSeries && <label className="inline" title="Anime releases are numbered across the whole series (Show - 1120) instead of S01E01. Searches and matching then use that number.">
+              <input type="checkbox" checked={!!data.isAnime} onChange={(e) => patch({ isAnime: e.target.checked })} /> anime numbering</label>}
             <button className="small" onClick={() => setShowFixMatch(!showFixMatch)}>Fix match</button>
             <button className="small" onClick={refreshMetadata} title="Update the title and episode list from TMDb. Files and links are kept.">Refresh metadata</button>
             <button className="small" onClick={() => setShowReleases(!showReleases)}>{showReleases ? "Hide releases" : "Search releases"}</button>

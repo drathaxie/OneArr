@@ -231,6 +231,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("AbsoluteNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateOnly?>("AirDate")
                         .HasColumnType("TEXT");
 
@@ -645,6 +648,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("HasFile")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsAnime")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("LegacyPath")

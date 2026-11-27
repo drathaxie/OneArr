@@ -230,10 +230,12 @@ public sealed class ReleaseService
             item.AlternateTitleList(),
             blocklisted,
             current?.Source,
-            current?.Revision ?? 1);
+            current?.Revision ?? 1,
+            item.IsAnime ? episode?.AbsoluteNumber : null);
 
         var category = item.MediaType == MediaType.Movie ? "2000" : "5000";
-        var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category);
+        var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category,
+            item.IsAnime ? episode?.AbsoluteNumber : null);
         // All indexers, in search order (lower Priority first, ties by Id): SearchAsync reports
         // skipped ones instead of silently omitting them, so the UI can show what was not tried.
         var indexers = await db.Indexers.AsNoTracking().OrderBy(i => i.Priority).ThenBy(i => i.Id).ToListAsync(ct);

@@ -36,6 +36,8 @@ public class MediaItem
     public DateTimeOffset? MetadataRefreshedUtc { get; set; }
     /// <summary>TVmaze show id, found from the TVDB/IMDb id TMDb reports. Used only for exact air times.</summary>
     public int? TvmazeId { get; set; }
+    /// <summary>Series only: anime releases are numbered absolutely ("Show - 1120") and are searched that way too. Default off.</summary>
+    public bool IsAnime { get; set; }
     /// <summary>Other names the title is released under (from TMDb), one per line. Used only to match release names.</summary>
     public string? AlternateTitles { get; set; }
     /// <summary>Movies: earliest theatrical, digital and physical release dates across countries (TMDb).</summary>
@@ -86,6 +88,8 @@ public class Episode
     public string ProviderId { get; set; } = "";
     public string Title { get; set; } = "";
     public DateOnly? AirDate { get; set; }
+    /// <summary>Position counting every regular (non-special) episode in order: S01E01 is 1. Used to match anime releases.</summary>
+    public int? AbsoluteNumber { get; set; }
     /// <summary>Exact first-air moment from TVmaze, when it agrees with <see cref="AirDate"/>. Null means only the date is known.</summary>
     public DateTimeOffset? AirDateUtc { get; set; }
     public bool Monitored { get; set; } = true;

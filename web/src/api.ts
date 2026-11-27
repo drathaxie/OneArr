@@ -132,6 +132,7 @@ export interface MediaDetail {
   physicalReleaseDate?: string | null;
   /** False for a movie still only in cinemas: automatic search waits for its digital or disc release. */
   releasedForSearch?: boolean;
+  isAnime?: boolean;
   alternateTitles?: string[];
   availableEpisodes?: number | null;
   applicableEpisodes?: number | null;

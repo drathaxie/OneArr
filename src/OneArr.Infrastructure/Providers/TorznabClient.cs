@@ -69,15 +69,18 @@ public sealed class TorznabClient : IIndexerClient
             return await SearchNyaaAsync(indexer.Name, baseUri, search, ct);
         if (PublicRssClient.IsPublicRss(indexer.ApiKey))
             return await _rss.SearchAsync(indexer, search, ct);
+        // Anime is released as "Show - 05": a free-text search for the title and absolute number finds it, where a tvsearch
+        // for season 1 episode 5 does not.
+        var anime = search.Type == MediaType.Series && search.AbsoluteEpisode is int;
         var parameters = new List<string>
         {
-            "t=" + (search.Type == MediaType.Series && search.Season is not null ? "tvsearch" : "search"),
-            "q=" + Uri.EscapeDataString(search.Title),
+            "t=" + (search.Type == MediaType.Series && search.Season is not null && !anime ? "tvsearch" : "search"),
+            "q=" + Uri.EscapeDataString(anime ? $"{search.Title} {search.AbsoluteEpisode:00}" : search.Title),
             "cat=" + Uri.EscapeDataString(search.Category),
             "apikey=" + Uri.EscapeDataString(indexer.ApiKey)
         };
-        if (search.Type == MediaType.Series && search.Season is int s) parameters.Add("season=" + s);
-        if (search.Type == MediaType.Series && search.Episode is int ep) parameters.Add("ep=" + ep);
+        if (!anime && search.Type == MediaType.Series && search.Season is int s) parameters.Add("season=" + s);
+        if (!anime && search.Type == MediaType.Series && search.Episode is int ep) parameters.Add("ep=" + ep);
 
         var relative = "api?" + string.Join("&", parameters);
         var client = _factory.CreateClient(OutboundHttp.TorznabClient);
@@ -135,7 +138,7 @@ public sealed class TorznabClient : IIndexerClient
     {
         var client = _factory.CreateClient(OutboundHttp.TorznabClient);
         client.BaseAddress = new Uri("https://nyaa.si/");
-        var url = NyaaSearchPath(configured, search.Title);
+        var url = NyaaSearchPath(configured, search.AbsoluteEpisode is int abs ? $"{search.Title} {abs:00}" : search.Title);
         using var response = await OutboundHttp.SendWithRetryAsync(client,
             () => new HttpRequestMessage(HttpMethod.Get, url), ct);
         if (!response.IsSuccessStatusCode)

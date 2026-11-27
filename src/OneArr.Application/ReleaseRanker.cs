@@ -40,12 +40,20 @@ public sealed class ReleaseRanker : IReleaseRanker
         }
         else
         {
-            if (parsed.Season is null)
+            if (parsed.Season is null && parsed.AbsoluteEpisodes is { Count: > 0 } absolute)
+            {
+                // Anime numbering: the release names the episode's position in the whole series.
+                if (target.AbsoluteEpisode is not int wantedAbs)
+                    reasons.Add("Release uses absolute (anime) numbering; mark the series as anime to match it");
+                else if (!absolute.Contains(wantedAbs))
+                    reasons.Add($"Wrong episode: release has absolute {string.Join(", ", absolute)}, wanted {wantedAbs}");
+            }
+            else if (parsed.Season is null)
                 reasons.Add("No season information in release");
             else if (target.Season is int ws && parsed.Season != ws)
                 reasons.Add($"Wrong season: S{parsed.Season:00}, wanted S{ws:00}");
 
-            if (target.Episode is int we && !parsed.IsSeasonPack && !parsed.Episodes.Contains(we))
+            if (target.Episode is int we && !parsed.IsSeasonPack && parsed.AbsoluteEpisodes is not { Count: > 0 } && !parsed.Episodes.Contains(we))
                 reasons.Add($"Wrong episode: release has {FormatEpisodes(parsed.Episodes)}, wanted E{we:00}");
         }
 

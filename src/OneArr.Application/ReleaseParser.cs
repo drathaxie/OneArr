@@ -19,6 +19,9 @@ public sealed partial class ReleaseParser : IReleaseParser
     private static readonly Regex YearRx = new(@"(?<![0-9])(19|20)\d{2}(?![0-9])", RegexOptions.Compiled);
     private static readonly Regex ResolutionRx = new(@"(?i)(?<![a-z0-9])(2160p|1080p|720p|480p|4k)(?![a-z0-9])", RegexOptions.Compiled);
     private static readonly Regex SourceRx = new(@"(?i)(?<![a-z0-9])(BluRay|BDRip|BRRip|Remux|WEB-?DL|WEB-?Rip|HDTV|HDCAM|CAMRip|CAM|TELESYNC|TS|TC)(?![a-z0-9])", RegexOptions.Compiled);
+    // "[Group] Show Title - 05 (1080p)", "[Group] Show - 1120v2 [1080p][HEVC]", "Show - 05-06 [720p]". Only used when the name has
+    // no SxxEyy or 1x01: an absolute number is then the episode's position across the whole series.
+    private static readonly Regex AnimeRx = new(@"^(?:\[(?<group>[^\]]+)\]\s*)?(?<title>.+?)\s+-\s+(?<e>\d{1,4})(?:-(?<e2>\d{1,4}))?(?:v\d)?(?=\s|\.|\[|\(|$)", RegexOptions.Compiled);
     private static readonly Regex ProperRx = new(@"(?i)(?<![a-z0-9])(PROPER|REPACK|RERIP)(?![a-z0-9])", RegexOptions.Compiled);
     private static readonly Regex VersionRx = new(@"(?i)(?<![a-z0-9])(?:\d{1,4})?v(?<v>[2-9])(?![a-z0-9])", RegexOptions.Compiled);
     private static readonly Regex UnsafeRx = new(@"(\.\.|[\\/:*?""<>|])|\.(exe|scr|bat|cmd|msi|lnk)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -99,6 +102,24 @@ public sealed partial class ReleaseParser : IReleaseParser
         var rawTitle = name[..titleEnd].Replace('.', ' ').Replace('_', ' ').Trim(' ', '-', '(', ')', '[', ']');
         var title = MultiSpace().Replace(rawTitle, " ").Trim();
 
+        IReadOnlyList<int>? absolute = null;
+        if (season is null)
+        {
+            var anime = AnimeRx.Match(name);
+            if (anime.Success)
+            {
+                var first = int.Parse(anime.Groups["e"].Value);
+                var last = anime.Groups["e2"].Success ? int.Parse(anime.Groups["e2"].Value) : first;
+                // A lone number in a year's range is read as a year ("Movie - 2019"), not as episode 2019.
+                var looksLikeYear = first is >= 1900 and <= 2099 && !anime.Groups["e2"].Success;
+                if (!looksLikeYear && first > 0 && last >= first && last - first <= 30)
+                {
+                    absolute = Enumerable.Range(first, last - first + 1).ToList();
+                    title = MultiSpace().Replace(anime.Groups["title"].Value.Replace('_', ' '), " ").Trim();
+                }
+            }
+        }
+
         return new ParsedRelease(
             title,
             year,
@@ -109,7 +130,8 @@ public sealed partial class ReleaseParser : IReleaseParser
             seasonPack,
             source == SourceCam,
             unsafeName,
-            RevisionOf(name));
+            RevisionOf(name),
+            absolute);
     }
 
     /// <summary>

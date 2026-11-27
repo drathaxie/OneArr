@@ -161,6 +161,7 @@ public sealed class MediaService
             }
             await write.SaveChangesAsync(ct);
         }
+        await NumberAbsoluteAsync(write, item.Id, ct);
         await tx.CommitAsync(ct);
         return new AddMediaResult(item, Created: true);
     }
@@ -204,7 +205,20 @@ public sealed class MediaService
     }
 
     /// <summary>Changing RootFolder only affects where future downloads go. It never moves or re-checks files already on disk.</summary>
-    public async Task<bool> UpdateAsync(int id, bool? monitored, int? qualityProfileId, string? rootFolder, CancellationToken ct)
+    /// <summary>
+    /// Absolute numbers: every regular episode in season, episode order, starting at 1. Specials get none. Derived from the
+    /// episode list, so it is recomputed whenever the list changes.
+    /// </summary>
+    private static async Task NumberAbsoluteAsync(OneArrDbContext db, int mediaItemId, CancellationToken ct)
+    {
+        var episodes = await db.Episodes.Where(e => e.MediaItemId == mediaItemId).ToListAsync(ct);
+        var n = 0;
+        foreach (var e in episodes.OrderBy(e => e.SeasonNumber).ThenBy(e => e.EpisodeNumber))
+            e.AbsoluteNumber = e.SeasonNumber == 0 ? null : ++n;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> UpdateAsync(int id, bool? monitored, int? qualityProfileId, string? rootFolder, CancellationToken ct, bool? isAnime = null)
     {
         await using var db = await _db.CreateDbContextAsync(ct);
         var item = await db.MediaItems.FindAsync([id], ct);
@@ -219,6 +233,12 @@ public sealed class MediaService
         {
             ValidateRoot(rootFolder);
             item.RootFolder = rootFolder.Trim();
+        }
+        if (isAnime is bool anime)
+        {
+            if (item.MediaType != MediaType.Series) throw new ArgumentException("Only a series can be marked as anime");
+            item.IsAnime = anime;
+            await NumberAbsoluteAsync(db, item.Id, ct);
         }
         await db.SaveChangesAsync(ct);
         return true;
@@ -401,6 +421,7 @@ public sealed class MediaService
         }
 
         await write.SaveChangesAsync(ct);
+        await NumberAbsoluteAsync(write, item.Id, ct);
         await tx.CommitAsync(ct);
         return new RematchResult(item.Id, details.Title, details.Year, sync.EpisodesUpdated, sync.EpisodesAdded, sync.EpisodesUnmonitored, links.Count);
     }
@@ -516,6 +537,7 @@ public sealed class MediaService
         if (sync.AddedEpisodesMayBeOnDisk) item.LibraryReviewedUtc = null;
 
         await write.SaveChangesAsync(ct);
+        await NumberAbsoluteAsync(write, item.Id, ct);
         await tx.CommitAsync(ct);
         return new RefreshResult(item.Id, details.Title, details.Year, sync.SeasonsAdded, sync.EpisodesAdded, sync.EpisodesUpdated,
             sync.EpisodesUnmonitored, NeedsLibraryScan: sync.AddedEpisodesMayBeOnDisk);

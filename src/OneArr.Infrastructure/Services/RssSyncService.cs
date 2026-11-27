@@ -128,6 +128,8 @@ public sealed class RssSyncService
         var parsed = _parser.Parse(release.Title);
         if (parsed.IsUnsafeName) return null;
         var title = ReleaseParser.NormalizeTitle(parsed.Title);
+        if (parsed.Season is null && parsed.AbsoluteEpisodes is { Count: 1 } abs)
+            return indexer.TvEnabled && wanted.Absolute.TryGetValue((title, abs[0]), out var anime) ? anime : null;
         if (parsed.Season is int season)
         {
             // Single episodes only. Season packs and multi-episode releases are left to the wanted search, which can
@@ -142,9 +144,10 @@ public sealed class RssSyncService
 
     private sealed record Wanted(
         Dictionary<(string Title, int Season, int Episode), (int MediaItemId, int? EpisodeId)> Episodes,
-        Dictionary<string, List<(int Id, int? Year)>> Movies)
+        Dictionary<string, List<(int Id, int? Year)>> Movies,
+        Dictionary<(string Title, int Absolute), (int MediaItemId, int? EpisodeId)> Absolute)
     {
-        public int Count => Episodes.Count + Movies.Sum(m => m.Value.Count);
+        public int Count => Episodes.Count + Movies.Sum(m => m.Value.Count) + Absolute.Count;
     }
 
     private async Task<Wanted> WantedAsync(OneArrDbContext db, CancellationToken ct)
@@ -162,13 +165,17 @@ public sealed class RssSyncService
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
                               where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && (!e.HasFile || upgradeProfiles.Contains(m.QualityProfileId)) && e.AirDate != null && e.AirDate <= tomorrow
-                              select new { e.Id, MediaItemId = m.Id, m.Title, m.AlternateTitles, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
+                              select new { e.Id, MediaItemId = m.Id, m.Title, m.AlternateTitles, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc, m.IsAnime, e.AbsoluteNumber }).ToListAsync(ct);
         var byEpisode = new Dictionary<(string, int, int), (int, int?)>();
+        var byAbsolute = new Dictionary<(string, int), (int, int?)>();
         foreach (var e in episodes)
         {
             if (busy.Contains(((int?)e.MediaItemId, (int?)e.Id)) || !Episode.HasAired(e.AirDate, e.AirDateUtc, now)) continue;
             foreach (var name in Names(e.Title, e.AlternateTitles))
+            {
                 byEpisode.TryAdd((name, e.SeasonNumber, e.EpisodeNumber), (e.MediaItemId, e.Id));
+                if (e.IsAnime && e.AbsoluteNumber is int abs) byAbsolute.TryAdd((name, abs), (e.MediaItemId, e.Id));
+            }
         }
 
         var movies = await db.MediaItems.AsNoTracking()
@@ -186,7 +193,7 @@ public sealed class RssSyncService
                 list.Add((m.Id, m.Year));
             }
         }
-        return new Wanted(byEpisode, byMovie);
+        return new Wanted(byEpisode, byMovie, byAbsolute);
     }
 
     /// <summary>Normalized keys for the title and each alternate title.</summary>
