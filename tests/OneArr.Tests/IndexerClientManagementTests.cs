@@ -416,6 +416,27 @@ public class IndexerClientManagementTests
     }
 
     [Fact]
+    public async Task Diagnostics_download_leaves_out_keys_passwords_and_indexer_urls()
+    {
+        var routing = new RoutingHandler();
+        using var factory = new StubApiFactory(routing);
+        var client = await SignedInAsync(factory);
+        await client.PostAsJsonAsync("/api/indexers", new { name = "idx", baseUrl = "http://indexer.test/path?apikey=urlsecret77", apiKey = "keysecret55", enabled = true });
+        await client.PostAsJsonAsync("/api/download-clients", new { name = "qb", baseUrl = "http://qbit.test", username = "admin", password = "pwsecret33", enabled = true });
+        await client.PutAsJsonAsync("/api/settings", new { tmdbApiKey = "tmdbsecret11" });
+
+        var response = await client.GetAsync("/api/diagnostics");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("attachment", response.Content.Headers.ContentDisposition?.ToString() ?? response.Headers.ToString());
+        foreach (var secret in new[] { "urlsecret77", "keysecret55", "pwsecret33", "tmdbsecret11" })
+            Assert.DoesNotContain(secret, body);
+        Assert.Contains("indexer.test", body);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/logs?level=Warning")).StatusCode);
+    }
+
+    [Fact]
     public async Task Indexer_and_client_validation_and_not_found()
     {
         var routing = new RoutingHandler();

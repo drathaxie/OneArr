@@ -53,6 +53,8 @@ internal sealed class ApiProcess : IApiController
         psi.Environment["ONEARR_PORT"] = _port.ToString();
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         psi.Environment["Logging__LogLevel__Default"] = "Warning";
+        // Lets Settings > Logs & diagnostics show the tail of these files.
+        psi.Environment["ONEARR_LOG_DIR"] = Log.Folder;
 
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         p.OutputDataReceived += (_, e) => { if (e.Data is not null) Log.Write("api.log", e.Data); };

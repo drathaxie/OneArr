@@ -4,12 +4,13 @@ import { TrackerCatalog } from "./tracker-catalog";
 import { ErrorLine, useLoad } from "./common";
 import { LibraryPanel, RootFolderTool } from "./library";
 import { Migration } from "./migration";
+import { LogsSection } from "./logs";
 
 // Settings, reorganised Sonarr/Radarr-style: an overview, a persistent sidebar with expandable
 // categories, and one section at a time. Only features OneArr actually supports are shown — nothing
 // here is decorative, and nothing implies an unimplemented Sonarr feature.
 
-type SectionId = "overview" | "media" | "profiles" | "indexers" | "clients" | "metadata" | "automation" | "migration" | "general" | "ui";
+type SectionId = "overview" | "media" | "profiles" | "indexers" | "clients" | "metadata" | "automation" | "migration" | "general" | "logs" | "ui";
 
 interface Subsection { id: string; label: string; advanced?: boolean }
 interface Category { id: SectionId; label: string; description: string; subsections: Subsection[] }
@@ -49,6 +50,12 @@ const CATEGORIES: Category[] = [
   { id: "general", label: "General", description: "Application and server settings, including security.", subsections: [
     { id: "general-app", label: "Application" },
     { id: "general-security", label: "Security" },
+  ] },
+  { id: "logs", label: "Logs & Diagnostics", description: "Recent warnings and errors, failed scheduled tasks, the tray's log files, and a diagnostics file to share.", subsections: [
+    { id: "logs-download", label: "Diagnostics download" },
+    { id: "logs-recent", label: "Recent log messages" },
+    { id: "logs-tasks", label: "Failed scheduled tasks" },
+    { id: "logs-files", label: "Log files" },
   ] },
   { id: "ui", label: "UI", description: "Display preferences: the default Posters/List view and the advanced-settings toggle.", subsections: [
     { id: "ui-view", label: "Default view" },
@@ -115,6 +122,7 @@ export function Settings({ initialSection }: { initialSection?: string }) {
         {section === "automation" && <AutomationSection />}
         {section === "migration" && <div id="migration-import"><Migration /></div>}
         {section === "general" && <GeneralSection />}
+        {section === "logs" && <LogsSection />}
         {section === "ui" && <UiSection advanced={advanced} onAdvanced={setAdvancedMode} />}
       </div>
     </div>

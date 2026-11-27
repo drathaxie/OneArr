@@ -59,6 +59,7 @@ public static class ApiEndpoints
     {
         var api = app.MapGroup("/api");
         var tokens = app.Services.GetRequiredService<TokenService>();
+        DiagnosticsEndpoints.Map(api);
 
         api.MapGet("/auth/status", async (IDbContextFactory<OneArrDbContext> db, HttpContext ctx) =>
         {

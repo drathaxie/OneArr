@@ -35,6 +35,12 @@ var tmdbBase = Environment.GetEnvironmentVariable("ONEARR_TMDB_BASE_URL");
 builder.Services.AddOneArrInfrastructure(dbPath, Environment.GetEnvironmentVariable("ONEARR_TMDB_API_KEY"),
     string.IsNullOrWhiteSpace(tmdbBase) ? null : UrlGuard.RequireServiceUrl(tmdbBase));
 builder.Services.AddSingleton(TimeProvider.System);
+// Recent log messages for Settings > Logs & diagnostics: OneArr's own at Information and up, everything else at Warning and up.
+var logBuffer = new OneArr.Infrastructure.Diagnostics.LogBuffer();
+builder.Services.AddSingleton(logBuffer);
+builder.Logging.AddProvider(new OneArr.Infrastructure.Diagnostics.BufferLoggerProvider(logBuffer));
+builder.Logging.AddFilter<OneArr.Infrastructure.Diagnostics.BufferLoggerProvider>("OneArr", LogLevel.Information);
+builder.Logging.AddFilter<OneArr.Infrastructure.Diagnostics.BufferLoggerProvider>("", LogLevel.Warning);
 builder.Services.AddSingleton(tokens);
 builder.Services.AddSingleton(new TrackerSecretBox(persistentSecretKey));
 builder.Services.AddProblemDetails();
