@@ -34,6 +34,32 @@ public class MediaItem
     public DateTimeOffset? MetadataRefreshedUtc { get; set; }
     /// <summary>TVmaze show id, found from the TVDB/IMDb id TMDb reports. Used only for exact air times.</summary>
     public int? TvmazeId { get; set; }
+    /// <summary>Other names the title is released under (from TMDb), one per line. Used only to match release names.</summary>
+    public string? AlternateTitles { get; set; }
+    /// <summary>Movies: earliest theatrical, digital and physical release dates across countries (TMDb).</summary>
+    public DateOnly? TheatricalReleaseDate { get; set; }
+    public DateOnly? DigitalReleaseDate { get; set; }
+    public DateOnly? PhysicalReleaseDate { get; set; }
+
+    public IReadOnlyList<string> AlternateTitleList() =>
+        string.IsNullOrWhiteSpace(AlternateTitles) ? [] : AlternateTitles.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>Days after a cinema release before a movie with no digital or physical date is treated as available.</summary>
+    public const int TheatricalWindowDays = 90;
+
+    /// <summary>
+    /// Whether a movie can be expected to have proper (non-cam) releases: a digital or physical release has happened, or the
+    /// cinema release was over <see cref="TheatricalWindowDays"/> days ago. With no dates at all it is treated as available,
+    /// as before. Manual searches are never blocked by this.
+    /// </summary>
+    public static bool MovieAvailable(DateOnly? theatrical, DateOnly? digital, DateOnly? physical, DateOnly today)
+    {
+        if (digital is not null || physical is not null)
+            return (digital is DateOnly d && d <= today) || (physical is DateOnly p && p <= today);
+        if (theatrical is DateOnly t) return t.AddDays(TheatricalWindowDays) <= today;
+        return true;
+    }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<Season> Seasons { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();

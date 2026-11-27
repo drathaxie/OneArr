@@ -157,27 +157,37 @@ public sealed class RssSyncService
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
                               where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
-                              select new { e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
+                              select new { e.Id, MediaItemId = m.Id, m.Title, m.AlternateTitles, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
         var byEpisode = new Dictionary<(string, int, int), (int, int?)>();
         foreach (var e in episodes)
         {
             if (busy.Contains(((int?)e.MediaItemId, (int?)e.Id)) || !Episode.HasAired(e.AirDate, e.AirDateUtc, now)) continue;
-            byEpisode.TryAdd((ReleaseParser.NormalizeTitle(e.Title), e.SeasonNumber, e.EpisodeNumber), (e.MediaItemId, e.Id));
+            foreach (var name in Names(e.Title, e.AlternateTitles))
+                byEpisode.TryAdd((name, e.SeasonNumber, e.EpisodeNumber), (e.MediaItemId, e.Id));
         }
 
         var movies = await db.MediaItems.AsNoTracking()
             .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
-            .Select(m => new { m.Id, m.Title, m.Year }).ToListAsync(ct);
+            .Select(m => new { m.Id, m.Title, m.Year, m.AlternateTitles, m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate }).ToListAsync(ct);
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
         var byMovie = new Dictionary<string, List<(int, int?)>>();
         foreach (var m in movies)
         {
             if (busy.Contains(((int?)m.Id, (int?)null))) continue;
-            var key = ReleaseParser.NormalizeTitle(m.Title);
-            if (!byMovie.TryGetValue(key, out var list)) byMovie[key] = list = [];
-            list.Add((m.Id, m.Year));
+            if (!MediaItem.MovieAvailable(m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate, today)) continue;
+            foreach (var key in Names(m.Title, m.AlternateTitles))
+            {
+                if (!byMovie.TryGetValue(key, out var list)) byMovie[key] = list = [];
+                list.Add((m.Id, m.Year));
+            }
         }
         return new Wanted(byEpisode, byMovie);
     }
+
+    /// <summary>Normalized keys for the title and each alternate title.</summary>
+    private static IEnumerable<string> Names(string title, string? alternates) =>
+        new MediaItem { Title = title, AlternateTitles = alternates }.AlternateTitleList().Prepend(title)
+            .Select(ReleaseParser.NormalizeTitle).Where(k => k.Length > 1).Distinct();
 
     /// <summary>Records the grab in the same search history the wanted search uses, so the item shows why it was grabbed
     /// and is not searched again while it downloads.</summary>

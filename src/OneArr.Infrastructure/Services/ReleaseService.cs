@@ -206,7 +206,8 @@ public sealed class ReleaseService
             profile,
             null,
             hasFile,
-            new HashSet<string>(knownHashes.Select(h => h.ToLowerInvariant())));
+            new HashSet<string>(knownHashes.Select(h => h.ToLowerInvariant())),
+            item.AlternateTitleList());
 
         var category = item.MediaType == MediaType.Movie ? "2000" : "5000";
         var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category);

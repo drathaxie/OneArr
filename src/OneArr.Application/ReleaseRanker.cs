@@ -24,7 +24,9 @@ public sealed class ReleaseRanker : IReleaseRanker
         if (candidate.Size <= 0) reasons.Add("Release reports no size");
         if (candidate.Link.Length == 0) reasons.Add("Release has no magnet or torrent link");
 
-        if (ReleaseParser.NormalizeTitle(parsed.Title) != ReleaseParser.NormalizeTitle(target.Title))
+        var releaseTitle = ReleaseParser.NormalizeTitle(parsed.Title);
+        if (releaseTitle != ReleaseParser.NormalizeTitle(target.Title)
+            && !(target.Aliases ?? []).Any(a => ReleaseParser.NormalizeTitle(a) is { Length: > 1 } alias && alias == releaseTitle))
             reasons.Add($"Title mismatch: release is '{parsed.Title}', wanted '{target.Title}'");
 
         if (target.Type == MediaType.Movie)

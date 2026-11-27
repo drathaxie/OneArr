@@ -279,6 +279,9 @@ public static class ApiEndpoints
                 item.Id, item.ProviderId, item.MediaType, item.Title, item.Year, item.Overview, item.PosterPath, item.Monitored,
                 item.QualityProfileId, item.RootFolder, item.HasFile, item.LegacyPath, item.LegacySource,
                 availability = seriesAvailability,
+                item.TheatricalReleaseDate, item.DigitalReleaseDate, item.PhysicalReleaseDate,
+                releasedForSearch = item.MediaType != MediaType.Movie || MediaItem.MovieAvailable(item.TheatricalReleaseDate, item.DigitalReleaseDate, item.PhysicalReleaseDate, today),
+                alternateTitles = item.AlternateTitleList(),
                 availableEpisodes = item.MediaType == MediaType.Series ? availableEpisodes : (int?)null,
                 applicableEpisodes = item.MediaType == MediaType.Series ? applicableEpisodes.Count : (int?)null,
                 seasons = item.Seasons.OrderBy(s => s.SeasonNumber).Select(s => new

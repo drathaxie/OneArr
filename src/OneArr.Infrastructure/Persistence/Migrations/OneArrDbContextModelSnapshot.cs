@@ -560,7 +560,13 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AlternateTitles")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("DigitalReleaseDate")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("HasFile")
@@ -589,6 +595,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Overview")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateOnly?>("PhysicalReleaseDate")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PosterPath")
                         .HasColumnType("TEXT");
 
@@ -607,6 +616,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("RootFolder")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("TheatricalReleaseDate")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")

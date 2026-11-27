@@ -45,7 +45,9 @@ public sealed class TmdbMetadataProvider : IMetadataProvider
     public async Task<MetadataDetails> GetDetailsAsync(MediaType type, string providerId, CancellationToken ct)
     {
         var id = ValidId(providerId);
-        var json = await GetJsonAsync(type == MediaType.Movie ? $"movie/{id}" : $"tv/{id}", ct);
+        // One request: alternative titles (both types) and, for movies, release dates by country.
+        var json = await GetJsonAsync(type == MediaType.Movie ? $"movie/{id}" : $"tv/{id}", ct,
+            ("append_to_response", type == MediaType.Movie ? "alternative_titles,release_dates" : "alternative_titles"));
         string? imdb = Str(json, "imdb_id");
         int? tvdb = null;
         if (type == MediaType.Series)
@@ -55,8 +57,56 @@ public sealed class TmdbMetadataProvider : IMetadataProvider
             if (ext.TryGetProperty("tvdb_id", out var tv) && tv.ValueKind == JsonValueKind.Number) tvdb = tv.GetInt32();
         }
         var seasons = type == MediaType.Series && json.TryGetProperty("number_of_seasons", out var n) ? n.GetInt32() : 0;
-        return new MetadataDetails(id, TitleOf(json, type), YearOf(json, type), Str(json, "overview"), Str(json, "poster_path"), imdb, tvdb, seasons);
+        var title = TitleOf(json, type);
+        return new MetadataDetails(id, title, YearOf(json, type), Str(json, "overview"), Str(json, "poster_path"), imdb, tvdb, seasons,
+            AlternateTitlesOf(json, type, title), type == MediaType.Movie ? ReleaseDatesOf(json) : null);
     }
+
+    /// <summary>
+    /// The original title plus TMDb's alternative titles, for matching release names. Titles that reduce to nothing comparable
+    /// (for example in a non-Latin script, which release names rarely use) are dropped, as are duplicates of the main title.
+    /// </summary>
+    public static IReadOnlyList<string> AlternateTitlesOf(JsonElement json, MediaType type, string title)
+    {
+        var names = new List<string>();
+        if (Str(json, type == MediaType.Movie ? "original_title" : "original_name") is { } original) names.Add(original);
+        if (json.TryGetProperty("alternative_titles", out var alt) && alt.ValueKind == JsonValueKind.Object
+            && alt.TryGetProperty(type == MediaType.Movie ? "titles" : "results", out var list) && list.ValueKind == JsonValueKind.Array)
+            foreach (var t in list.EnumerateArray())
+                if (Str(t, "title") is { } name) names.Add(name);
+        var mainKey = ReleaseParser.NormalizeTitle(title);
+        return names
+            .Select(n => n.Trim())
+            .Where(n => ReleaseParser.NormalizeTitle(n) is { Length: > 1 } key && key != mainKey && key.All(char.IsAscii))
+            .DistinctBy(ReleaseParser.NormalizeTitle)
+            .Take(25)
+            .ToList();
+    }
+
+    /// <summary>Earliest theatrical (types 2-3), digital (4) and physical (5) release across all countries.</summary>
+    public static MovieReleaseDates ReleaseDatesOf(JsonElement json)
+    {
+        DateOnly? theatrical = null, digital = null, physical = null;
+        if (json.TryGetProperty("release_dates", out var rd) && rd.TryGetProperty("results", out var countries) && countries.ValueKind == JsonValueKind.Array)
+            foreach (var country in countries.EnumerateArray())
+            {
+                if (!country.TryGetProperty("release_dates", out var dates) || dates.ValueKind != JsonValueKind.Array) continue;
+                foreach (var d in dates.EnumerateArray())
+                {
+                    if (!d.TryGetProperty("type", out var t) || t.ValueKind != JsonValueKind.Number) continue;
+                    if (Str(d, "release_date") is not { Length: >= 10 } raw || !DateOnly.TryParse(raw[..10], System.Globalization.CultureInfo.InvariantCulture, out var date)) continue;
+                    switch (t.GetInt32())
+                    {
+                        case 2 or 3: theatrical = Min(theatrical, date); break;
+                        case 4: digital = Min(digital, date); break;
+                        case 5: physical = Min(physical, date); break;
+                    }
+                }
+            }
+        return new MovieReleaseDates(theatrical, digital, physical);
+    }
+
+    private static DateOnly Min(DateOnly? a, DateOnly b) => a is DateOnly x && x < b ? x : b;
 
     public async Task<IReadOnlyList<SeasonInfo>> GetSeasonsAsync(string providerId, CancellationToken ct)
     {

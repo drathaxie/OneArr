@@ -109,10 +109,16 @@ public sealed partial class ReleaseParser : IReleaseParser
             unsafeName);
     }
 
-    /// <summary>Lowercase alphanumeric key for title comparison, e.g. "The.Matrix" and "The Matrix!" both become "thematrix".</summary>
+    /// <summary>
+    /// Lowercase alphanumeric key for title comparison, e.g. "The.Matrix" and "The Matrix!" both become "thematrix". Accents are
+    /// folded ("Shōgun" matches "Shogun") and "&amp;" counts as "and" ("Law &amp; Order" matches "Law.and.Order").
+    /// </summary>
     public static string NormalizeTitle(string value)
     {
-        var chars = value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray();
+        var folded = value.Replace("&", " and ").Normalize(System.Text.NormalizationForm.FormD);
+        var chars = folded.ToLowerInvariant()
+            .Where(c => char.IsLetterOrDigit(c) && System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .ToArray();
         return new string(chars);
     }
 

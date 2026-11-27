@@ -126,6 +126,12 @@ export interface MediaDetail {
   legacyPath: string | null;
   legacySource: string | null;
   availability?: string | null;
+  theatricalReleaseDate?: string | null;
+  digitalReleaseDate?: string | null;
+  physicalReleaseDate?: string | null;
+  /** False for a movie still only in cinemas: automatic search waits for its digital or disc release. */
+  releasedForSearch?: boolean;
+  alternateTitles?: string[];
   availableEpisodes?: number | null;
   applicableEpisodes?: number | null;
   seasons: DetailSeason[];

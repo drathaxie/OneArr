@@ -471,6 +471,12 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
         <div style={{ minWidth: 0 }}>
           <h2>{data.title} {data.year ? `(${data.year})` : ""}</h2>
           <p>{data.overview || <span className="muted">No overview available.</span>}</p>
+          {!isSeries && (data.theatricalReleaseDate || data.digitalReleaseDate || data.physicalReleaseDate) && (
+            <p className="muted">
+              {[data.theatricalReleaseDate && `In cinemas ${data.theatricalReleaseDate}`, data.digitalReleaseDate && `digital ${data.digitalReleaseDate}`, data.physicalReleaseDate && `disc ${data.physicalReleaseDate}`].filter(Boolean).join(" · ")}
+              {data.releasedForSearch === false && " · automatic search waits for the digital or disc release"}
+            </p>)}
+          {data.alternateTitles && data.alternateTitles.length > 0 && <p className="muted">Also matched as: {data.alternateTitles.join(", ")}</p>}
           <div className="row">
             <span className={detailStatus.badgeClass}>{detailStatus.badge}</span>
             {data.monitored && <span className="badge">Monitored</span>}

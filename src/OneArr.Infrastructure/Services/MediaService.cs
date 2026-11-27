@@ -36,6 +36,19 @@ public sealed class MediaService
         _airTimes = airTimes;
     }
 
+    /// <summary>Alternate titles and movie release dates. A provider that returns none leaves the stored values alone.</summary>
+    private static void ApplyNamesAndDates(MediaItem item, MetadataDetails details)
+    {
+        if (details.AlternateTitles is { } names)
+            item.AlternateTitles = names.Count == 0 ? null : string.Join('\n', names.Select(n => n.Replace('\n', ' ').Replace('\r', ' ')));
+        if (details.MovieReleases is { } dates)
+        {
+            item.TheatricalReleaseDate = dates.Theatrical;
+            item.DigitalReleaseDate = dates.Digital;
+            item.PhysicalReleaseDate = dates.Physical;
+        }
+    }
+
     /// <summary>
     /// Exact air times for a series, keyed by (season, episode). Null when there is no provider, the show is unknown there, or
     /// the lookup failed: air times are an improvement over dates, never a reason for an add or refresh to fail.
@@ -105,6 +118,7 @@ public sealed class MediaService
             MetadataRefreshedUtc = _time.GetUtcNow(),
             TvmazeId = showId,
         };
+        ApplyNamesAndDates(item, details);
         write.MediaItems.Add(item);
         try
         {
@@ -365,6 +379,7 @@ public sealed class MediaService
         item.Year = details.Year;
         item.Overview = details.Overview;
         item.PosterPath = details.PosterPath;
+        ApplyNamesAndDates(item, details);
         item.LibraryReviewedUtc = null;
         item.MetadataRefreshedUtc = _time.GetUtcNow();
         // Presence was established for the old identity. A library scan must verify it for the new match.
@@ -486,6 +501,7 @@ public sealed class MediaService
         item.Year = details.Year;
         item.Overview = details.Overview;
         item.PosterPath = details.PosterPath;
+        ApplyNamesAndDates(item, details);
         item.MetadataRefreshedUtc = _time.GetUtcNow();
         item.TvmazeId = showId;
 

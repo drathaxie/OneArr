@@ -75,7 +75,11 @@ public interface ILegacyArrReader
 
 public sealed record MetadataSearchResult(string ProviderId, string Title, int? Year, string? Overview, string? PosterPath);
 
-public sealed record MetadataDetails(string ProviderId, string Title, int? Year, string? Overview, string? PosterPath, string? ImdbId, int? TvdbId, int SeasonCount);
+public sealed record MetadataDetails(string ProviderId, string Title, int? Year, string? Overview, string? PosterPath, string? ImdbId, int? TvdbId, int SeasonCount,
+    IReadOnlyList<string>? AlternateTitles = null, MovieReleaseDates? MovieReleases = null);
+
+/// <summary>Earliest release of each kind across countries.</summary>
+public sealed record MovieReleaseDates(DateOnly? Theatrical, DateOnly? Digital, DateOnly? Physical);
 
 public sealed record SeasonInfo(int SeasonNumber, IReadOnlyList<EpisodeInfo> Episodes);
 
@@ -113,7 +117,8 @@ public sealed record ReleaseTarget(
     QualityProfile Profile,
     int? CurrentResolution,
     bool AlreadyHasFile,
-    IReadOnlySet<string> KnownInfoHashes);
+    IReadOnlySet<string> KnownInfoHashes,
+    IReadOnlyList<string>? Aliases = null);
 
 public sealed record ReleaseDecision(
     ReleaseCandidate Candidate,

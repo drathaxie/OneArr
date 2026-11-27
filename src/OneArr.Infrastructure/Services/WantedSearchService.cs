@@ -166,8 +166,10 @@ public sealed class WantedSearchService
 
         var movies = await db.MediaItems.AsNoTracking()
             .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
-            .Select(m => new { m.Id, m.Title })
+            .Select(m => new { m.Id, m.Title, m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate })
             .ToListAsync(ct);
+        // A movie still only in cinemas has nothing but cam copies; it is searched once it is out digitally or on disc.
+        movies = movies.Where(m => MediaItem.MovieAvailable(m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate, today)).ToList();
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
                               where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
