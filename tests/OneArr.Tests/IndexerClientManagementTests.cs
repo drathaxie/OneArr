@@ -398,6 +398,24 @@ public class IndexerClientManagementTests
     }
 
     [Fact]
+    public async Task Rss_sync_is_off_by_default_and_an_edit_that_omits_it_keeps_it()
+    {
+        var routing = new RoutingHandler();
+        using var factory = new StubApiFactory(routing);
+        var client = await SignedInAsync(factory);
+
+        var created = await client.PostAsJsonAsync("/api/indexers", new { name = "x", baseUrl = "http://indexer.test/", apiKey = "k", enabled = true });
+        var row = await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var id = row.GetProperty("id").GetInt32();
+        Assert.False(row.GetProperty("rssSync").GetBoolean());
+
+        await client.PutAsJsonAsync($"/api/indexers/{id}", new { name = "x", baseUrl = "http://indexer.test/", apiKey = "", enabled = true, rssSync = true });
+        // The list's quick enable/disable toggle sends no rssSync field.
+        var toggled = await client.PutAsJsonAsync($"/api/indexers/{id}", new { name = "x", baseUrl = "http://indexer.test/", apiKey = "", enabled = false });
+        Assert.True((await toggled.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("rssSync").GetBoolean());
+    }
+
+    [Fact]
     public async Task Indexer_and_client_validation_and_not_found()
     {
         var routing = new RoutingHandler();

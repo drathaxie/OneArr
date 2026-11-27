@@ -239,6 +239,10 @@ export interface Indexer {
   moviesEnabled: boolean;
   tvEnabled: boolean;
   priority: number;
+  /** Opt-in: grab wanted items from this indexer's recent-releases feed. */
+  rssSync?: boolean;
+  /** False for indexer types without a recent-releases feed (native trackers). */
+  rssSupported?: boolean;
   hasKey: boolean;
   healthStatus: string;
   lastTestedAt: string | null;

@@ -195,6 +195,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("AirDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("AirDateUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("EpisodeNumber")
                         .HasColumnType("INTEGER");
 
@@ -349,6 +352,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RssSync")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("TvEnabled")
@@ -574,6 +580,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("MetadataRefreshedUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
 
@@ -603,6 +612,9 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TvmazeId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("Year")
                         .HasColumnType("INTEGER");

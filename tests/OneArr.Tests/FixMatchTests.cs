@@ -283,4 +283,78 @@ public class FixMatchTests
         Assert.Equal("Rey Mysterio vs The Darkness", match.SuggestedTitle);
         Assert.Equal(2022, match.SuggestedYear);
     }
+
+    /// <summary>
+    /// A weekly show gains an episode on every refresh. That episode cannot already be on disk from before reconciliation,
+    /// so it must not pause automatic grabbing; otherwise the scheduled refresh would stop every new episode being fetched.
+    /// </summary>
+    [Fact]
+    public async Task Refreshing_in_newly_aired_or_upcoming_episodes_keeps_the_review_and_automation()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        var (seriesId, _, _, _, _) = await SeedWrongMatchAsync(factory);
+        var reviewed = DateTimeOffset.UtcNow;
+        await using (var db = factory.CreateDbContext())
+        {
+            var series = await db.MediaItems.SingleAsync(m => m.Id == seriesId);
+            series.ProviderId = "555";
+            series.LibraryReviewedUtc = reviewed;
+            await db.SaveChangesAsync();
+        }
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        meta.Catalog["555"] = ("Wrong Show", 2001,
+        [
+            new SeasonInfo(1, [new EpisodeInfo(1, "e1", "One", null), new EpisodeInfo(2, "e2", "Two", null), new EpisodeInfo(3, "e3", "Three", null),
+                new EpisodeInfo(4, "e4", "Aired today", today), new EpisodeInfo(5, "e5", "Next week", today.AddDays(7))]),
+        ]);
+
+        var result = await media.RefreshMetadataAsync(seriesId, default);
+
+        Assert.Equal(2, result.EpisodesAdded);
+        Assert.False(result.NeedsLibraryScan);
+        await using var check = factory.CreateDbContext();
+        var item = await check.MediaItems.SingleAsync(m => m.Id == seriesId);
+        Assert.NotNull(item.LibraryReviewedUtc);
+        Assert.NotNull(item.MetadataRefreshedUtc);
+    }
+
+    [Fact]
+    public async Task Scheduled_refresh_takes_the_stalest_monitored_series_up_to_the_limit()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        int never, stale, fresh, unmonitored;
+        await using (var db = factory.CreateDbContext())
+        {
+            var profile = await db.QualityProfiles.FirstAsync();
+            MediaItem Series(string tmdb, bool monitored, DateTimeOffset? refreshed) => new()
+            {
+                MediaType = MediaType.Series, Provider = "tmdb", ProviderId = tmdb, Title = "Show " + tmdb, Year = 2020, Monitored = monitored,
+                QualityProfileId = profile.Id, RootFolder = Root, CreatedAt = DateTimeOffset.UtcNow, MetadataRefreshedUtc = refreshed,
+            };
+            var a = Series("901", true, null);
+            var b = Series("902", true, DateTimeOffset.UtcNow.AddHours(-20));
+            var c = Series("903", true, DateTimeOffset.UtcNow.AddHours(-1));
+            var d = Series("904", false, null);
+            db.MediaItems.AddRange(a, b, c, d);
+            await db.SaveChangesAsync();
+            (never, stale, fresh, unmonitored) = (a.Id, b.Id, c.Id, d.Id);
+        }
+        foreach (var id in new[] { "901", "902", "903", "904" })
+            meta.Catalog[id] = ("Show " + id, 2020, [new SeasonInfo(1, [new EpisodeInfo(1, id + "e1", "Pilot", new DateOnly(2020, 1, 1))])]);
+
+        var first = await media.RefreshDueSeriesAsync(1, TimeSpan.FromHours(12), default);
+        var second = await media.RefreshDueSeriesAsync(5, TimeSpan.FromHours(12), default);
+
+        Assert.StartsWith("Refreshed 1 series", first);
+        Assert.StartsWith("Refreshed 1 series", second);
+        await using var check = factory.CreateDbContext();
+        var items = await check.MediaItems.ToDictionaryAsync(m => m.Id);
+        Assert.NotNull(items[never].MetadataRefreshedUtc);
+        Assert.True(items[stale].MetadataRefreshedUtc > DateTimeOffset.UtcNow.AddMinutes(-5), "the stale series is refreshed on the second pass");
+        Assert.True(items[fresh].MetadataRefreshedUtc < DateTimeOffset.UtcNow.AddMinutes(-30), "a series refreshed an hour ago is left alone");
+        Assert.Null(items[unmonitored].MetadataRefreshedUtc);
+        Assert.Equal(1, await check.Episodes.CountAsync(e => e.MediaItemId == never));
+    }
 }

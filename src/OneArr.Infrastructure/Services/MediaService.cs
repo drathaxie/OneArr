@@ -14,7 +14,8 @@ public sealed record AddMediaResult(MediaItem Item, bool Created);
 
 public sealed record RefreshResult(int MediaItemId, string Title, int? Year, int SeasonsAdded, int EpisodesAdded, int EpisodesUpdated, int EpisodesUnmonitored, bool NeedsLibraryScan);
 
-internal sealed record SeriesSync(int SeasonsAdded, int EpisodesAdded, int EpisodesUpdated, int EpisodesUnmonitored);
+/// <param name="AddedEpisodesMayBeOnDisk">True when an added episode has no air date or aired before the recent window, so a file for it could already exist.</param>
+internal sealed record SeriesSync(int SeasonsAdded, int EpisodesAdded, int EpisodesUpdated, int EpisodesUnmonitored, bool AddedEpisodesMayBeOnDisk);
 
 public sealed record RematchResult(int MediaItemId, string Title, int? Year, int EpisodesUpdated, int EpisodesAdded, int EpisodesUnmonitored, int FilesUnlinked);
 
@@ -25,12 +26,46 @@ public sealed class MediaService
     private readonly IDbContextFactory<OneArrDbContext> _db;
     private readonly IMetadataProvider _metadata;
     private readonly TimeProvider _time;
+    private readonly IAirTimeProvider? _airTimes;
 
-    public MediaService(IDbContextFactory<OneArrDbContext> db, IMetadataProvider metadata, TimeProvider time)
+    public MediaService(IDbContextFactory<OneArrDbContext> db, IMetadataProvider metadata, TimeProvider time, IAirTimeProvider? airTimes = null)
     {
         _db = db;
         _metadata = metadata;
         _time = time;
+        _airTimes = airTimes;
+    }
+
+    /// <summary>
+    /// Exact air times for a series, keyed by (season, episode). Null when there is no provider, the show is unknown there, or
+    /// the lookup failed: air times are an improvement over dates, never a reason for an add or refresh to fail.
+    /// </summary>
+    private async Task<(int? ShowId, Dictionary<(int Season, int Episode), DateTimeOffset>? Times)> AirTimesAsync(int? knownShowId, MetadataDetails details, CancellationToken ct)
+    {
+        if (_airTimes is null) return (knownShowId, null);
+        try
+        {
+            var show = knownShowId ?? await _airTimes.FindShowAsync(details.TvdbId, details.ImdbId, ct);
+            if (show is not int id) return (null, null);
+            var map = new Dictionary<(int, int), DateTimeOffset>();
+            foreach (var t in await _airTimes.GetAirTimesAsync(id, ct)) map.TryAdd((t.Season, t.Episode), t.AirsUtc);
+            return (id, map);
+        }
+        catch (Exception ex) when (ex is ExternalServiceException or HttpRequestException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+        {
+            return (knownShowId, null);
+        }
+    }
+
+    /// <summary>
+    /// The exact air time for one episode, used only when it falls within a day of TMDb's air date. Numbering can differ between
+    /// sources (anime, specials, split seasons); a mismatched episode must never make an episode look aired early.
+    /// </summary>
+    private static DateTimeOffset? ExactAirTime(Dictionary<(int Season, int Episode), DateTimeOffset>? times, int season, int episode, DateOnly? airDate)
+    {
+        if (times is null || airDate is not DateOnly date || !times.TryGetValue((season, episode), out var stamp)) return null;
+        var stampDate = DateOnly.FromDateTime(stamp.UtcDateTime);
+        return Math.Abs(stampDate.DayNumber - date.DayNumber) <= 1 ? stamp : null;
     }
 
     public async Task<AddMediaResult> AddAsync(AddMediaRequest request, CancellationToken ct)
@@ -50,6 +85,7 @@ public sealed class MediaService
         // Metadata is fetched outside the DB transaction so network latency never holds a write lock.
         var details = await _metadata.GetDetailsAsync(request.Type, request.ProviderId, ct);
         var seasons = request.Type == MediaType.Series ? await _metadata.GetSeasonsAsync(request.ProviderId, ct) : [];
+        var (showId, airTimes) = request.Type == MediaType.Series ? await AirTimesAsync(null, details, ct) : (null, null);
 
         await using var write = await _db.CreateDbContextAsync(ct);
         await using var tx = await write.Database.BeginTransactionAsync(ct);
@@ -66,6 +102,8 @@ public sealed class MediaService
             QualityProfileId = request.QualityProfileId,
             RootFolder = request.RootFolder,
             CreatedAt = _time.GetUtcNow(),
+            MetadataRefreshedUtc = _time.GetUtcNow(),
+            TvmazeId = showId,
         };
         write.MediaItems.Add(item);
         try
@@ -102,6 +140,7 @@ public sealed class MediaService
                         ProviderId = e.ProviderId,
                         Title = e.Title,
                         AirDate = e.AirDate,
+                        AirDateUtc = ExactAirTime(airTimes, s.SeasonNumber, e.EpisodeNumber, e.AirDate),
                         Monitored = episodeMonitored,
                     });
                 }
@@ -313,26 +352,30 @@ public sealed class MediaService
         // Metadata is fetched before the write transaction, so network latency never holds a write lock.
         var details = await _metadata.GetDetailsAsync(type, providerId, ct);
         var seasons = type == MediaType.Series ? await _metadata.GetSeasonsAsync(providerId, ct) : [];
+        // A new identity is a new show elsewhere too, so the air-time show is looked up again.
+        var (showId, airTimes) = type == MediaType.Series ? await AirTimesAsync(null, details, ct) : (null, null);
 
         await using var write = await _db.CreateDbContextAsync(ct);
         await using var tx = await write.Database.BeginTransactionAsync(ct);
         var item = await write.MediaItems.Include(m => m.Episodes).FirstAsync(m => m.Id == id, ct);
 
         item.ProviderId = providerId;
+        item.TvmazeId = showId;
         item.Title = details.Title;
         item.Year = details.Year;
         item.Overview = details.Overview;
         item.PosterPath = details.PosterPath;
         item.LibraryReviewedUtc = null;
+        item.MetadataRefreshedUtc = _time.GetUtcNow();
         // Presence was established for the old identity. A library scan must verify it for the new match.
         item.HasFile = false;
         foreach (var episode in item.Episodes) episode.HasFile = false;
 
-        var sync = new SeriesSync(0, 0, 0, 0);
+        var sync = new SeriesSync(0, 0, 0, 0, false);
         if (type == MediaType.Series)
         {
             var existingSeasons = await write.Seasons.Where(x => x.MediaItemId == id).Select(x => x.SeasonNumber).ToListAsync(ct);
-            sync = SyncSeries(write, item, seasons, existingSeasons);
+            sync = SyncSeries(write, item, seasons, existingSeasons, Today(), airTimes);
         }
 
         var links = await write.MediaFiles.Include(f => f.EpisodeLinks).Where(f => f.MediaItemId == id).ToListAsync(ct);
@@ -352,8 +395,18 @@ public sealed class MediaService
     /// links stay valid. Episodes the metadata no longer lists are unmonitored, not deleted. Specials (season 0) are never monitored
     /// by default.
     /// </summary>
-    private static SeriesSync SyncSeries(OneArrDbContext write, MediaItem item, IReadOnlyList<SeasonInfo> seasons, IReadOnlyList<int> existingSeasons)
+    /// <summary>
+    /// Episodes that aired within this many days, or have not aired, cannot have a file on disk from before the library was
+    /// reconciled, so adding them does not reopen the library review. Matches the wanted search's recent window.
+    /// </summary>
+    private const int RecentAirDays = 2;
+
+    private DateOnly Today() => DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime);
+
+    private static SeriesSync SyncSeries(OneArrDbContext write, MediaItem item, IReadOnlyList<SeasonInfo> seasons, IReadOnlyList<int> existingSeasons, DateOnly today,
+        Dictionary<(int Season, int Episode), DateTimeOffset>? airTimes)
     {
+        var mayBeOnDisk = false;
         var seasonsAdded = 0;
         var episodesAdded = 0;
         var episodesUpdated = 0;
@@ -377,14 +430,19 @@ public sealed class MediaService
                     {
                         MediaItemId = item.Id, SeasonNumber = season.SeasonNumber, EpisodeNumber = e.EpisodeNumber,
                         ProviderId = e.ProviderId, Title = e.Title, AirDate = e.AirDate,
+                        AirDateUtc = ExactAirTime(airTimes, season.SeasonNumber, e.EpisodeNumber, e.AirDate),
                         Monitored = season.SeasonNumber != 0 && item.Monitored,
                     });
                     episodesAdded++;
+                    if (e.AirDate is not DateOnly aired || aired < today.AddDays(-RecentAirDays)) mayBeOnDisk = true;
                 }
                 else
                 {
                     existing.ProviderId = e.ProviderId;
                     existing.Title = e.Title;
+                    // Without fresh air times, a kept time is only trusted while the date it was checked against is unchanged.
+                    if (airTimes is not null) existing.AirDateUtc = ExactAirTime(airTimes, season.SeasonNumber, e.EpisodeNumber, e.AirDate);
+                    else if (existing.AirDate != e.AirDate) existing.AirDateUtc = null;
                     existing.AirDate = e.AirDate;
                     episodesUpdated++;
                 }
@@ -395,7 +453,7 @@ public sealed class MediaService
             ep.Monitored = false;
             episodesUnmonitored++;
         }
-        return new SeriesSync(seasonsAdded, episodesAdded, episodesUpdated, episodesUnmonitored);
+        return new SeriesSync(seasonsAdded, episodesAdded, episodesUpdated, episodesUnmonitored, mayBeOnDisk);
     }
 
     /// <summary>
@@ -406,6 +464,7 @@ public sealed class MediaService
     {
         MediaType type;
         string providerId;
+        int? knownShowId;
         await using (var check = await _db.CreateDbContextAsync(ct))
         {
             var current = await check.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct)
@@ -413,10 +472,12 @@ public sealed class MediaService
             if (current.Provider != "tmdb") throw new ArgumentException("Only TMDb entries can be refreshed");
             type = current.MediaType;
             providerId = current.ProviderId;
+            knownShowId = current.TvmazeId;
         }
 
         var details = await _metadata.GetDetailsAsync(type, providerId, ct);
         var seasons = type == MediaType.Series ? await _metadata.GetSeasonsAsync(providerId, ct) : [];
+        var (showId, airTimes) = type == MediaType.Series ? await AirTimesAsync(knownShowId, details, ct) : (knownShowId, null);
 
         await using var write = await _db.CreateDbContextAsync(ct);
         await using var tx = await write.Database.BeginTransactionAsync(ct);
@@ -425,19 +486,67 @@ public sealed class MediaService
         item.Year = details.Year;
         item.Overview = details.Overview;
         item.PosterPath = details.PosterPath;
+        item.MetadataRefreshedUtc = _time.GetUtcNow();
+        item.TvmazeId = showId;
 
-        var sync = new SeriesSync(0, 0, 0, 0);
+        var sync = new SeriesSync(0, 0, 0, 0, false);
         if (type == MediaType.Series)
         {
             var existingSeasons = await write.Seasons.Where(x => x.MediaItemId == id).Select(x => x.SeasonNumber).ToListAsync(ct);
-            sync = SyncSeries(write, item, seasons, existingSeasons);
+            sync = SyncSeries(write, item, seasons, existingSeasons, Today(), airTimes);
         }
-        if (sync.EpisodesAdded > 0) item.LibraryReviewedUtc = null;
+        // Only episodes that could already be on disk reopen the review. A newly announced or just-aired episode does not,
+        // otherwise every weekly episode would pause automatic grabbing until a library scan.
+        if (sync.AddedEpisodesMayBeOnDisk) item.LibraryReviewedUtc = null;
 
         await write.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return new RefreshResult(item.Id, details.Title, details.Year, sync.SeasonsAdded, sync.EpisodesAdded, sync.EpisodesUpdated,
-            sync.EpisodesUnmonitored, NeedsLibraryScan: sync.EpisodesAdded > 0);
+            sync.EpisodesUnmonitored, NeedsLibraryScan: sync.AddedEpisodesMayBeOnDisk);
+    }
+
+    /// <summary>
+    /// Refreshes the monitored TMDb series that have gone longest without a refresh, up to <paramref name="max"/>, so newly
+    /// listed episodes become searchable without a manual refresh. A series that fails is stamped too, so one bad entry is
+    /// retried on the next cycle instead of being hammered every pass.
+    /// </summary>
+    public async Task<string> RefreshDueSeriesAsync(int max, TimeSpan maxAge, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        List<int> due;
+        await using (var db = await _db.CreateDbContextAsync(ct))
+        {
+            // SQLite stores DateTimeOffset as text and cannot compare it in SQL, so the small id/date list is filtered here.
+            var series = await db.MediaItems.AsNoTracking()
+                .Where(m => m.MediaType == MediaType.Series && m.Monitored && m.Provider == "tmdb")
+                .Select(m => new { m.Id, m.MetadataRefreshedUtc }).ToListAsync(ct);
+            due = series.Where(m => m.MetadataRefreshedUtc is null || now - m.MetadataRefreshedUtc.Value >= maxAge)
+                .OrderBy(m => m.MetadataRefreshedUtc ?? DateTimeOffset.MinValue).ThenBy(m => m.Id)
+                .Take(max).Select(m => m.Id).ToList();
+        }
+
+        int refreshed = 0, added = 0, failed = 0;
+        foreach (var id in due)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var result = await RefreshMetadataAsync(id, ct);
+                refreshed++;
+                added += result.EpisodesAdded;
+            }
+            catch (ProviderNotConfiguredException)
+            {
+                return "TMDb is not configured, so series episode lists were not refreshed";
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or KeyNotFoundException)
+            {
+                failed++;
+                await using var db = await _db.CreateDbContextAsync(ct);
+                await db.MediaItems.Where(m => m.Id == id).ExecuteUpdateAsync(s => s.SetProperty(m => m.MetadataRefreshedUtc, now), ct);
+            }
+        }
+        return $"Refreshed {refreshed} series ({added} new episode(s)), {failed} failed";
     }
 
     public async Task<bool> DeleteAsync(int id, CancellationToken ct)
@@ -465,9 +574,13 @@ public sealed class MediaService
             .OrderBy(m => m.Title).ToListAsync(ct);
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today
+                              where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= today.AddDays(1)
                               orderby m.Title, e.SeasonNumber, e.EpisodeNumber
-                              select new WantedEpisode(m.Id, e.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.Title, e.AirDate)).ToListAsync(ct);
+                              select new { Row = new WantedEpisode(m.Id, e.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.Title, e.AirDate), e.AirDateUtc })
+                              .ToListAsync(ct);
+        // Same "aired" rule as the wanted search: the exact air time when known, otherwise the date.
+        var now = _time.GetUtcNow();
+        var aired = episodes.Where(e => Episode.HasAired(e.Row.AirDate, e.AirDateUtc, now)).Select(e => e.Row).ToList();
         // Wanted only ever lists monitored items. These counts are the unmonitored counterpart, so the UI can
         // say plainly how much "missing" material is deliberately unmonitored rather than actually wanted.
         var unmonitoredMovies = await db.MediaItems.CountAsync(m => m.MediaType == MediaType.Movie && !m.Monitored && !m.HasFile, ct);
@@ -477,7 +590,7 @@ public sealed class MediaService
                                          select e).CountAsync(ct);
         return new WantedList(
             movies,
-            episodes.Select(e => e with { HasActiveDownload = active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)) }).ToList(),
+            aired.Select(e => e with { HasActiveDownload = active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)) }).ToList(),
             unmonitoredMovies, unmonitoredEpisodes,
             movies.Select(m => (m.Id, active.Contains(((int?)m.Id, (int?)null)))).ToDictionary(x => x.Id, x => x.Item2));
     }

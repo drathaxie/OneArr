@@ -157,6 +157,95 @@ public class WantedSearchTests
         Assert.Equal(1, (await w.Search.RunOnceAsync(Ct)).Considered);
     }
 
+    private static async Task SetAirDateAsync(TestWorld w, int episodeId, DateOnly date)
+    {
+        await using var db = w.Db.CreateDbContext();
+        (await db.Episodes.SingleAsync(e => e.Id == episodeId)).AirDate = date;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>An item searched before and overdue for another try, as a large backlog is.</summary>
+    private static async Task MarkOverdueAsync(TestWorld w, int mediaItemId, int episodeId, DateTimeOffset dueSince)
+    {
+        await using var db = w.Db.CreateDbContext();
+        db.SearchAttempts.Add(new SearchAttempt
+        {
+            ItemKey = $"episode:{episodeId}", MediaItemId = mediaItemId, EpisodeId = episodeId,
+            LastAttemptAt = dueSince.AddHours(-6), NextAttemptAt = dueSince, Attempts = 1, LastOutcome = SearchOutcome.NoAcceptableRelease,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static string Decode(string query) => Uri.UnescapeDataString(query).Replace('+', ' ');
+
+    /// <summary>
+    /// The South Park report: a new episode aired, but every run's few search slots went to overdue backlog items first,
+    /// so the new episode waited for hours. A recently aired episode is now searched ahead of the backlog.
+    /// </summary>
+    [Fact]
+    public async Task RecentlyAiredEpisodeIsSearchedBeforeOverdueBacklog()
+    {
+        using var w = new TestWorld(new SearchPolicy { MaxSearchesPerRun = 1 });
+        await w.ConfigureAsync();
+        var (backlog, backlogEpisodes) = await w.AddSeriesAsync("Backlog Show", episodes: 3);
+        var (_, freshEpisodes) = await w.AddSeriesAsync("Fresh Show", episodes: 1);
+        await SetAirDateAsync(w, freshEpisodes[0], DateOnly.FromDateTime(w.Time.GetUtcNow().UtcDateTime));
+        foreach (var e in backlogEpisodes) await MarkOverdueAsync(w, backlog, e, w.Time.GetUtcNow().AddHours(-5));
+
+        await w.ReconcileLibraryAsync();
+        await w.Search.RunOnceAsync(Ct);
+
+        var query = Assert.Single(w.Indexer.Queries);
+        Assert.Contains("Fresh Show", Decode(query));
+    }
+
+    [Fact]
+    public async Task NeverSearchedItemIsSearchedBeforeOverdueBacklog()
+    {
+        using var w = new TestWorld(new SearchPolicy { MaxSearchesPerRun = 1 });
+        await w.ConfigureAsync();
+        var (backlog, backlogEpisodes) = await w.AddSeriesAsync("Backlog Show", episodes: 2);
+        await w.AddSeriesAsync("Unsearched Show", episodes: 1);
+        foreach (var e in backlogEpisodes) await MarkOverdueAsync(w, backlog, e, w.Time.GetUtcNow().AddHours(-5));
+
+        await w.ReconcileLibraryAsync();
+        await w.Search.RunOnceAsync(Ct);
+
+        Assert.Contains("Unsearched Show", Decode(Assert.Single(w.Indexer.Queries)));
+    }
+
+    [Fact]
+    public async Task RecentlyAiredEpisodeWithoutReleaseIsRetriedWithinAnHour()
+    {
+        using var w = new TestWorld();
+        await w.ConfigureAsync();
+        var (_, episodes) = await w.AddSeriesAsync("Fresh Show", episodes: 1);
+        await SetAirDateAsync(w, episodes[0], DateOnly.FromDateTime(w.Time.GetUtcNow().UtcDateTime));
+
+        await w.ReconcileLibraryAsync();
+        await w.Search.RunOnceAsync(Ct);
+
+        await using var db = w.Db.CreateDbContext();
+        var attempt = await db.SearchAttempts.SingleAsync(a => a.EpisodeId == episodes[0]);
+        Assert.Equal(SearchOutcome.NoAcceptableRelease, attempt.LastOutcome);
+        Assert.Equal(TimeSpan.FromHours(1), attempt.NextAttemptAt - attempt.LastAttemptAt);
+    }
+
+    [Fact]
+    public async Task OlderEpisodeWithoutReleaseStillWaitsTheFullInterval()
+    {
+        using var w = new TestWorld();
+        await w.ConfigureAsync();
+        var (_, episodes) = await w.AddSeriesAsync("Old Show", episodes: 1);
+
+        await w.ReconcileLibraryAsync();
+        await w.Search.RunOnceAsync(Ct);
+
+        await using var db = w.Db.CreateDbContext();
+        var attempt = await db.SearchAttempts.SingleAsync(a => a.EpisodeId == episodes[0]);
+        Assert.Equal(TimeSpan.FromHours(6), attempt.NextAttemptAt - attempt.LastAttemptAt);
+    }
+
     [Fact]
     public async Task RunIsBoundedByMaxSearchesPerRun()
     {
