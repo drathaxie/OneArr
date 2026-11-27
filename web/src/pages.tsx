@@ -1075,6 +1075,8 @@ function fileNameOf(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+interface BlocklistItem { id: number; releaseTitle: string; reason: string; createdAt: string; }
+
 // Activity: Queue, History, and Problems tabs over the same download jobs. Speed and ETA are
 // only ever shown when the client reported them; a dash means unknown, never an invented value.
 // Previewing an import never writes anything; applying one requires the preview id plus an
@@ -1087,7 +1089,8 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
   const { data: history, reload: reloadHistory } = useLoad<HistoryEntry[]>("/api/activity/history");
   const { data: problems, reload: reloadProblems } = useLoad<Problem[]>("/api/activity/problems");
   const { data: imports } = useLoad<any[]>("/api/imports");
-  const [tab, setTab] = useState<"queue" | "history" | "problems">(initialTab ?? "queue");
+  const { data: blocklist, reload: reloadBlocklist } = useLoad<BlocklistItem[]>("/api/blocklist");
+  const [tab, setTab] = useState<"queue" | "history" | "problems" | "blocklist">(initialTab ?? "queue");
   const [message, setMessage] = useState<string | null>(null);
   const [previewJobId, setPreviewJobId] = useState<number | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -1099,10 +1102,16 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
     try {
       const res = await api<any>("POST", path, body);
       setMessage(res?.message ?? `${label} finished`);
-      reload(); reloadHistory(); reloadProblems();
+      reload(); reloadHistory(); reloadProblems(); reloadBlocklist();
     } catch (e) {
       setMessage((e as Error).message);
     }
+  }
+
+  async function unblock(id: number) {
+    if (!confirm("Remove this release from the blocklist? It may then be grabbed again.")) return;
+    try { await api("DELETE", `/api/blocklist/${id}`); setMessage("Removed from blocklist"); reloadBlocklist(); }
+    catch (e) { setMessage((e as Error).message); }
   }
 
   async function openPreview(jobId: number) {
@@ -1168,7 +1177,23 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
         <button className={tab === "queue" ? "primary" : ""} onClick={() => setTab("queue")}>Queue</button>
         <button className={tab === "history" ? "primary" : ""} onClick={() => setTab("history")}>History</button>
         <button className={tab === "problems" ? "primary" : ""} onClick={() => setTab("problems")}>Problems{problems && problems.length > 0 ? ` (${problems.length})` : ""}</button>
+        <button className={tab === "blocklist" ? "primary" : ""} onClick={() => setTab("blocklist")}>Blocklist{blocklist && blocklist.length > 0 ? ` (${blocklist.length})` : ""}</button>
       </div>
+      {tab === "blocklist" && (
+        <div className="card table-wrap">
+          {blocklist && blocklist.length === 0 && <p className="muted">Nothing is blocklisted. Use Blocklist on a download that is broken or wrong, and OneArr will look for another release.</p>}
+          {blocklist && blocklist.length > 0 && (
+            <table><thead><tr><th>Release</th><th>Reason</th><th>When</th><th></th></tr></thead><tbody>
+              {blocklist.map((b) => (
+                <tr key={b.id}>
+                  <td className="mono">{b.releaseTitle}</td>
+                  <td>{b.reason}</td>
+                  <td className="muted">{new Date(b.createdAt).toLocaleString()}</td>
+                  <td><button className="small" onClick={() => unblock(b.id)}>Remove</button></td>
+                </tr>))}
+            </tbody></table>)}
+        </div>
+      )}
       <ErrorLine message={error ?? message} />
       {unreachable.length > 0 && tab !== "problems" && (
         <p className="error">Download client unreachable: {unreachable.map((c) => c.name).join(", ")}. Jobs on those clients are left untouched, not marked missing. See Problems.</p>
@@ -1196,6 +1221,7 @@ export function Activity({ initialTab }: { initialTab?: "queue" | "history" | "p
                       <div className="row">
                         {j.importReady && <button className="small primary" onClick={() => openPreview(j.id)}>Preview import</button>}
                         {j.status === "Failed" && j.importFailed && <button className="small" onClick={() => run("Retry import", `/api/queue/${j.id}/retry-import`, undefined, "Retry this failed import? It imports again without deleting anything.")}>Retry import</button>}
+                        {j.status !== "Imported" && !(j.error ?? "").startsWith("Blocklisted") && <button className="small" onClick={() => run("Blocklist", `/api/queue/${j.id}/blocklist`, { reason: "Blocklisted by you" }, "Blocklist this release? OneArr stops tracking it and searches for a different release. The torrent stays in your download client: remove it there yourself if you want.")}>Blocklist</button>}
                         {j.status === "Missing" && <button className="small" onClick={() => run("Clear missing", `/api/queue/${j.id}/clear-missing`, undefined, "Clear this missing download? It only changes OneArr's record to Failed so the item can be searched or grabbed again. No torrent or file is touched.")}>Clear missing</button>}
                       </div>
                     </td>

@@ -118,7 +118,8 @@ public sealed record ReleaseTarget(
     int? CurrentResolution,
     bool AlreadyHasFile,
     IReadOnlySet<string> KnownInfoHashes,
-    IReadOnlyList<string>? Aliases = null);
+    IReadOnlyList<string>? Aliases = null,
+    IReadOnlySet<string>? Blocklisted = null);
 
 public sealed record ReleaseDecision(
     ReleaseCandidate Candidate,

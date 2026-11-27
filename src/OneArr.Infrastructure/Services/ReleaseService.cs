@@ -197,6 +197,7 @@ public sealed class ReleaseService
             .Where(j => j.Hash != null && j.Status != DownloadStatus.Failed)
             .Select(j => j.Hash!)
             .ToListAsync(ct);
+        var blocklisted = await BlocklistService.BlockedKeysAsync(db, ct);
         var target = new ReleaseTarget(
             item.MediaType,
             item.Title,
@@ -207,7 +208,8 @@ public sealed class ReleaseService
             null,
             hasFile,
             new HashSet<string>(knownHashes.Select(h => h.ToLowerInvariant())),
-            item.AlternateTitleList());
+            item.AlternateTitleList(),
+            blocklisted);
 
         var category = item.MediaType == MediaType.Movie ? "2000" : "5000";
         var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category);

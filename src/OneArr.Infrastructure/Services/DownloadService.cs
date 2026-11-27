@@ -106,7 +106,7 @@ public sealed class DownloadService
         // Jobs eligible for polling: everything except Imported (terminal) and import-failed jobs
         // (operator-retryable). Download-side Failed jobs keep polling so recovery is possible.
         var active = await db.DownloadJobs
-            .Where(j => j.Status != DownloadStatus.Imported && !(j.Status == DownloadStatus.Failed && j.ImportFailed))
+            .Where(j => j.Status != DownloadStatus.Imported && !(j.Status == DownloadStatus.Failed && j.ImportFailed) && !j.Blocklisted)
             .ToListAsync(ct);
         var updated = 0;
 

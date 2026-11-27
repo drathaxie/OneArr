@@ -28,6 +28,7 @@ public class OneArrDbContext : DbContext
     public DbSet<MediaFileEpisode> MediaFileEpisodes => Set<MediaFileEpisode>();
     public DbSet<LibraryScanPlan> LibraryScanPlans => Set<LibraryScanPlan>();
     public DbSet<ProblemDismissal> ProblemDismissals => Set<ProblemDismissal>();
+    public DbSet<BlocklistEntry> Blocklist => Set<BlocklistEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -122,6 +123,7 @@ public class OneArrDbContext : DbContext
         });
 
         b.Entity<ProblemDismissal>(e => e.HasIndex(x => x.Key).IsUnique());
+        b.Entity<BlocklistEntry>(e => e.HasIndex(x => x.InfoHash));
 
         b.Entity<FileRecord>(e => e.HasIndex(x => x.Path).IsUnique());
         b.Entity<AppSetting>(e => e.HasKey(x => x.Key));

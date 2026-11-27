@@ -21,6 +21,10 @@ public sealed class ReleaseRanker : IReleaseRanker
         var reasons = new List<string>();
 
         if (parsed.IsUnsafeName) reasons.Add("Unsafe release name (path characters or executable extension)");
+        if (target.Blocklisted is { Count: > 0 } blocked
+            && (blocked.Contains("title:" + candidate.Title.Trim().ToLowerInvariant())
+                || (candidate.InfoHash is { Length: > 0 } bh && blocked.Contains(bh.ToLowerInvariant()))))
+            reasons.Add("Blocklisted: this release failed or was rejected before");
         if (candidate.Size <= 0) reasons.Add("Release reports no size");
         if (candidate.Link.Length == 0) reasons.Add("Release has no magnet or torrent link");
 

@@ -190,8 +190,23 @@ public class DownloadJob
     public DateTimeOffset? LastSeenAt { get; set; }
     /// <summary>First time the job entered Completed. NULL for jobs completed before this was tracked.</summary>
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>True when this release was blocklisted. The job is no longer polled; the torrent itself is never touched.</summary>
+    public bool Blocklisted { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A release that must not be grabbed again, by info hash and by exact title.</summary>
+public class BlocklistEntry
+{
+    public int Id { get; set; }
+    public int? MediaItemId { get; set; }
+    public int? EpisodeId { get; set; }
+    public string ReleaseTitle { get; set; } = "";
+    public string? InfoHash { get; set; }
+    public string Reason { get; set; } = "";
+    public int? DownloadJobId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 /// <summary>Per-client reachability, upserted on every queue sync. This is what distinguishes "the

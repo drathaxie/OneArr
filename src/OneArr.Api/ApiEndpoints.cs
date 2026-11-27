@@ -29,6 +29,7 @@ public static class ApiEndpoints
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null);
+    public sealed record BlocklistBody(string? Reason);
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
     public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
@@ -839,6 +840,17 @@ public static class ApiEndpoints
             await c.SaveChangesAsync(ct);
             return Results.Ok(new { message = "Missing download cleared; the item can be searched or grabbed again" });
         });
+
+        // Blocklist: never touches the torrent or any file; only OneArr's record and future searches.
+        api.MapPost("/queue/{id:int}/blocklist", async (int id, BlocklistBody? body, BlocklistService blocklist, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await blocklist.BlocklistJobAsync(id, body?.Reason ?? "", ct)); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+        api.MapGet("/blocklist", async (BlocklistService blocklist, CancellationToken ct) => Results.Ok(await blocklist.ListAsync(ct)));
+        api.MapDelete("/blocklist/{id:int}", async (int id, BlocklistService blocklist, CancellationToken ct) =>
+            await blocklist.RemoveAsync(id, ct) ? Results.NoContent() : Results.NotFound());
 
         api.MapPost("/queue/sync", async (DownloadService downloads, JobRunner runner, CancellationToken ct) =>
         {

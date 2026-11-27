@@ -18,9 +18,10 @@ public sealed class BackgroundScheduler : BackgroundService
     private readonly WantedSearchService _search;
     private readonly MediaService? _media;
     private readonly RssSyncService? _rss;
+    private readonly BlocklistService? _blocklist;
     private readonly ILogger<BackgroundScheduler> _log;
 
-    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null, RssSyncService? rss = null)
+    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null, RssSyncService? rss = null, BlocklistService? blocklist = null)
     {
         _runner = runner;
         _downloads = downloads;
@@ -29,6 +30,7 @@ public sealed class BackgroundScheduler : BackgroundService
         _log = log;
         _media = media;
         _rss = rss;
+        _blocklist = blocklist;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -71,6 +73,11 @@ public sealed class BackgroundScheduler : BackgroundService
         // Wanted search runs every 15 minutes, and only when automatic grabbing is switched on.
         if (tick % 15 == 0 && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))
             await _runner.TryRunAsync("wanted-search", async t => (await _search.RunOnceAsync(t)).ToString(), ct);
+
+        // Dead torrents (no progress a day after the grab) are blocklisted hourly so the item gets another release.
+        // Only while automatic grabbing is on: otherwise nothing would grab a replacement.
+        if (tick % 60 == 30 && _blocklist is not null && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))
+            await _runner.TryRunAsync("dead-downloads", t => _blocklist.BlocklistDeadTorrentsAsync(t), ct);
 
         // RSS sync reads the newest releases of opted-in indexers every 15 minutes, offset from the wanted search.
         if (tick % 15 == 7 && _rss is not null && await _settings.GetBoolAsync(OneArr.Domain.SettingKeys.AutomaticGrab, false, ct))
