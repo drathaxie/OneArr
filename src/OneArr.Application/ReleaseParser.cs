@@ -19,6 +19,8 @@ public sealed partial class ReleaseParser : IReleaseParser
     private static readonly Regex YearRx = new(@"(?<![0-9])(19|20)\d{2}(?![0-9])", RegexOptions.Compiled);
     private static readonly Regex ResolutionRx = new(@"(?i)(?<![a-z0-9])(2160p|1080p|720p|480p|4k)(?![a-z0-9])", RegexOptions.Compiled);
     private static readonly Regex SourceRx = new(@"(?i)(?<![a-z0-9])(BluRay|BDRip|BRRip|Remux|WEB-?DL|WEB-?Rip|HDTV|HDCAM|CAMRip|CAM|TELESYNC|TS|TC)(?![a-z0-9])", RegexOptions.Compiled);
+    private static readonly Regex ProperRx = new(@"(?i)(?<![a-z0-9])(PROPER|REPACK|RERIP)(?![a-z0-9])", RegexOptions.Compiled);
+    private static readonly Regex VersionRx = new(@"(?i)(?<![a-z0-9])(?:\d{1,4})?v(?<v>[2-9])(?![a-z0-9])", RegexOptions.Compiled);
     private static readonly Regex UnsafeRx = new(@"(\.\.|[\\/:*?""<>|])|\.(exe|scr|bat|cmd|msi|lnk)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public ParsedRelease Parse(string releaseName)
@@ -106,8 +108,31 @@ public sealed partial class ReleaseParser : IReleaseParser
             episodes,
             seasonPack,
             source == SourceCam,
-            unsafeName);
+            unsafeName,
+            RevisionOf(name));
     }
+
+    /// <summary>
+    /// 1 for an original release. Each PROPER, REPACK or RERIP adds one (REAL.PROPER counts once per word); an anime "v2"/"v3"
+    /// tag sets it directly. A higher revision of the same quality fixes a broken original.
+    /// </summary>
+    public static int RevisionOf(string name)
+    {
+        var revision = 1 + ProperRx.Matches(name).Count;
+        var version = VersionRx.Match(name);
+        if (version.Success) revision = Math.Max(revision, int.Parse(version.Groups["v"].Value));
+        return Math.Min(revision, 9);
+    }
+
+    /// <summary>Source rank for comparing qualities: Blu-ray above WEB-DL above WEBRip above HDTV.</summary>
+    public static int SourceRank(string? source) => source switch
+    {
+        SourceBluRay => 4,
+        SourceWebDl => 3,
+        SourceWebRip => 2,
+        SourceHdtv => 1,
+        _ => 0,
+    };
 
     /// <summary>
     /// Lowercase alphanumeric key for title comparison, e.g. "The.Matrix" and "The Matrix!" both become "thematrix". Accents are

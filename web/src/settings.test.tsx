@@ -122,7 +122,7 @@ describe("General settings", () => {
 
     await waitFor(() => expect(putCalls()).toHaveLength(1));
     const body = putCalls()[0].body!;
-    expect(body).toEqual({ torrentRoot: "/mnt/torrents", mediaRoot: "/data/media", dryRunImport: true });
+    expect(body).toEqual({ torrentRoot: "/mnt/torrents", mediaRoot: "/data/media", recycleBin: "", dryRunImport: true });
     expect(JSON.stringify(body)).not.toContain("tmdbApiKey");
   });
 
@@ -200,7 +200,7 @@ describe("Quality profile settings", () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/quality-profiles")).toBe(true));
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/quality-profiles")!;
-    expect(post.body).toEqual({ name: "Test-4K", minResolution: 1080, cutoffResolution: 2160, allowWebSources: true });
+    expect(post.body).toEqual({ name: "Test-4K", minResolution: 1080, cutoffResolution: 2160, allowWebSources: true, allowedSources: "", minSizeMb: 0, maxSizeMb: 0, mustContain: "", mustNotContain: "", preferredWords: "", upgradesAllowed: false });
   });
 
   it("shows an error when the cutoff is below the minimum", async () => {
@@ -231,7 +231,7 @@ describe("Quality profile management", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
     await waitFor(() => expect(calls.some(x => x.path === "/api/quality-profiles/1" && x.method === "PUT")).toBe(true));
     const put = calls.find(x => x.path === "/api/quality-profiles/1" && x.method === "PUT")!;
-    expect(put.body).toEqual({ name: "HD edited", minResolution: 1080, cutoffResolution: 2160, allowWebSources: true });
+    expect(put.body).toEqual({ name: "HD edited", minResolution: 1080, cutoffResolution: 2160, allowWebSources: true, allowedSources: "", minSizeMb: 0, maxSizeMb: 0, mustContain: "", mustNotContain: "", preferredWords: "", upgradesAllowed: false });
   });
 
   it("asks for explicit delete confirmation and shows an in-use conflict", async () => {

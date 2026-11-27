@@ -18,6 +18,8 @@ public static class SettingKeys
     public const string SeriesNamingTemplate = "import.naming.series";
     public const string TorrentRoot = "paths.torrents";
     public const string MediaRoot = "paths.media";
+    /// <summary>Folder that receives files replaced by an upgrade. Must be on the same drive as the library. Unset: no upgrades.</summary>
+    public const string RecycleBin = "paths.recycleBin";
     /// <summary>Per-type default root folders for the Add dialog. When one is unset, adds for that type require an explicit folder; they never fall back to the shared MediaRoot.</summary>
     public const string DefaultMovieRoot = "media.defaultRoot.movie";
     public const string DefaultSeriesRoot = "media.defaultRoot.series";

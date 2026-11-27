@@ -52,6 +52,25 @@ public sealed class ReleaseRanker : IReleaseRanker
         if (parsed.IsCam) reasons.Add("Cam or telesync source");
         if (!target.Profile.AllowWebSources && parsed.Source is ReleaseParser.SourceWebDl or ReleaseParser.SourceWebRip)
             reasons.Add("Web sources not allowed by quality profile");
+        var allowedSources = QualityProfile.Words(target.Profile.AllowedSources);
+        if (allowedSources.Count > 0 && !allowedSources.Contains(parsed.Source, StringComparer.OrdinalIgnoreCase))
+            reasons.Add($"Source {parsed.Source} not allowed by quality profile ({string.Join(", ", allowedSources)})");
+
+        // Size limits apply to a movie or a single episode; a pack's size depends on how many episodes it holds.
+        if (!parsed.IsSeasonPack && candidate.Size > 0 && parsed.Episodes.Count <= 1)
+        {
+            var mb = candidate.Size / (1024 * 1024);
+            if (target.Profile.MinSizeMb > 0 && mb < target.Profile.MinSizeMb)
+                reasons.Add($"Size {mb} MB below the profile minimum {target.Profile.MinSizeMb} MB");
+            if (target.Profile.MaxSizeMb > 0 && mb > target.Profile.MaxSizeMb)
+                reasons.Add($"Size {mb} MB above the profile maximum {target.Profile.MaxSizeMb} MB");
+        }
+
+        var must = QualityProfile.Words(target.Profile.MustContain);
+        if (must.Count > 0 && !must.Any(w => HasWord(candidate.Title, w)))
+            reasons.Add("Missing a required word: " + string.Join(", ", must));
+        var banned = QualityProfile.Words(target.Profile.MustNotContain).FirstOrDefault(w => HasWord(candidate.Title, w));
+        if (banned is not null) reasons.Add($"Contains the banned word '{banned}'");
 
         var resolution = parsed.Resolution;
         if (resolution is null)
@@ -61,10 +80,18 @@ public sealed class ReleaseRanker : IReleaseRanker
 
         if (target.AlreadyHasFile && target.CurrentResolution is int current)
         {
-            if (current >= target.Profile.CutoffResolution)
-                reasons.Add($"Already have {current}p, cutoff {target.Profile.CutoffResolution}p met");
-            else if (resolution is int cand && cand <= current)
-                reasons.Add($"Not an upgrade: have {current}p, release is {cand}p");
+            var candRes = resolution ?? 0;
+            var candRank = ReleaseParser.SourceRank(parsed.Source);
+            var haveRank = ReleaseParser.SourceRank(target.CurrentSource);
+            // A PROPER/REPACK of exactly the quality already on disk fixes a broken release, even at the cutoff.
+            var isRevision = candRes == current && candRank == haveRank && parsed.Revision > target.CurrentRevision;
+            if (!isRevision)
+            {
+                if (current >= target.Profile.CutoffResolution)
+                    reasons.Add($"Already have {current}p, cutoff {target.Profile.CutoffResolution}p met");
+                else if (candRes < current || (candRes == current && candRank <= haveRank))
+                    reasons.Add($"Not an upgrade: have {current}p {target.CurrentSource ?? "unknown source"}, release is {candRes}p {parsed.Source}");
+            }
         }
         else if (target.AlreadyHasFile)
         {
@@ -76,7 +103,7 @@ public sealed class ReleaseRanker : IReleaseRanker
 
         if (candidate.Seeders == 0) reasons.Add("No seeders");
 
-        var score = Score(parsed, candidate);
+        var score = Score(parsed, candidate) + 15 * QualityProfile.Words(target.Profile.PreferredWords).Count(w => HasWord(candidate.Title, w));
         return new ReleaseDecision(candidate, parsed, reasons.Count == 0, score, reasons);
     }
 
@@ -94,8 +121,15 @@ public sealed class ReleaseRanker : IReleaseRanker
         };
         var seeders = Math.Min(candidate.Seeders, 100) / 10;
         var pack = parsed.IsSeasonPack ? 2 : 0;
-        return resolution + source + seeders + pack;
+        var revision = (parsed.Revision - 1) * 5;
+        return resolution + source + seeders + pack + revision;
     }
+
+    /// <summary>Whole-word, case-insensitive: "x265" matches "Show.S01E01.x265-GRP" but "HDR" does not match "HDRip".</summary>
+    public static bool HasWord(string title, string word) =>
+        word.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(title,
+            @"(?<![A-Za-z0-9])" + System.Text.RegularExpressions.Regex.Escape(word) + @"(?![A-Za-z0-9])",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static string FormatEpisodes(IReadOnlyList<int> episodes) =>
         episodes.Count == 0 ? "no episode" : string.Join(", ", episodes.Select(e => $"E{e:00}"));

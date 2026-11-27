@@ -153,10 +153,15 @@ public sealed class RssSyncService
         var tomorrow = DateOnly.FromDateTime(now.UtcDateTime).AddDays(1);
         var busy = (await db.DownloadJobs.AsNoTracking().Where(j => Blocking.Contains(j.Status))
             .Select(j => new ValueTuple<int?, int?>(j.MediaItemId, j.EpisodeId)).ToListAsync(ct)).ToHashSet();
+        // Items that already have a file are included for profiles with upgrades on (and a recycle bin set), so a PROPER or a
+        // better release in the feed can replace them. The ranker decides whether a release really is better.
+        var upgradeProfiles = string.IsNullOrWhiteSpace(await _settings.GetAsync(SettingKeys.RecycleBin, ct))
+            ? new List<int>()
+            : await db.QualityProfiles.AsNoTracking().Where(p => p.UpgradesAllowed).Select(p => p.Id).ToListAsync(ct);
 
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
+                              where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && (!e.HasFile || upgradeProfiles.Contains(m.QualityProfileId)) && e.AirDate != null && e.AirDate <= tomorrow
                               select new { e.Id, MediaItemId = m.Id, m.Title, m.AlternateTitles, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
         var byEpisode = new Dictionary<(string, int, int), (int, int?)>();
         foreach (var e in episodes)
@@ -167,7 +172,7 @@ public sealed class RssSyncService
         }
 
         var movies = await db.MediaItems.AsNoTracking()
-            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
+            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && (!m.HasFile || upgradeProfiles.Contains(m.QualityProfileId)))
             .Select(m => new { m.Id, m.Title, m.Year, m.AlternateTitles, m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate }).ToListAsync(ct);
         var today = DateOnly.FromDateTime(now.UtcDateTime);
         var byMovie = new Dictionary<string, List<(int, int?)>>();

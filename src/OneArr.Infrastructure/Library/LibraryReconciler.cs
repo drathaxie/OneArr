@@ -217,6 +217,13 @@ public sealed class LibraryReconciler
                     row.LibraryRootId = RootIdFor(link.Key, enabledRoots, _fs.Windows);
                     row.MatchMethod = link.Method;
                     row.Resolution = link.Resolution;
+                    // A file OneArr imported keeps the quality of its release; others are read from the file name.
+                    if (row.ReleaseTitle is null)
+                    {
+                        var parsed = new OneArr.Application.ReleaseParser().Parse(System.IO.Path.GetFileName(link.Path));
+                        row.Source = parsed.Source;
+                        row.Revision = parsed.Revision;
+                    }
                     row.LastVerifiedUtc = now;
                     affectedItems.Add(link.MediaItemId);
                 }

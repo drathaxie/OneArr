@@ -28,9 +28,12 @@ public static class ApiEndpoints
         string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null, bool? RssSync = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null, string? RecycleBin = null);
     public sealed record BlocklistBody(string? Reason);
-    public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources);
+    // The newer fields are optional: null keeps the stored value on PUT and the default on POST, so older clients still work.
+    public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources,
+        string? AllowedSources = null, int? MinSizeMb = null, int? MaxSizeMb = null,
+        string? MustContain = null, string? MustNotContain = null, string? PreferredWords = null, bool? UpgradesAllowed = null);
     public sealed record NamingPreviewBody(string Kind, string Template, string Title, string OriginalFile, int? Year = null, int? Season = null, int? Episode = null, string? EpisodeTitle = null, string? Quality = null, string? ReleaseGroup = null);
     public sealed record MigrationPreviewBody(string Kind, string BaseUrl, string ApiKey);
     public sealed record MigrationImportBody(List<MigrationSelection> Items, int QualityProfileId, string RootFolder);
@@ -120,6 +123,7 @@ public static class ApiEndpoints
                 CutoffResolution = body.CutoffResolution,
                 AllowWebSources = body.AllowWebSources
             };
+            ApplyProfileExtras(profile, body);
             c.QualityProfiles.Add(profile);
             await c.SaveChangesAsync(ct);
             return Results.Created($"/api/quality-profiles/{profile.Id}", profile);
@@ -137,6 +141,7 @@ public static class ApiEndpoints
             profile.MinResolution = body.MinResolution;
             profile.CutoffResolution = body.CutoffResolution;
             profile.AllowWebSources = body.AllowWebSources;
+            ApplyProfileExtras(profile, body);
             await c.SaveChangesAsync(ct);
             return Results.Ok(profile);
         });
@@ -1074,6 +1079,7 @@ public static class ApiEndpoints
                 seriesNamingTemplate = await settings.GetAsync(SettingKeys.SeriesNamingTemplate, ct) ?? MediaNaming.EpisodeTemplate,
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
+                recycleBin = await settings.GetAsync(SettingKeys.RecycleBin, ct),
                 automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
                 automaticImport = await settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct),
                 defaultMovieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct),
@@ -1117,6 +1123,8 @@ public static class ApiEndpoints
             }
             if (body.TorrentRoot is not null) values[SettingKeys.TorrentRoot] = RequireAbsolute(body.TorrentRoot);
             if (body.MediaRoot is not null) values[SettingKeys.MediaRoot] = RequireAbsolute(body.MediaRoot);
+            // Empty clears the recycle bin, which switches upgrades off.
+            if (body.RecycleBin is not null) values[SettingKeys.RecycleBin] = string.IsNullOrWhiteSpace(body.RecycleBin) ? null : RequireAbsolute(body.RecycleBin);
             if (body.AutomaticGrabbing is bool auto) values[SettingKeys.AutomaticGrab] = auto.ToString();
             if (body.AutomaticImport is bool autoImport) values[SettingKeys.AutomaticImport] = autoImport.ToString();
             if (body.DefaultMovieRoot is not null) values[SettingKeys.DefaultMovieRoot] = string.IsNullOrWhiteSpace(body.DefaultMovieRoot) ? null : RequireAbsolute(body.DefaultMovieRoot);
@@ -1787,7 +1795,25 @@ public static class ApiEndpoints
             body.CutoffResolution is not (480 or 720 or 1080 or 2160) ||
             body.CutoffResolution < body.MinResolution)
             return "Resolutions must be 480, 720, 1080 or 2160, with cutoff >= minimum.";
+        if (body.MinSizeMb is < 0 || body.MaxSizeMb is < 0) return "Size limits cannot be negative.";
+        if (body.MinSizeMb is int lo && body.MaxSizeMb is int hi && hi > 0 && lo > hi) return "The minimum size is larger than the maximum.";
+        if (QualityProfile.Words(body.AllowedSources).FirstOrDefault(s => s is not ("bluray" or "webdl" or "webrip" or "hdtv")) is string bad)
+            return $"Unknown source '{bad}'. Use bluray, webdl, webrip or hdtv.";
+        foreach (var words in new[] { body.MustContain, body.MustNotContain, body.PreferredWords })
+            if (words is { Length: > 500 }) return "Word lists must be under 500 characters.";
         return null;
+    }
+
+    private static void ApplyProfileExtras(QualityProfile profile, ProfileBody body)
+    {
+        static string? Clean(string? csv) => QualityProfile.Words(csv) is { Count: > 0 } w ? string.Join(", ", w.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
+        if (body.AllowedSources is not null) profile.AllowedSources = Clean(body.AllowedSources?.ToLowerInvariant());
+        if (body.MinSizeMb is int min) profile.MinSizeMb = min;
+        if (body.MaxSizeMb is int max) profile.MaxSizeMb = max;
+        if (body.MustContain is not null) profile.MustContain = Clean(body.MustContain);
+        if (body.MustNotContain is not null) profile.MustNotContain = Clean(body.MustNotContain);
+        if (body.PreferredWords is not null) profile.PreferredWords = Clean(body.PreferredWords);
+        if (body.UpgradesAllowed is bool upgrades) profile.UpgradesAllowed = upgrades;
     }
 
     private static async Task<(bool Ok, string Detail)> TestPlainIndexerAsync(

@@ -124,6 +124,8 @@ public class OneArrDbContext : DbContext
 
         b.Entity<ProblemDismissal>(e => e.HasIndex(x => x.Key).IsUnique());
         b.Entity<BlocklistEntry>(e => e.HasIndex(x => x.InfoHash));
+        // Existing files are original releases (revision 1), not "revision 0", or every release would look like a proper of them.
+        b.Entity<MediaFile>().Property(x => x.Revision).HasDefaultValue(1);
 
         b.Entity<FileRecord>(e => e.HasIndex(x => x.Path).IsUnique());
         b.Entity<AppSetting>(e => e.HasKey(x => x.Key));

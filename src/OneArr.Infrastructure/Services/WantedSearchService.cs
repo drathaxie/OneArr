@@ -29,6 +29,8 @@ public sealed record SearchPolicy
     public int RecentAirDays { get; init; } = 2;
     /// <summary>Retry spacing for a recently aired episode that has no acceptable release yet.</summary>
     public TimeSpan RecentRetryInterval { get; init; } = TimeSpan.FromHours(1);
+    /// <summary>Wait before looking again for a better release of an item that already has a file.</summary>
+    public TimeSpan UpgradeInterval { get; init; } = TimeSpan.FromHours(24);
 }
 
 public sealed record WantedSearchSummary(bool Enabled, int Considered, int Searched, int Grabbed, int Skipped, string Message)
@@ -99,9 +101,12 @@ public sealed class WantedSearchService
             var outcome = await SearchAndGrabAsync(c, ct);
             if (outcome.Outcome == SearchOutcome.Grabbed) grabbed++;
             // A just-aired episode usually has no release for a few hours. Look again soon rather than in six hours.
-            var delay = outcome.Outcome == SearchOutcome.NoAcceptableRelease && IsRecentlyAired(c, today)
+            var delay = outcome.Outcome == SearchOutcome.NoAcceptableRelease && IsRecentlyAired(c, today) && !c.Upgrade
                 ? TimeSpan.FromTicks(Math.Min(outcome.NextDelay.Ticks, _policy.RecentRetryInterval.Ticks))
                 : outcome.NextDelay;
+            // Upgrades are a nicety: look once a day, not every six hours.
+            if (c.Upgrade && outcome.Outcome is SearchOutcome.NoAcceptableRelease or SearchOutcome.Rejected && delay < _policy.UpgradeInterval)
+                delay = _policy.UpgradeInterval;
             await RecordAsync(c, outcome.Outcome, outcome.Message, _time.GetUtcNow(), ct, delay);
         }
 
@@ -154,7 +159,7 @@ public sealed class WantedSearchService
         return delay > _policy.ErrorMaxDelay ? _policy.ErrorMaxDelay : delay;
     }
 
-    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, bool HasMissingDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt, DateOnly? AirDate, bool NeverSearched);
+    private sealed record Candidate(int MediaItemId, int? EpisodeId, string Key, bool HasActiveDownload, bool HasMissingDownload, int ConsecutiveFailures, string Title, DateTimeOffset NextAttemptAt, DateOnly? AirDate, bool NeverSearched, bool Upgrade = false);
 
     private bool IsRecentlyAired(Candidate c, DateOnly today) =>
         c.AirDate is DateOnly aired && aired >= today.AddDays(-_policy.RecentAirDays);
@@ -202,14 +207,54 @@ public sealed class WantedSearchService
             list.Add(new Candidate(e.MediaItemId, e.EpisodeId, key, active.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), missing.Contains(((int?)e.MediaItemId, (int?)e.EpisodeId)), FailuresOf(states, key), $"{e.Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", NextOf(states, key, now), e.AirDate, !states.ContainsKey(key)));
         }
 
-        // Recently aired episodes first, then items never searched, then the backlog by how long it has waited.
+        await AddUpgradeCandidatesAsync(db, list, states, active, missing, now, ct);
+
+        // Recently aired episodes first, then items never searched, then the backlog by how long it has waited; upgrades last.
         // Ordering only by due time put a just-aired episode behind every overdue backlog item, so with more than
         // MaxSearchesPerRun overdue items a new episode could wait hours.
         return list
-            .OrderBy(c => IsRecentlyAired(c, today) ? 0 : c.NeverSearched ? 1 : 2)
+            .OrderBy(c => c.Upgrade ? 3 : IsRecentlyAired(c, today) ? 0 : c.NeverSearched ? 1 : 2)
             .ThenBy(c => c.NextAttemptAt)
             .ThenBy(c => c.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Items that have a file below their profile's cutoff, for profiles with upgrades switched on. Only when a recycle bin is set:
+    /// without one the old file could not be moved aside, and the upgrade would sit next to it.
+    /// </summary>
+    private async Task AddUpgradeCandidatesAsync(OneArrDbContext db, List<Candidate> list, Dictionary<string, SearchAttempt> states,
+        HashSet<(int?, int?)> active, HashSet<(int?, int?)> missing, DateTimeOffset now, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(await _settings.GetAsync(SettingKeys.RecycleBin, ct))) return;
+        var profiles = await db.QualityProfiles.AsNoTracking().Where(p => p.UpgradesAllowed).ToDictionaryAsync(p => p.Id, p => p.CutoffResolution, ct);
+        if (profiles.Count == 0) return;
+        var ids = profiles.Keys.ToList();
+        var items = await db.MediaItems.AsNoTracking().Where(m => m.Monitored && ids.Contains(m.QualityProfileId))
+            .Select(m => new { m.Id, m.Title, m.MediaType, m.QualityProfileId, m.HasFile }).ToListAsync(ct);
+        var itemIds = items.Select(i => i.Id).ToList();
+        var files = await db.MediaFiles.AsNoTracking().Include(f => f.EpisodeLinks)
+            .Where(f => f.Status == MediaFileStatus.Present && f.MediaItemId != null && itemIds.Contains(f.MediaItemId!.Value)).ToListAsync(ct);
+        var episodes = await db.Episodes.AsNoTracking().Where(e => itemIds.Contains(e.MediaItemId) && e.Monitored && e.HasFile)
+            .Select(e => new { e.Id, e.MediaItemId, e.SeasonNumber, e.EpisodeNumber }).ToListAsync(ct);
+        var byId = items.ToDictionary(i => i.Id);
+
+        void Add(int itemId, int? episodeId, string title, int best)
+        {
+            var cutoff = profiles[byId[itemId].QualityProfileId];
+            if (best <= 0 || best >= cutoff) return; // unknown quality is never "upgraded" blindly
+            var key = episodeId is int e ? $"episode:{e}" : $"movie:{itemId}";
+            if (!IsDue(states, key, now)) return;
+            list.Add(new Candidate(itemId, episodeId, key, active.Contains((itemId, episodeId)), missing.Contains((itemId, episodeId)),
+                FailuresOf(states, key), title + " (upgrade)", NextOf(states, key, now), null, false, Upgrade: true));
+        }
+
+        foreach (var m in items.Where(i => i.MediaType == MediaType.Movie && i.HasFile))
+            Add(m.Id, null, m.Title, files.Where(f => f.MediaItemId == m.Id).Select(f => f.Resolution ?? 0).DefaultIfEmpty(0).Max());
+        var bestByEpisode = files.SelectMany(f => f.EpisodeLinks.Select(l => (l.EpisodeId, Res: f.Resolution ?? 0)))
+            .GroupBy(x => x.EpisodeId).ToDictionary(g => g.Key, g => g.Max(x => x.Res));
+        foreach (var e in episodes)
+            Add(e.MediaItemId, e.Id, $"{byId[e.MediaItemId].Title} S{e.SeasonNumber:00}E{e.EpisodeNumber:00}", bestByEpisode.GetValueOrDefault(e.Id));
     }
 
     private static bool IsDue(Dictionary<string, SearchAttempt> states, string key, DateTimeOffset now) =>

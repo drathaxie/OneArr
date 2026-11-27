@@ -78,6 +78,7 @@ export interface SettingsData {
   seriesNamingTemplate?: string;
   torrentRoot: string | null;
   mediaRoot: string | null;
+  recycleBin?: string | null;
   automaticGrabbing: boolean;
   automaticImport?: boolean;
   defaultMovieRoot: string | null;
@@ -164,6 +165,13 @@ export interface QualityProfile {
   minResolution: number;
   cutoffResolution: number;
   allowWebSources: boolean;
+  allowedSources?: string | null;
+  minSizeMb?: number;
+  maxSizeMb?: number;
+  mustContain?: string | null;
+  mustNotContain?: string | null;
+  preferredWords?: string | null;
+  upgradesAllowed?: boolean;
 }
 
 export interface MetadataResult {

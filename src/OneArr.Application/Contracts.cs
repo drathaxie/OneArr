@@ -106,7 +106,8 @@ public sealed record ParsedRelease(
     IReadOnlyList<int> Episodes,
     bool IsSeasonPack,
     bool IsCam,
-    bool IsUnsafeName);
+    bool IsUnsafeName,
+    int Revision = 1);
 
 public sealed record ReleaseTarget(
     MediaType Type,
@@ -119,7 +120,9 @@ public sealed record ReleaseTarget(
     bool AlreadyHasFile,
     IReadOnlySet<string> KnownInfoHashes,
     IReadOnlyList<string>? Aliases = null,
-    IReadOnlySet<string>? Blocklisted = null);
+    IReadOnlySet<string>? Blocklisted = null,
+    string? CurrentSource = null,
+    int CurrentRevision = 1);
 
 public sealed record ReleaseDecision(
     ReleaseCandidate Candidate,

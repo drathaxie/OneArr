@@ -1085,4 +1085,111 @@ public class DownloadLifecycleTests
         Assert.False(await world.Settings.GetBoolAsync(SettingKeys.AutomaticGrab, false));
         Assert.True(await world.Settings.GetBoolAsync(SettingKeys.DryRunImport, true));
     }
+
+    // ---- Upgrades: the old file goes to the recycle bin (same drive), never deleted, and comes back if the import fails.
+
+    private static async Task EnableUpgradesAsync(TestWorld world, string? recycle)
+    {
+        await using var db = world.Db.CreateDbContext();
+        foreach (var p in db.QualityProfiles) p.UpgradesAllowed = true;
+        await db.SaveChangesAsync();
+        if (recycle is not null) await world.Settings.SetAsync(SettingKeys.RecycleBin, recycle);
+    }
+
+    private static async Task<string> ImportReleaseAsync(TestWorld world, DownloadService svc, int movieId, string release, string content, string hash)
+    {
+        var source = world.Dirs.WriteFile($"torrents/{release}/{release}.mkv", content);
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, movieId, null, MediaType.Movie, release, DownloadStatus.Completed, 1, hash, Path.GetDirectoryName(source));
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        await svc.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+        return Assert.Single(preview.Plans).DestinationPath!;
+    }
+
+    [Fact]
+    public async Task Upgrade_with_the_same_file_name_moves_the_old_file_to_the_recycle_bin_first()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        await world.Settings.SetAsync(SettingKeys.MovieNamingTemplate, "{Title} ({Year})");
+        var recycle = Path.Combine(world.Dirs.Root, "recycle");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var svc = PreviewService(world);
+        var dest = await ImportReleaseAsync(world, svc, id, "Dune.2021.720p.BluRay-OLD", "old-video", "b1");
+        await EnableUpgradesAsync(world, recycle);
+
+        var source = world.Dirs.WriteFile("torrents/Dune.2021.1080p.BluRay-NEW/Dune.2021.1080p.BluRay-NEW.mkv", "new-video");
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie, "Dune.2021.1080p.BluRay-NEW", DownloadStatus.Completed, 1, "b2", Path.GetDirectoryName(source));
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        var plan = Assert.Single(preview.Plans);
+        Assert.True(plan.ReplacesExisting);
+        Assert.Equal("old-video", await File.ReadAllTextAsync(dest)); // a preview changes nothing
+        await svc.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+
+        Assert.Equal("new-video", await File.ReadAllTextAsync(dest));
+        var recycled = Assert.Single(Directory.GetFiles(recycle, "*", SearchOption.AllDirectories));
+        Assert.Equal("old-video", await File.ReadAllTextAsync(recycled));
+        await using var db = world.Db.CreateDbContext();
+        var row = await db.MediaFiles.SingleAsync(f => f.Status == MediaFileStatus.Present);
+        Assert.Equal(1080, row.Resolution);
+        Assert.Equal("bluray", row.Source);
+    }
+
+    [Fact]
+    public async Task Upgrade_with_a_new_file_name_recycles_the_old_file_after_the_new_one_imports()
+    {
+        using var world = await WorldAsync();
+        var recycle = Path.Combine(world.Dirs.Root, "recycle");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var svc = PreviewService(world);
+        var oldDest = await ImportReleaseAsync(world, svc, id, "Dune.2021.720p.BluRay-OLD", "old-video", "c1");
+        await EnableUpgradesAsync(world, recycle);
+
+        var newDest = await ImportReleaseAsync(world, svc, id, "Dune.2021.1080p.BluRay-NEW", "new-video", "c2");
+
+        Assert.False(File.Exists(oldDest));
+        Assert.True(File.Exists(newDest));
+        Assert.Equal("old-video", await File.ReadAllTextAsync(Assert.Single(Directory.GetFiles(recycle, "*", SearchOption.AllDirectories))));
+        await using var db = world.Db.CreateDbContext();
+        Assert.Equal(MediaFileStatus.Recycled, (await db.MediaFiles.SingleAsync(f => f.Path == oldDest)).Status);
+    }
+
+    [Fact]
+    public async Task Without_upgrades_switched_on_the_old_file_is_never_moved()
+    {
+        using var world = await WorldAsync();
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var svc = PreviewService(world);
+        var oldDest = await ImportReleaseAsync(world, svc, id, "Dune.2021.720p.BluRay-OLD", "old-video", "d1");
+        await world.Settings.SetAsync(SettingKeys.RecycleBin, Path.Combine(world.Dirs.Root, "recycle"));
+
+        await ImportReleaseAsync(world, svc, id, "Dune.2021.1080p.BluRay-NEW", "new-video", "d2");
+
+        Assert.Equal("old-video", await File.ReadAllTextAsync(oldDest));
+        Assert.False(Directory.Exists(Path.Combine(world.Dirs.Root, "recycle")));
+    }
+
+    [Fact]
+    public async Task A_failed_upgrade_import_puts_the_old_file_back()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        await world.Settings.SetAsync(SettingKeys.MovieNamingTemplate, "{Title} ({Year})");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var dest = await ImportReleaseAsync(world, PreviewService(world), id, "Dune.2021.720p.BluRay-OLD", "old-video", "e1");
+        await EnableUpgradesAsync(world, Path.Combine(world.Dirs.Root, "recycle"));
+
+        var failing = new DownloadService(world.Db, new QBittorrentClient(new FakeFactory(world.Http)),
+            new ThrowingImporter(new SafeImporter(TimeSpan.FromSeconds(30)), "Dune.2021.1080p.BluRay-NEW.mkv"), world.Settings, world.Time);
+        var source = world.Dirs.WriteFile("torrents/Dune.2021.1080p.BluRay-NEW/Dune.2021.1080p.BluRay-NEW.mkv", "new-video");
+        AgeFile(source);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie, "Dune.2021.1080p.BluRay-NEW", DownloadStatus.Completed, 1, "e2", Path.GetDirectoryName(source));
+        var preview = await failing.PreviewImportAsync(jobId, default);
+        await failing.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+
+        Assert.Equal("old-video", await File.ReadAllTextAsync(dest));
+        Assert.Equal(DownloadStatus.Failed, (await GetJobAsync(world, jobId)).Status);
+    }
 }

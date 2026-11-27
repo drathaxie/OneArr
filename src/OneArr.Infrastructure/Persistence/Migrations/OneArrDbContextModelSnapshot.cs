@@ -555,11 +555,22 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ReleaseTitle")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("Resolution")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
                     b.Property<long>("SizeBytes")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -741,15 +752,36 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.Property<bool>("AllowWebSources")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AllowedSources")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("CutoffResolution")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxSizeMb")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("MinResolution")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("MinSizeMb")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MustContain")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MustNotContain")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("PreferredWords")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("UpgradesAllowed")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 

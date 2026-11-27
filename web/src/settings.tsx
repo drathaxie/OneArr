@@ -214,10 +214,11 @@ function DefaultRootsForm({ data, onSaved }: { data: SettingsData; onSaved: () =
 function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => void }) {
   const [torrentRoot, setTorrentRoot] = useState(data.torrentRoot ?? "");
   const [mediaRoot, setMediaRoot] = useState(data.mediaRoot ?? "");
+  const [recycleBin, setRecycleBin] = useState(data.recycleBin ?? "");
   const [dry, setDry] = useState<boolean>(data.dryRunImport);
   const [message, setMessage] = useState<string | null>(null);
   return (
-    <form className="card" onSubmit={(e) => { e.preventDefault(); void saveSettings({ torrentRoot, mediaRoot, dryRunImport: dry }, setMessage, onSaved); }}>
+    <form className="card" onSubmit={(e) => { e.preventDefault(); void saveSettings({ torrentRoot, mediaRoot, recycleBin, dryRunImport: dry }, setMessage, onSaved); }}>
       <h2>Import paths</h2>
       <p className="muted">Where downloads live, the media root that imports must stay inside, and whether imports are dry-run only. The media root is NOT an Add default: it never supplies a folder for a new title.</p>
       <label>Torrent download root (absolute)
@@ -226,6 +227,10 @@ function MediaPathsForm({ data, onSaved }: { data: SettingsData; onSaved: () => 
       <label>Media root (imports must stay inside it)
         <input aria-label="Media root (imports)" value={mediaRoot} onChange={(e) => setMediaRoot(e.target.value)} placeholder="D:\Media" />
       </label>
+      <label>Recycle bin for upgraded files (optional, same drive as the library)
+        <input aria-label="Recycle bin" value={recycleBin} onChange={(e) => setRecycleBin(e.target.value)} placeholder="D:\Media\.recycle" />
+      </label>
+      <p className="muted">When a quality profile allows upgrades, the file a better release replaces is moved here, never deleted. Empty the folder yourself when you are happy. Leave blank to switch upgrades off.</p>
       <label className="inline"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> Imports are dry-run only (recommended until verified)</label>
       <ErrorLine message={message} />
       <button className="primary" type="submit">Save import paths</button>
@@ -408,6 +413,13 @@ function ProfileForm({ initial, onSaved, onCancel }: { initial?: QualityProfile;
   const [min, setMin] = useState(initial?.minResolution ?? 720);
   const [cutoff, setCutoff] = useState(initial?.cutoffResolution ?? 1080);
   const [web, setWeb] = useState(initial?.allowWebSources ?? true);
+  const [sources, setSources] = useState(initial?.allowedSources ?? "");
+  const [minSize, setMinSize] = useState(initial?.minSizeMb ?? 0);
+  const [maxSize, setMaxSize] = useState(initial?.maxSizeMb ?? 0);
+  const [must, setMust] = useState(initial?.mustContain ?? "");
+  const [mustNot, setMustNot] = useState(initial?.mustNotContain ?? "");
+  const [preferred, setPreferred] = useState(initial?.preferredWords ?? "");
+  const [upgrades, setUpgrades] = useState(initial?.upgradesAllowed ?? false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   return (
@@ -419,7 +431,9 @@ function ProfileForm({ initial, onSaved, onCancel }: { initial?: QualityProfile;
         try {
           await api(initial ? "PUT" : "POST",
             initial ? `/api/quality-profiles/${initial.id}` : "/api/quality-profiles",
-            { name, minResolution: min, cutoffResolution: cutoff, allowWebSources: web });
+            { name, minResolution: min, cutoffResolution: cutoff, allowWebSources: web,
+              allowedSources: sources, minSizeMb: minSize, maxSizeMb: maxSize,
+              mustContain: must, mustNotContain: mustNot, preferredWords: preferred, upgradesAllowed: upgrades });
           if (!initial) setName("");
           onSaved();
         } catch (x) { setErr((x as Error).message); }
@@ -434,6 +448,23 @@ function ProfileForm({ initial, onSaved, onCancel }: { initial?: QualityProfile;
         {[480, 720, 1080, 2160].map((r) => <option key={r} value={r}>cutoff {r}p</option>)}
       </select>
       <label className="inline"><input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /> allow web sources</label>
+      <details>
+        <summary>More rules</summary>
+        <label>Allowed sources (comma separated: bluray, webdl, webrip, hdtv; blank = all)
+          <input aria-label="Allowed sources" value={sources} onChange={(e) => setSources(e.target.value)} placeholder="bluray, webdl" /></label>
+        <label>Minimum size per movie or episode (MB, 0 = none)
+          <input aria-label="Minimum size MB" type="number" min={0} value={minSize} onChange={(e) => setMinSize(Number(e.target.value))} /></label>
+        <label>Maximum size per movie or episode (MB, 0 = none)
+          <input aria-label="Maximum size MB" type="number" min={0} value={maxSize} onChange={(e) => setMaxSize(Number(e.target.value))} /></label>
+        <label>Must contain one of (comma separated)
+          <input aria-label="Must contain" value={must} onChange={(e) => setMust(e.target.value)} /></label>
+        <label>Must not contain (comma separated)
+          <input aria-label="Must not contain" value={mustNot} onChange={(e) => setMustNot(e.target.value)} placeholder="HDR, HEVC" /></label>
+        <label>Preferred words, ranked higher (comma separated)
+          <input aria-label="Preferred words" value={preferred} onChange={(e) => setPreferred(e.target.value)} placeholder="x265, NTb" /></label>
+        <label className="inline"><input type="checkbox" checked={upgrades} onChange={(e) => setUpgrades(e.target.checked)} /> upgrade existing files (below the cutoff, and PROPER/REPACK fixes)</label>
+        <p className="muted">Upgrades replace a file only after the better one has imported, moving the old file to the recycle bin set under Import paths. Without a recycle bin nothing is upgraded.</p>
+      </details>
       <button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save profile" : "Add profile"}</button>
       {initial && <button type="button" disabled={busy} onClick={onCancel}>Cancel edit</button>}
       <ErrorLine message={err} />

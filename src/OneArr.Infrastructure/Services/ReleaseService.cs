@@ -181,6 +181,22 @@ public sealed class ReleaseService
         return job;
     }
 
+    /// <summary>The best present file for a movie or episode: highest resolution, then source, then revision.</summary>
+    public static async Task<MediaFile?> CurrentQualityAsync(OneArrDbContext db, int mediaItemId, int? episodeId, CancellationToken ct)
+    {
+        var files = episodeId is int eid
+            ? await (from l in db.MediaFileEpisodes.AsNoTracking()
+                     join f in db.MediaFiles.AsNoTracking() on l.MediaFileId equals f.Id
+                     where l.EpisodeId == eid && f.Status == MediaFileStatus.Present
+                     select f).ToListAsync(ct)
+            : await db.MediaFiles.AsNoTracking().Where(f => f.MediaItemId == mediaItemId && f.Status == MediaFileStatus.Present).ToListAsync(ct);
+        return files
+            .OrderByDescending(f => f.Resolution ?? 0)
+            .ThenByDescending(f => ReleaseParser.SourceRank(f.Source))
+            .ThenByDescending(f => f.Revision)
+            .FirstOrDefault();
+    }
+
     private async Task<(ReleaseTarget Target, ReleaseSearch Search, List<IndexerConfig> Indexers)> BuildTargetAsync(int mediaItemId, int? episodeId, CancellationToken ct)
     {
         await using var db = await _db.CreateDbContextAsync(ct);
@@ -198,6 +214,9 @@ public sealed class ReleaseService
             .Select(j => j.Hash!)
             .ToListAsync(ct);
         var blocklisted = await BlocklistService.BlockedKeysAsync(db, ct);
+        // Without upgrades switched on in the profile, an item with a file stays "already has a file", as before: a better
+        // release would otherwise be imported next to the old file instead of replacing it.
+        var current = hasFile && profile.UpgradesAllowed ? await CurrentQualityAsync(db, item.Id, episode?.Id, ct) : null;
         var target = new ReleaseTarget(
             item.MediaType,
             item.Title,
@@ -205,11 +224,13 @@ public sealed class ReleaseService
             episode?.SeasonNumber,
             episode?.EpisodeNumber,
             profile,
-            null,
+            current?.Resolution,
             hasFile,
             new HashSet<string>(knownHashes.Select(h => h.ToLowerInvariant())),
             item.AlternateTitleList(),
-            blocklisted);
+            blocklisted,
+            current?.Source,
+            current?.Revision ?? 1);
 
         var category = item.MediaType == MediaType.Movie ? "2000" : "5000";
         var search = new ReleaseSearch(item.MediaType, item.Title, item.Year, episode?.SeasonNumber, episode?.EpisodeNumber, category);

@@ -7,7 +7,9 @@ public enum DownloadStatus { Queued = 0, Downloading = 1, Completed = 2, Importe
 public enum ImportAction { DryRun = 0, Hardlink = 1, Copy = 2, Skipped = 3, Failed = 4, Deferred = 5,
     /// <summary>The file was imported into the library but matched no episode, so no episode was
     /// marked available. The job stays visibly unresolved instead of reporting fully imported.</summary>
-    Unmatched = 6 }
+    Unmatched = 6,
+    /// <summary>An older file replaced by an upgrade was moved to the recycle bin (or moved back after a failed import).</summary>
+    Recycled = 7 }
 
 /// <summary>Movie or series. Identity is (MediaType, Provider, ProviderId) so IDs never collide across media types.</summary>
 public class MediaItem
@@ -106,6 +108,25 @@ public class QualityProfile
     /// <summary>Resolution at which upgrades stop being sought.</summary>
     public int CutoffResolution { get; set; } = 1080;
     public bool AllowWebSources { get; set; } = true;
+    /// <summary>Comma-separated sources allowed (bluray, webdl, webrip, hdtv). Empty means all, subject to AllowWebSources.</summary>
+    public string? AllowedSources { get; set; }
+    /// <summary>Size limits in MB per movie or per episode. 0 means no limit. Season packs are not size-checked.</summary>
+    public int MinSizeMb { get; set; }
+    public int MaxSizeMb { get; set; }
+    /// <summary>Comma-separated words. A release must contain at least one MustContain word (when any are set), must contain
+    /// no MustNotContain word, and is ranked higher for each PreferredWords match. Case-insensitive, whole words.</summary>
+    public string? MustContain { get; set; }
+    public string? MustNotContain { get; set; }
+    public string? PreferredWords { get; set; }
+    /// <summary>
+    /// Opt-in: search for better releases of items that already have a file (below the cutoff, or a PROPER/REPACK of the same
+    /// quality), and replace the old file after the new one imports. The old file is moved to the recycle bin, never deleted.
+    /// Needs a recycle bin folder in Settings. Default off.
+    /// </summary>
+    public bool UpgradesAllowed { get; set; }
+
+    public static IReadOnlyList<string> Words(string? csv) =>
+        string.IsNullOrWhiteSpace(csv) ? [] : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
 public class IndexerConfig
@@ -295,7 +316,9 @@ public class SearchAttempt
 public enum LibraryRootState { Unknown = 0, Accessible = 1, Unavailable = 2, Invalid = 3 }
 
 /// <summary>Present and Missing are verified facts. Inaccessible means the folder is offline. Unknown means the disk could not be read to decide.</summary>
-public enum MediaFileStatus { Present = 0, Missing = 1, Inaccessible = 2, Unknown = 3 }
+public enum MediaFileStatus { Present = 0, Missing = 1, Inaccessible = 2, Unknown = 3,
+    /// <summary>Replaced by an upgrade and moved to the recycle bin. Kept as a record; never counted as present.</summary>
+    Recycled = 4 }
 
 /// <summary>A folder OneArr scans for existing media. A media type can have several roots.</summary>
 public class LibraryRoot
@@ -337,6 +360,11 @@ public class MediaFile
     public int? LibraryRootId { get; set; }
     public int? MediaItemId { get; set; }
     public int? Resolution { get; set; }
+    /// <summary>Source (bluray, webdl, webrip, hdtv, unknown) and PROPER/REPACK revision, from the release or file name.</summary>
+    public string? Source { get; set; }
+    public int Revision { get; set; } = 1;
+    /// <summary>The release this file came from, when OneArr imported it.</summary>
+    public string? ReleaseTitle { get; set; }
     public string MatchMethod { get; set; } = "";
     public DateTimeOffset FirstSeenUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastVerifiedUtc { get; set; } = DateTimeOffset.UtcNow;

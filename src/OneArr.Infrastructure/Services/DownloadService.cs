@@ -26,7 +26,8 @@ public sealed record ImportPlanDto(
     bool DestinationConflict,
     bool SameVolume,
     List<int> MatchedEpisodeIds,
-    List<string> MatchedEpisodeLabels);
+    List<string> MatchedEpisodeLabels,
+    bool ReplacesExisting = false);
 
 public sealed record ImportPreviewDto(int PreviewId, int JobId, DateTimeOffset CreatedAt, List<ImportPlanDto> Plans, string Fingerprint);
 
@@ -356,8 +357,8 @@ public sealed class DownloadService
             return "Files require a manual review or have an unsafe plan";
 
         var release = new ReleaseParser().Parse(job.ReleaseTitle);
-        if (!string.Equals(ReleaseParser.NormalizeTitle(release.Title),
-            ReleaseParser.NormalizeTitle(media.Title), StringComparison.Ordinal))
+        var releaseKey = ReleaseParser.NormalizeTitle(release.Title);
+        if (!media.AlternateTitleList().Prepend(media.Title).Any(t => string.Equals(releaseKey, ReleaseParser.NormalizeTitle(t), StringComparison.Ordinal)))
             return "Release title does not match the media item";
         if (media.MediaType == MediaType.Movie)
         {
@@ -544,8 +545,9 @@ public sealed class DownloadService
             }
             else
             {
+                await RecycleReplacedFilesAsync(db, media, job, importedFiles, ct);
                 await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
-                await LinkImportedFilesAsync(db, media, importedFiles, ct);
+                await LinkImportedFilesAsync(db, media, importedFiles, ct, job.ReleaseTitle);
                 if (unmatched.Count > 0)
                 {
                     tracked.Status = DownloadStatus.Completed;
@@ -589,9 +591,11 @@ public sealed class DownloadService
     /// availability is backed by verified file associations instead of bare HasFile flags. Rows
     /// are keyed by PathKey (the same key the library reconciler uses), so a rescan or a
     /// re-import reuses the row instead of duplicating it, and episode links are unioned.</summary>
-    private async Task LinkImportedFilesAsync(OneArrDbContext db, MediaItem media, List<(string Dest, List<int> Episodes)> files, CancellationToken ct)
+    private async Task LinkImportedFilesAsync(OneArrDbContext db, MediaItem media, List<(string Dest, List<int> Episodes)> files, CancellationToken ct, string? releaseTitle = null)
     {
         var now = _time.GetUtcNow();
+        // Quality comes from the release name: a renamed file may no longer carry it.
+        var quality = new ReleaseParser().Parse(string.IsNullOrWhiteSpace(releaseTitle) ? "" : releaseTitle);
         var windows = OperatingSystem.IsWindows();
         foreach (var (dest, episodeIds) in files)
         {
@@ -600,9 +604,14 @@ public sealed class DownloadService
             var row = await db.MediaFiles.FirstOrDefaultAsync(f => f.PathKey == key, ct);
             long size = 0;
             try { if (File.Exists(dest)) size = new FileInfo(dest).Length; } catch { /* size stays unknown */ }
+            var fileQuality = releaseTitle is null ? new ReleaseParser().Parse(Path.GetFileName(dest)) : quality;
             if (row is null)
             {
                 row = new MediaFile { Path = dest, PathKey = key, SizeBytes = size, Status = MediaFileStatus.Present, MediaItemId = media.Id, MatchMethod = "import", FirstSeenUtc = now, LastVerifiedUtc = now };
+                row.Resolution = fileQuality.Resolution ?? LibraryMatcher.ParseResolution(dest);
+                row.Source = fileQuality.Source;
+                row.Revision = fileQuality.Revision;
+                row.ReleaseTitle = releaseTitle;
                 db.MediaFiles.Add(row);
                 foreach (var ep in episodeIds) row.EpisodeLinks.Add(new MediaFileEpisode { EpisodeId = ep });
             }
@@ -614,9 +623,79 @@ public sealed class DownloadService
                 row.MediaItemId = media.Id;
                 row.MatchMethod = "import";
                 row.LastVerifiedUtc = now;
+                row.Resolution = fileQuality.Resolution ?? row.Resolution;
+                row.Source = fileQuality.Source;
+                row.Revision = fileQuality.Revision;
+                row.ReleaseTitle = releaseTitle ?? row.ReleaseTitle;
                 var have = (await db.MediaFileEpisodes.Where(l => l.MediaFileId == row.Id).Select(l => l.EpisodeId).ToListAsync(ct)).ToHashSet();
                 foreach (var ep in episodeIds.Where(e => !have.Contains(e)))
                     db.MediaFileEpisodes.Add(new MediaFileEpisode { MediaFileId = row.Id, EpisodeId = ep });
+            }
+        }
+    }
+
+    /// <summary>Upgrade settings for one item, or null when its profile does not allow upgrades.</summary>
+    private sealed record UpgradeContext(string? RecycleRoot, HashSet<string> MovieKeys, Dictionary<string, HashSet<int>> EpisodeKeys)
+    {
+        /// <summary>Whether the file at this path is one this item's present files already include (for the episodes being imported).</summary>
+        public bool Owns(string path, MediaItem media, List<int> episodeIds)
+        {
+            var key = LibraryPaths.Key(path, OperatingSystem.IsWindows());
+            return media.MediaType == MediaType.Movie
+                ? MovieKeys.Contains(key)
+                : EpisodeKeys.TryGetValue(key, out var linked) && linked.Count > 0 && linked.All(episodeIds.Contains);
+        }
+    }
+
+    private async Task<UpgradeContext?> UpgradeContextAsync(OneArrDbContext db, MediaItem media, CancellationToken ct)
+    {
+        var profile = await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == media.QualityProfileId, ct);
+        if (profile is not { UpgradesAllowed: true }) return null;
+        var recycle = await _settings.GetAsync(SettingKeys.RecycleBin, ct);
+        var files = await db.MediaFiles.AsNoTracking().Include(f => f.EpisodeLinks)
+            .Where(f => f.MediaItemId == media.Id && f.Status == MediaFileStatus.Present).ToListAsync(ct);
+        return new UpgradeContext(recycle, files.Select(f => f.PathKey).ToHashSet(),
+            files.ToDictionary(f => f.PathKey, f => f.EpisodeLinks.Select(l => l.EpisodeId).ToHashSet()));
+    }
+
+    /// <summary>
+    /// After an upgrade imports, the files it replaces (for a movie: its other present files; for episodes: files whose every
+    /// linked episode the new files cover) are moved to the recycle bin. Only when the profile allows upgrades and the recycle bin
+    /// is usable; otherwise the old file is left where it is and the reason recorded. Nothing is ever deleted.
+    /// </summary>
+    private async Task RecycleReplacedFilesAsync(OneArrDbContext db, MediaItem media, DownloadJob job, List<(string Dest, List<int> Episodes)> imported, CancellationToken ct)
+    {
+        var upgrade = await UpgradeContextAsync(db, media, ct);
+        if (upgrade is null || imported.Count == 0) return;
+        var windows = OperatingSystem.IsWindows();
+        var newKeys = imported.Select(i => LibraryPaths.Key(i.Dest, windows)).ToHashSet();
+        var covered = imported.SelectMany(i => i.Episodes).ToHashSet();
+        var candidates = await db.MediaFiles.Include(f => f.EpisodeLinks)
+            .Where(f => f.MediaItemId == media.Id && f.Status == MediaFileStatus.Present).ToListAsync(ct);
+        var replaced = candidates.Where(f => !newKeys.Contains(f.PathKey) && (media.MediaType == MediaType.Movie
+            ? true
+            : f.EpisodeLinks.Count > 0 && f.EpisodeLinks.All(l => covered.Contains(l.EpisodeId)))).ToList();
+        var now = _time.GetUtcNow();
+        foreach (var old in replaced)
+        {
+            string message;
+            if (!File.Exists(old.Path)) continue;
+            if (RecycleBin.Problem(upgrade.RecycleRoot, old.Path) is string problem)
+            {
+                message = "Old file kept in place after the upgrade: " + problem;
+                db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = old.Path, DestinationPath = old.Path, Action = ImportAction.Recycled, Success = false, Message = message, CreatedAt = now });
+                continue;
+            }
+            try
+            {
+                var moved = RecycleBin.Move(upgrade.RecycleRoot!, old.Path, now);
+                old.Status = MediaFileStatus.Recycled;
+                db.MediaFileEpisodes.RemoveRange(old.EpisodeLinks);
+                db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = old.Path, DestinationPath = moved, Action = ImportAction.Recycled, Success = true, Message = "Replaced by an upgrade: old file moved to the recycle bin", CreatedAt = now });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = old.Path, DestinationPath = old.Path, Action = ImportAction.Recycled, Success = false, Message = "Old file kept in place: " + Truncate(ex.Message, 300), CreatedAt = now });
             }
         }
     }
@@ -803,10 +882,18 @@ public sealed class DownloadService
                 continue;
             }
             ImportOutcome outcome;
+            string? movedAside = null;
             try
             {
                 if (string.IsNullOrWhiteSpace(plan.DestinationPath))
                     throw new ArgumentException("The approved import plan has no destination");
+                if (plan.ReplacesExisting && File.Exists(plan.DestinationPath))
+                {
+                    var recycle = await _settings.GetAsync(SettingKeys.RecycleBin, ct);
+                    movedAside = RecycleBin.Move(recycle!, plan.DestinationPath, _time.GetUtcNow());
+                    db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = plan.DestinationPath, DestinationPath = movedAside,
+                        Action = ImportAction.Recycled, Success = true, Message = "Replaced by an upgrade: old file moved to the recycle bin", CreatedAt = _time.GetUtcNow() });
+                }
                 outcome = await _importer.ImportAsync(new ImportRequest(plan.SourcePath, destRoot, relFolder,
                     torrentRoot, DryRun: false, job.Id, Path.GetFileName(plan.DestinationPath)), ct);
                 if (!string.Equals(outcome.DestinationPath, plan.DestinationPath,
@@ -816,6 +903,13 @@ public sealed class DownloadService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 outcome = new ImportOutcome(ImportAction.Failed, "", false, ex.GetType().Name + ": " + Truncate(ex.Message, 500));
+            }
+            if (!outcome.Success && movedAside is not null && !File.Exists(plan.DestinationPath!))
+            {
+                // The upgrade did not import: put the old file back exactly where it was.
+                File.Move(movedAside, plan.DestinationPath!, overwrite: false);
+                db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = movedAside, DestinationPath = plan.DestinationPath!,
+                    Action = ImportAction.Recycled, Success = true, Message = "Upgrade failed: old file moved back from the recycle bin", CreatedAt = _time.GetUtcNow() });
             }
             db.ImportRecords.Add(new ImportRecord
             {
@@ -848,8 +942,9 @@ public sealed class DownloadService
             }
             else
             {
+                await RecycleReplacedFilesAsync(db, media, job, importedFiles, ct);
                 await MarkHaveFileAsync(db, job, media, matchedEpisodeIds, ct);
-                await LinkImportedFilesAsync(db, media, importedFiles, ct);
+                await LinkImportedFilesAsync(db, media, importedFiles, ct, job.ReleaseTitle);
                 if (unmatched > 0)
                 {
                     tracked.Status = DownloadStatus.Completed;
@@ -906,10 +1001,11 @@ public sealed class DownloadService
                 ? SettingKeys.MovieNamingTemplate : SettingKeys.SeriesNamingTemplate, ct)
             : null;
         template ??= media.MediaType == MediaType.Movie ? MediaNaming.MovieTemplate : MediaNaming.EpisodeTemplate;
+        var upgrade = await UpgradeContextAsync(db, media, ct);
         foreach (var file in files)
         {
             plans.Add(await PlanFileAsync(file, destRoot, relFolder, torrentRoot,
-                media, job, episodes, rename, template, ct));
+                media, job, episodes, rename, template, ct, upgrade));
         }
         // Two distinct source files must never target one filename, even when
         // the destination did not exist during preview.
@@ -930,7 +1026,7 @@ public sealed class DownloadService
 
     private async Task<ImportPlanDto> PlanFileAsync(string file, string destRoot, string relFolder,
         string torrentRoot, MediaItem media, DownloadJob job, List<Episode> episodes,
-        bool rename, string template, CancellationToken ct)
+        bool rename, string template, CancellationToken ct, UpgradeContext? upgrade = null)
     {
         var labels = new List<int>();
         var labelTexts = new List<string>();
@@ -984,6 +1080,14 @@ public sealed class DownloadService
             {
                 if (await SafeImporter.SameContentAsync(source, dest, ct))
                     return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), "skip", "Already imported with identical content" + unmatchedNote, false, SafeImporter.IsSameVolume(source, dest), labels, labelTexts);
+                // An upgrade whose new name equals the current file's name: the current file is moved to the recycle bin
+                // first (and moved back if the import fails). Only for a file this item already owns.
+                if (upgrade is not null && upgrade.Owns(dest, media, labels) && RecycleBin.Problem(upgrade.RecycleRoot, dest) is null)
+                {
+                    var same = SafeImporter.IsSameVolume(source, dest);
+                    return new ImportPlanDto(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, Path.GetExtension(file), same ? "hardlink" : "copy",
+                        "Upgrade: replaces the current file, which is moved to the recycle bin" + unmatchedNote, false, same, labels, labelTexts, ReplacesExisting: true);
+                }
                 return Reject(file, dest, info.Length, info.LastWriteTimeUtc.Ticks, labels, labelTexts, "Destination exists with different content; not overwriting", conflict: true);
             }
             var sameVolume = SafeImporter.IsSameVolume(source, dest);
