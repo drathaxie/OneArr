@@ -19,9 +19,10 @@ public sealed class BackgroundScheduler : BackgroundService
     private readonly MediaService? _media;
     private readonly RssSyncService? _rss;
     private readonly BlocklistService? _blocklist;
+    private readonly NotificationService? _notify;
     private readonly ILogger<BackgroundScheduler> _log;
 
-    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null, RssSyncService? rss = null, BlocklistService? blocklist = null)
+    public BackgroundScheduler(JobRunner runner, DownloadService downloads, SettingsStore settings, WantedSearchService search, ILogger<BackgroundScheduler> log, MediaService? media = null, RssSyncService? rss = null, BlocklistService? blocklist = null, NotificationService? notify = null)
     {
         _runner = runner;
         _downloads = downloads;
@@ -31,6 +32,7 @@ public sealed class BackgroundScheduler : BackgroundService
         _media = media;
         _rss = rss;
         _blocklist = blocklist;
+        _notify = notify;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -92,5 +94,9 @@ public sealed class BackgroundScheduler : BackgroundService
                     ? (await _downloads.AutoImportCompletedAsync(t)).Message
                     : (await _downloads.ImportCompletedAsync(true, t)).Message, ct);
         }
+
+        // Announce grabs, imports and failures. Every minute, after the queue and imports have been updated.
+        if (_notify is not null)
+            await _runner.TryRunAsync("notifications", t => _notify.RunAsync(t), ct);
     }
 }

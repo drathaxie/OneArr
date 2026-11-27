@@ -3,7 +3,7 @@ import { api, formatBytes, posterUrl, type MediaDetail, type MediaItem, type Pro
 import { availabilityStamp, ErrorLine, useLoad } from "./common";
 
 export type CommandNavigate = (
-  page: "dashboard" | "movies" | "series" | "wanted" | "activity" | "settings" | "migration",
+  page: "dashboard" | "movies" | "series" | "wanted" | "calendar" | "activity" | "settings" | "migration",
   opts?: { activityTab?: "queue" | "history" | "problems"; settingsSection?: string },
 ) => void;
 

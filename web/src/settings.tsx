@@ -42,6 +42,7 @@ const CATEGORIES: Category[] = [
     { id: "automation-status", label: "Automation status" },
     { id: "automation-toggle", label: "Automatic grabbing" },
     { id: "automation-import", label: "Completed-download importing" },
+    { id: "automation-notify", label: "Notifications" },
   ] },
   { id: "migration", label: "Migration", description: "Sonarr/Radarr import previews and monitoring synchronisation, with the preview-required Apply safety mechanism.", subsections: [
     { id: "migration-import", label: "Import preview" },
@@ -992,6 +993,41 @@ function MetadataForm({ data, onSaved }: { data: SettingsData; onSaved: () => vo
   );
 }
 
+function NotificationsForm({ data, onSaved }: { data: SettingsData; onSaved: () => void }) {
+  const [webhook, setWebhook] = useState("");
+  const [grab, setGrab] = useState(data.notifyOnGrab ?? true);
+  const [imported, setImported] = useState(data.notifyOnImport ?? true);
+  const [failure, setFailure] = useState(data.notifyOnFailure ?? true);
+  const [message, setMessage] = useState<string | null>(null);
+  async function test() {
+    setMessage(null);
+    try { setMessage((await api<{ message: string }>("POST", "/api/notifications/test")).message); }
+    catch (e) { setMessage((e as Error).message); }
+  }
+  return (
+    <form className="card" onSubmit={(e) => {
+      e.preventDefault();
+      void saveSettings({ ...(webhook.trim() ? { notifyWebhook: webhook.trim() } : {}), notifyOnGrab: grab, notifyOnImport: imported, notifyOnFailure: failure }, setMessage, () => { setWebhook(""); onSaved(); });
+    }}>
+      <h2>Notifications</h2>
+      <p className="muted">Send a message when a release is grabbed, imported, or fails. Paste a Discord channel webhook, or any URL that accepts a JSON POST.</p>
+      <p className="muted">{data.notifyWebhookHost ? <>Webhook set ({data.notifyWebhookHost}). Leave the field blank to keep it.</> : "No webhook set."}</p>
+      <label>Webhook URL
+        <input aria-label="Webhook URL" type="password" autoComplete="off" value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/…" />
+      </label>
+      <label className="inline"><input type="checkbox" checked={grab} onChange={(e) => setGrab(e.target.checked)} /> grabbed</label>
+      <label className="inline"><input type="checkbox" checked={imported} onChange={(e) => setImported(e.target.checked)} /> imported</label>
+      <label className="inline"><input type="checkbox" checked={failure} onChange={(e) => setFailure(e.target.checked)} /> failed or missing</label>
+      <ErrorLine message={message} />
+      <div className="row">
+        <button className="primary" type="submit">Save notifications</button>
+        <button type="button" disabled={!data.notifyWebhookHost} onClick={test}>Send test</button>
+        {data.notifyWebhookHost && <button type="button" onClick={() => { if (confirm("Remove the webhook? Notifications stop.")) void saveSettings({ notifyWebhook: "" }, setMessage, onSaved); }}>Remove webhook</button>}
+      </div>
+    </form>
+  );
+}
+
 function AutomationSection() {
   const { data, error, reload } = useLoad<SettingsData>("/api/settings");
   return (
@@ -1003,6 +1039,7 @@ function AutomationSection() {
         <>
           <div id="automation-toggle"><AutomationForm data={data} onSaved={reload} /></div>
           <div id="automation-import"><AutomaticImportForm data={data} onSaved={reload} /></div>
+          <div id="automation-notify"><NotificationsForm data={data} onSaved={reload} /></div>
         </>
       )}
     </>

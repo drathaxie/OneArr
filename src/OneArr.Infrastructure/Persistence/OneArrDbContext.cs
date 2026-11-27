@@ -63,6 +63,8 @@ public class OneArrDbContext : DbContext
             e.HasIndex(x => x.DownloadClientId);
             e.Property(x => x.MediaType).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            // Stored like Status, so the two can be compared in SQL.
+            e.Property(x => x.NotifiedStatus).HasConversion<string>().HasMaxLength(16);
         });
 
         b.Entity<DownloadClientHealth>(e =>

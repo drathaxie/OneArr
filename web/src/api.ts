@@ -79,6 +79,10 @@ export interface SettingsData {
   torrentRoot: string | null;
   mediaRoot: string | null;
   recycleBin?: string | null;
+  notifyWebhookHost?: string | null;
+  notifyOnGrab?: boolean;
+  notifyOnImport?: boolean;
+  notifyOnFailure?: boolean;
   automaticGrabbing: boolean;
   automaticImport?: boolean;
   defaultMovieRoot: string | null;

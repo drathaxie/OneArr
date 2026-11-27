@@ -37,6 +37,7 @@ public static class ServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false });
         services.AddHttpClient(OutboundHttp.LegacyClient, c => c.Timeout = TimeSpan.FromSeconds(20));
         // TVmaze's show lookup answers with a redirect whose Location holds the show id; it is read, not followed.
+        services.AddHttpClient(NotificationService.ClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddHttpClient(TvmazeAirTimeProvider.ClientName, c => c.Timeout = TimeSpan.FromSeconds(15))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddSingleton<IAirTimeProvider, TvmazeAirTimeProvider>();
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WantedSearchService>();
         services.AddSingleton<RssSyncService>();
         services.AddSingleton<BlocklistService>();
+        services.AddSingleton<NotificationService>();
         services.AddHostedService<BackgroundScheduler>();
         return services;
     }

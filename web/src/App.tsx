@@ -3,8 +3,9 @@ import { api, getToken, setToken, type SettingsData } from "./api";
 import { Dashboard, Movies, Series, Wanted, Activity, Settings, Migration } from "./pages";
 import { useLoad } from "./common";
 import type { CommandNavigate } from "./command-center";
+import { Calendar } from "./calendar";
 
-type Page = "dashboard" | "movies" | "series" | "wanted" | "activity" | "settings" | "migration";
+type Page = "dashboard" | "movies" | "series" | "wanted" | "calendar" | "activity" | "settings" | "migration";
 
 // Archive index: numbered groups, counts in mono on the right. Counts come from
 // the real dashboard endpoint and are only rendered once loaded — never a
@@ -17,6 +18,7 @@ const NAV_GROUPS: { num: string; heading: string; items: { id: Page; label: stri
   ] },
   { num: "02", heading: "Operations", items: [
     { id: "wanted", label: "Wanted", count: (d) => (d.wantedMovies ?? 0) + (d.wantedEpisodes ?? 0) },
+    { id: "calendar", label: "Calendar" },
     { id: "activity", label: "Activity" },
   ] },
   { num: "03", heading: "System", items: [
@@ -92,6 +94,7 @@ export function App() {
         {page === "movies" && <Movies onNavigate={navigate} />}
         {page === "series" && <Series onNavigate={navigate} />}
         {page === "wanted" && <Wanted />}
+        {page === "calendar" && <Calendar />}
         {page === "activity" && <Activity initialTab={activityTab} />}
         {page === "settings" && <Settings initialSection={settingsSection} />}
         {page === "migration" && <Migration />}

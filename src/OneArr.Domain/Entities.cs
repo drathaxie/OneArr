@@ -217,6 +217,8 @@ public class DownloadJob
     public DateTimeOffset? CompletedAt { get; set; }
     /// <summary>True when this release was blocklisted. The job is no longer polled; the torrent itself is never touched.</summary>
     public bool Blocklisted { get; set; }
+    /// <summary>The status last considered for notifications, so each change is announced once. Null for a new grab.</summary>
+    public DownloadStatus? NotifiedStatus { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

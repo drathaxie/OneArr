@@ -197,6 +197,10 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NotifiedStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("Progress")
                         .HasColumnType("REAL");
 

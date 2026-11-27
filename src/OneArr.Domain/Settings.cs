@@ -20,6 +20,11 @@ public static class SettingKeys
     public const string MediaRoot = "paths.media";
     /// <summary>Folder that receives files replaced by an upgrade. Must be on the same drive as the library. Unset: no upgrades.</summary>
     public const string RecycleBin = "paths.recycleBin";
+    /// <summary>Webhook for notifications (Discord or any JSON endpoint). Secret: never returned by the API.</summary>
+    public const string NotifyWebhook = "notify.webhook";
+    public const string NotifyOnGrab = "notify.onGrab";
+    public const string NotifyOnImport = "notify.onImport";
+    public const string NotifyOnFailure = "notify.onFailure";
     /// <summary>Per-type default root folders for the Add dialog. When one is unset, adds for that type require an explicit folder; they never fall back to the shared MediaRoot.</summary>
     public const string DefaultMovieRoot = "media.defaultRoot.movie";
     public const string DefaultSeriesRoot = "media.defaultRoot.series";

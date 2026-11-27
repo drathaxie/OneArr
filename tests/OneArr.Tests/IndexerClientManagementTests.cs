@@ -437,6 +437,15 @@ public class IndexerClientManagementTests
     }
 
     [Fact]
+    public async Task Calendar_answers_and_rejects_huge_ranges()
+    {
+        using var factory = new StubApiFactory(new RoutingHandler());
+        var client = await SignedInAsync(factory);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/calendar")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/calendar?from=2026-01-01&to=2027-01-01")).StatusCode);
+    }
+
+    [Fact]
     public async Task Indexer_and_client_validation_and_not_found()
     {
         var routing = new RoutingHandler();

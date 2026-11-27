@@ -28,7 +28,8 @@ public static class ApiEndpoints
         string? TrackerId = null, Dictionary<string, string>? TrackerSettings = null, string? Protocol = null, bool? RssSync = null);
     public sealed record ClientBody(string Name, string BaseUrl, string Username, string? Password, string? MovieCategory, string? TvCategory, bool Enabled);
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
-    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null, string? RecycleBin = null);
+    public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null, string? RecycleBin = null,
+        string? NotifyWebhook = null, bool? NotifyOnGrab = null, bool? NotifyOnImport = null, bool? NotifyOnFailure = null);
     public sealed record BlocklistBody(string? Reason);
     public sealed record IgnoreBody(List<string>? Paths);
     // The newer fields are optional: null keeps the stored value on PUT and the default on POST, so older clients still work.
@@ -60,6 +61,7 @@ public static class ApiEndpoints
         var api = app.MapGroup("/api");
         var tokens = app.Services.GetRequiredService<TokenService>();
         DiagnosticsEndpoints.Map(api);
+        CalendarEndpoints.Map(api);
 
         api.MapGet("/auth/status", async (IDbContextFactory<OneArrDbContext> db, HttpContext ctx) =>
         {
@@ -848,6 +850,21 @@ public static class ApiEndpoints
             return Results.Ok(new { message = "Missing download cleared; the item can be searched or grabbed again" });
         });
 
+        api.MapPost("/notifications/test", async (NotificationService notify, SettingsStore settings, CancellationToken ct) =>
+        {
+            var hook = await settings.GetAsync(SettingKeys.NotifyWebhook, ct);
+            if (string.IsNullOrWhiteSpace(hook)) return Results.BadRequest(new { error = "Save a webhook URL first" });
+            try
+            {
+                await notify.SendAsync(hook, new Notification("test", "OneArr test notification", "Notifications are working."), ct);
+                return Results.Ok(new { message = "Test notification sent" });
+            }
+            catch (Exception ex) when (ex is ExternalServiceException or HttpRequestException or TaskCanceledException)
+            {
+                return Results.BadRequest(new { error = "Could not send: " + OutboundHttp.Redact(ex.Message) });
+            }
+        });
+
         // Blocklist: never touches the torrent or any file; only OneArr's record and future searches.
         api.MapPost("/queue/{id:int}/blocklist", async (int id, BlocklistBody? body, BlocklistService blocklist, CancellationToken ct) =>
         {
@@ -1115,6 +1132,11 @@ public static class ApiEndpoints
                 torrentRoot = await settings.GetAsync(SettingKeys.TorrentRoot, ct),
                 mediaRoot = await settings.GetAsync(SettingKeys.MediaRoot, ct),
                 recycleBin = await settings.GetAsync(SettingKeys.RecycleBin, ct),
+                // The webhook URL holds its own token, so only whether one is set (and its host) is returned.
+                notifyWebhookHost = Uri.TryCreate(await settings.GetAsync(SettingKeys.NotifyWebhook, ct), UriKind.Absolute, out var hook) ? hook.Host : null,
+                notifyOnGrab = await settings.GetBoolAsync(SettingKeys.NotifyOnGrab, true, ct),
+                notifyOnImport = await settings.GetBoolAsync(SettingKeys.NotifyOnImport, true, ct),
+                notifyOnFailure = await settings.GetBoolAsync(SettingKeys.NotifyOnFailure, true, ct),
                 automaticGrabbing = await settings.GetBoolAsync(SettingKeys.AutomaticGrab, false, ct),
                 automaticImport = await settings.GetBoolAsync(SettingKeys.AutomaticImport, false, ct),
                 defaultMovieRoot = await settings.GetAsync(SettingKeys.DefaultMovieRoot, ct),
@@ -1158,6 +1180,12 @@ public static class ApiEndpoints
             }
             if (body.TorrentRoot is not null) values[SettingKeys.TorrentRoot] = RequireAbsolute(body.TorrentRoot);
             if (body.MediaRoot is not null) values[SettingKeys.MediaRoot] = RequireAbsolute(body.MediaRoot);
+            // Webhook: null keeps the stored one (it is never sent to the browser), empty removes it.
+            if (body.NotifyWebhook is not null)
+                values[SettingKeys.NotifyWebhook] = string.IsNullOrWhiteSpace(body.NotifyWebhook) ? null : UrlGuard.RequireServiceUrl(body.NotifyWebhook).ToString();
+            if (body.NotifyOnGrab is bool ng) values[SettingKeys.NotifyOnGrab] = ng.ToString();
+            if (body.NotifyOnImport is bool ni) values[SettingKeys.NotifyOnImport] = ni.ToString();
+            if (body.NotifyOnFailure is bool nf) values[SettingKeys.NotifyOnFailure] = nf.ToString();
             // Empty clears the recycle bin, which switches upgrades off.
             if (body.RecycleBin is not null) values[SettingKeys.RecycleBin] = string.IsNullOrWhiteSpace(body.RecycleBin) ? null : RequireAbsolute(body.RecycleBin);
             if (body.AutomaticGrabbing is bool auto) values[SettingKeys.AutomaticGrab] = auto.ToString();
