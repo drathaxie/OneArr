@@ -523,6 +523,7 @@ public sealed class DownloadService
                 var matched = MatchedEpisodes(db, media, job, file);
                 foreach (var ep in matched) matchedEpisodeIds.Add(ep);
                 importedFiles.Add((outcome.DestinationPath, matched));
+                if (!dryRun) await ImportSubtitlesAsync(db, job, file, outcome.DestinationPath, files.Count == 1, destRoot, relFolder, torrentRoot, ct);
                 // A series pack file that matched no episode is imported but stays unresolved:
                 // it gets an Unmatched record and the job is never marked fully Imported.
                 if (!dryRun && media.MediaType == MediaType.Series && job.EpisodeId is null && matched.Count == 0)
@@ -634,6 +635,46 @@ public sealed class DownloadService
         }
     }
 
+    /// <summary>
+    /// Copies (or hardlinks) the subtitles that belong to an imported video next to it, named after it, through the same safe
+    /// importer: inside the roots only, never overwriting, source untouched. A subtitle that cannot be imported is recorded and
+    /// skipped; it never fails the video's import.
+    /// </summary>
+    private async Task ImportSubtitlesAsync(OneArrDbContext db, DownloadJob job, string videoSource, string videoDest, bool onlyVideo,
+        string destRoot, string relFolder, string torrentRoot, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(videoDest)) return;
+        IReadOnlyList<string> subs;
+        try { subs = Subtitles.For(videoSource, onlyVideo); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var newBase = Path.GetFileNameWithoutExtension(videoDest);
+        var oldBase = Path.GetFileNameWithoutExtension(videoSource);
+        foreach (var sub in subs.Take(40))
+        {
+            var name = Subtitles.DestinationName(newBase, sub, oldBase);
+            // Two subtitles with the same language and flags: number the later ones rather than dropping them.
+            for (var i = 2; !used.Add(name); i++)
+                name = Path.GetFileNameWithoutExtension(Subtitles.DestinationName(newBase, sub, oldBase)) + $".{i}" + Path.GetExtension(sub).ToLowerInvariant();
+            ImportOutcome outcome;
+            try
+            {
+                outcome = await _importer.ImportAsync(new ImportRequest(sub, destRoot, relFolder, torrentRoot, DryRun: false, job.Id, name), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                outcome = new ImportOutcome(ImportAction.Failed, "", false, ex.GetType().Name + ": " + Truncate(ex.Message, 300));
+            }
+            db.ImportRecords.Add(new ImportRecord
+            {
+                DownloadJobId = job.Id, SourcePath = sub, DestinationPath = outcome.DestinationPath,
+                // Recorded as skipped when it did not import, so a subtitle never shows up as a failed import.
+                Action = outcome.Success ? outcome.Action : ImportAction.Skipped, Success = true,
+                Message = (outcome.Success ? "Subtitle: " : "Subtitle not imported: ") + outcome.Message, CreatedAt = _time.GetUtcNow(),
+            });
+        }
+    }
+
     /// <summary>Upgrade settings for one item, or null when its profile does not allow upgrades.</summary>
     private sealed record UpgradeContext(string? RecycleRoot, HashSet<string> MovieKeys, Dictionary<string, HashSet<int>> EpisodeKeys)
     {
@@ -688,6 +729,8 @@ public sealed class DownloadService
             }
             try
             {
+                foreach (var sidecar in Subtitles.Sidecars(old.Path))
+                    RecycleBin.Move(upgrade.RecycleRoot!, sidecar, now);
                 var moved = RecycleBin.Move(upgrade.RecycleRoot!, old.Path, now);
                 old.Status = MediaFileStatus.Recycled;
                 db.MediaFileEpisodes.RemoveRange(old.EpisodeLinks);
@@ -883,6 +926,7 @@ public sealed class DownloadService
             }
             ImportOutcome outcome;
             string? movedAside = null;
+            var movedSidecars = new List<(string From, string To)>();
             try
             {
                 if (string.IsNullOrWhiteSpace(plan.DestinationPath))
@@ -890,6 +934,8 @@ public sealed class DownloadService
                 if (plan.ReplacesExisting && File.Exists(plan.DestinationPath))
                 {
                     var recycle = await _settings.GetAsync(SettingKeys.RecycleBin, ct);
+                    foreach (var sidecar in Subtitles.Sidecars(plan.DestinationPath))
+                        movedSidecars.Add((sidecar, RecycleBin.Move(recycle!, sidecar, _time.GetUtcNow())));
                     movedAside = RecycleBin.Move(recycle!, plan.DestinationPath, _time.GetUtcNow());
                     db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = plan.DestinationPath, DestinationPath = movedAside,
                         Action = ImportAction.Recycled, Success = true, Message = "Replaced by an upgrade: old file moved to the recycle bin", CreatedAt = _time.GetUtcNow() });
@@ -908,6 +954,8 @@ public sealed class DownloadService
             {
                 // The upgrade did not import: put the old file back exactly where it was.
                 File.Move(movedAside, plan.DestinationPath!, overwrite: false);
+                foreach (var (from, to) in movedSidecars.Where(m => !File.Exists(m.From)))
+                    File.Move(to, from, overwrite: false);
                 db.ImportRecords.Add(new ImportRecord { DownloadJobId = job.Id, SourcePath = movedAside, DestinationPath = plan.DestinationPath!,
                     Action = ImportAction.Recycled, Success = true, Message = "Upgrade failed: old file moved back from the recycle bin", CreatedAt = _time.GetUtcNow() });
             }
@@ -923,6 +971,7 @@ public sealed class DownloadService
                 imported++;
                 foreach (var ep in plan.MatchedEpisodeIds) matchedEpisodeIds.Add(ep);
                 importedFiles.Add((outcome.DestinationPath, plan.MatchedEpisodeIds));
+                await ImportSubtitlesAsync(db, job, plan.SourcePath, outcome.DestinationPath, stored.Count(p => p.PlannedAction is not ("reject" or "defer")) == 1, destRoot, relFolder, torrentRoot, ct);
                 if (media.MediaType == MediaType.Series && job.EpisodeId is null && plan.MatchedEpisodeIds.Count == 0)
                 {
                     unmatched++;

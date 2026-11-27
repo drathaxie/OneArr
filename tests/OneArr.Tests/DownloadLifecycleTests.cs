@@ -1192,4 +1192,59 @@ public class DownloadLifecycleTests
         Assert.Equal("old-video", await File.ReadAllTextAsync(dest));
         Assert.Equal(DownloadStatus.Failed, (await GetJobAsync(world, jobId)).Status);
     }
+
+    // ---- Subtitles follow their video, named after it; they never fail an import.
+
+    [Theory]
+    [InlineData("Dune.2021.1080p.BluRay-GRP.eng.srt", "Dune (2021).en.srt")]
+    [InlineData("Dune.2021.1080p.BluRay-GRP.English.forced.srt", "Dune (2021).en.forced.srt")]
+    [InlineData("2_English.srt", "Dune (2021).en.srt")]
+    [InlineData("Dune.2021.1080p.BluRay-GRP.srt", "Dune (2021).srt")]
+    public void Subtitle_names_follow_the_video(string subtitle, string expected) =>
+        Assert.Equal(expected, Subtitles.DestinationName("Dune (2021)", "/t/" + subtitle, "Dune.2021.1080p.BluRay-GRP"));
+
+    [Fact]
+    public async Task A_movie_import_brings_its_subtitles_along()
+    {
+        using var world = await WorldAsync();
+        await world.Settings.SetAsync(SettingKeys.RenameOnImport, "True");
+        await world.Settings.SetAsync(SettingKeys.MovieNamingTemplate, "{Title} ({Year})");
+        var id = await world.AddMovieAsync("Dune", 2021);
+        var video = world.Dirs.WriteFile("torrents/Dune.2021/Dune.2021.1080p.BluRay-GRP.mkv", "video");
+        var sub1 = world.Dirs.WriteFile("torrents/Dune.2021/Dune.2021.1080p.BluRay-GRP.eng.srt", "en");
+        var sub2 = world.Dirs.WriteFile("torrents/Dune.2021/Subs/3_Spanish.srt", "es");
+        foreach (var f in new[] { video, sub1, sub2 }) AgeFile(f);
+        var jobId = await AddJobAsync(world, id, null, MediaType.Movie, "Dune.2021.1080p.BluRay-GRP", DownloadStatus.Completed, 1, "s1", Path.GetDirectoryName(video));
+        var svc = PreviewService(world);
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        await svc.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+
+        var folder = Path.GetDirectoryName(preview.Plans.Single().DestinationPath)!;
+        Assert.Equal("en", await File.ReadAllTextAsync(Path.Combine(folder, "Dune (2021).en.srt")));
+        Assert.Equal("es", await File.ReadAllTextAsync(Path.Combine(folder, "Dune (2021).es.srt")));
+        Assert.True(File.Exists(sub1) && File.Exists(sub2), "Sources are never moved");
+        Assert.Equal(DownloadStatus.Imported, (await GetJobAsync(world, jobId)).Status);
+    }
+
+    [Fact]
+    public async Task In_a_pack_each_episode_gets_only_its_own_subtitles()
+    {
+        using var world = await WorldAsync();
+        var (series, _) = await world.AddSeriesAsync("Show", 2);
+        var e1 = world.Dirs.WriteFile("torrents/Show.S01/Show.S01E01.1080p.WEB-DL.mkv", "one");
+        var e2 = world.Dirs.WriteFile("torrents/Show.S01/Show.S01E02.1080p.WEB-DL.mkv", "two");
+        var s1 = world.Dirs.WriteFile("torrents/Show.S01/Subs/Show.S01E01.1080p.WEB-DL/2_English.srt", "sub-one");
+        var s2 = world.Dirs.WriteFile("torrents/Show.S01/Show.S01E02.1080p.WEB-DL.en.srt", "sub-two");
+        foreach (var f in new[] { e1, e2, s1, s2 }) AgeFile(f);
+        var jobId = await AddJobAsync(world, series, null, MediaType.Series, "Show.S01.1080p.WEB-DL", DownloadStatus.Completed, 1, "s2", Path.GetDirectoryName(e1));
+        var svc = PreviewService(world);
+        var preview = await svc.PreviewImportAsync(jobId, default);
+        await svc.ApplyPreviewAsync(jobId, preview.PreviewId, default);
+
+        var dest1 = preview.Plans.Single(p => p.SourcePath == e1).DestinationPath!;
+        var dest2 = preview.Plans.Single(p => p.SourcePath == e2).DestinationPath!;
+        Assert.Equal("sub-one", await File.ReadAllTextAsync(Path.ChangeExtension(dest1, null) + ".en.srt"));
+        Assert.Equal("sub-two", await File.ReadAllTextAsync(Path.ChangeExtension(dest2, null) + ".en.srt"));
+        Assert.Equal(2, Directory.GetFiles(Path.GetDirectoryName(dest1)!, "*.srt").Length);
+    }
 }
