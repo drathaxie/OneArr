@@ -347,8 +347,8 @@ public class FixMatchTests
         var first = await media.RefreshDueSeriesAsync(1, TimeSpan.FromHours(12), default);
         var second = await media.RefreshDueSeriesAsync(5, TimeSpan.FromHours(12), default);
 
-        Assert.StartsWith("Refreshed 1 series", first);
-        Assert.StartsWith("Refreshed 1 series", second);
+        Assert.StartsWith("Refreshed 1 item", first);
+        Assert.StartsWith("Refreshed 1 item", second);
         await using var check = factory.CreateDbContext();
         var items = await check.MediaItems.ToDictionaryAsync(m => m.Id);
         Assert.NotNull(items[never].MetadataRefreshedUtc);

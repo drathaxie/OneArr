@@ -556,7 +556,8 @@ public sealed class MediaService
         {
             // SQLite stores DateTimeOffset as text and cannot compare it in SQL, so the small id/date list is filtered here.
             var series = await db.MediaItems.AsNoTracking()
-                .Where(m => m.MediaType == MediaType.Series && m.Monitored && m.Provider == "tmdb")
+                // Movies too: their release dates and alternate titles come from the same refresh.
+                .Where(m => m.Monitored && m.Provider == "tmdb")
                 .Select(m => new { m.Id, m.MetadataRefreshedUtc }).ToListAsync(ct);
             due = series.Where(m => m.MetadataRefreshedUtc is null || now - m.MetadataRefreshedUtc.Value >= maxAge)
                 .OrderBy(m => m.MetadataRefreshedUtc ?? DateTimeOffset.MinValue).ThenBy(m => m.Id)
@@ -575,7 +576,7 @@ public sealed class MediaService
             }
             catch (ProviderNotConfiguredException)
             {
-                return "TMDb is not configured, so series episode lists were not refreshed";
+                return "TMDb is not configured, so metadata was not refreshed";
             }
             catch (Exception ex) when (ex is ExternalServiceException or ArgumentException or KeyNotFoundException)
             {
@@ -584,7 +585,7 @@ public sealed class MediaService
                 await db.MediaItems.Where(m => m.Id == id).ExecuteUpdateAsync(s => s.SetProperty(m => m.MetadataRefreshedUtc, now), ct);
             }
         }
-        return $"Refreshed {refreshed} series ({added} new episode(s)), {failed} failed";
+        return $"Refreshed {refreshed} item(s) ({added} new episode(s)), {failed} failed";
     }
 
     public async Task<bool> DeleteAsync(int id, CancellationToken ct)

@@ -32,6 +32,8 @@ public static class ApiEndpoints
         string? NotifyWebhook = null, bool? NotifyOnGrab = null, bool? NotifyOnImport = null, bool? NotifyOnFailure = null);
     public sealed record BlocklistBody(string? Reason);
     public sealed record IgnoreBody(List<string>? Paths);
+    public sealed record ListPreviewBody(string Source, string Value);
+    public sealed record ListAddBody(List<ListAddItem>? Items, bool Monitored = true);
     // The newer fields are optional: null keeps the stored value on PUT and the default on POST, so older clients still work.
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources,
         string? AllowedSources = null, int? MinSizeMb = null, int? MaxSizeMb = null,
@@ -849,6 +851,12 @@ public static class ApiEndpoints
             await c.SaveChangesAsync(ct);
             return Results.Ok(new { message = "Missing download cleared; the item can be searched or grabbed again" });
         });
+
+        // Lists: preview is read-only; add creates only the chosen titles. Nothing is added on a schedule.
+        api.MapPost("/lists/preview", async (ListPreviewBody body, ListImportService lists, CancellationToken ct) =>
+            Results.Ok(await lists.PreviewAsync(body.Source, body.Value ?? "", ct)));
+        api.MapPost("/lists/add", async (ListAddBody body, ListImportService lists, CancellationToken ct) =>
+            Results.Ok(await lists.AddAsync(body.Items ?? [], body.Monitored, ct)));
 
         api.MapPost("/notifications/test", async (NotificationService notify, SettingsStore settings, CancellationToken ct) =>
         {

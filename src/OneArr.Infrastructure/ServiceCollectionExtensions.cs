@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RssSyncService>();
         services.AddSingleton<BlocklistService>();
         services.AddSingleton<NotificationService>();
+        services.AddSingleton<ListImportService>();
         services.AddHostedService<BackgroundScheduler>();
         return services;
     }

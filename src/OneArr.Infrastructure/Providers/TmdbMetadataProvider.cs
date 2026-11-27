@@ -108,6 +108,39 @@ public sealed class TmdbMetadataProvider : IMetadataProvider
 
     private static DateOnly Min(DateOnly? a, DateOnly b) => a is DateOnly x && x < b ? x : b;
 
+    public async Task<IReadOnlyList<ListItem>> GetListAsync(string listId, CancellationToken ct)
+    {
+        var id = ValidId(listId);
+        var items = new List<ListItem>();
+        // TMDb pages list items; ten pages is far beyond a normal list and bounds the requests.
+        for (var page = 1; page <= 10; page++)
+        {
+            var json = await GetJsonAsync($"list/{id}", ct, ("page", page.ToString()));
+            if (!json.TryGetProperty("items", out var arr) || arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0) break;
+            foreach (var e in arr.EnumerateArray())
+                if (ListItemOf(e, Str(e, "media_type")) is { } item) items.Add(item);
+            if (!json.TryGetProperty("total_pages", out var tp) || tp.ValueKind != JsonValueKind.Number || page >= tp.GetInt32()) break;
+        }
+        return items.DistinctBy(i => (i.Type, i.ProviderId)).ToList();
+    }
+
+    public async Task<ListItem?> FindByImdbAsync(string imdbId, CancellationToken ct)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(imdbId, "^tt\\d{5,10}$")) throw new ArgumentException($"'{imdbId}' is not an IMDb id");
+        var json = await GetJsonAsync($"find/{imdbId}", ct, ("external_source", "imdb_id"));
+        foreach (var (key, type) in new[] { ("movie_results", "movie"), ("tv_results", "tv") })
+            if (json.TryGetProperty(key, out var arr) && arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() > 0)
+                return ListItemOf(arr[0], type);
+        return null;
+    }
+
+    private static ListItem? ListItemOf(JsonElement e, string? mediaType)
+    {
+        var type = mediaType switch { "movie" => MediaType.Movie, "tv" => MediaType.Series, _ => (MediaType?)null };
+        if (type is not MediaType t || !e.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.Number) return null;
+        return new ListItem(t, idEl.GetInt32().ToString(), TitleOf(e, t), YearOf(e, t));
+    }
+
     public async Task<IReadOnlyList<SeasonInfo>> GetSeasonsAsync(string providerId, CancellationToken ct)
     {
         var id = ValidId(providerId);

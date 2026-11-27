@@ -18,7 +18,16 @@ public interface IMetadataProvider
     Task<IReadOnlyList<MetadataSearchResult>> SearchAsync(MediaType type, string query, CancellationToken ct);
     Task<MetadataDetails> GetDetailsAsync(MediaType type, string providerId, CancellationToken ct);
     Task<IReadOnlyList<SeasonInfo>> GetSeasonsAsync(string providerId, CancellationToken ct);
+
+    /// <summary>The movies and series on a public TMDb list.</summary>
+    Task<IReadOnlyList<ListItem>> GetListAsync(string listId, CancellationToken ct) => throw new NotSupportedException("Lists are not supported by this metadata provider");
+
+    /// <summary>The TMDb entry for an IMDb id, or null.</summary>
+    Task<ListItem?> FindByImdbAsync(string imdbId, CancellationToken ct) => throw new NotSupportedException("IMDb lookup is not supported by this metadata provider");
 }
+
+/// <summary>One title from a list, identified by TMDb id.</summary>
+public sealed record ListItem(MediaType Type, string ProviderId, string Title, int? Year);
 
 /// <summary>An episode's exact first-air moment, for deciding when it has really aired.</summary>
 public sealed record EpisodeAirTime(int Season, int Episode, DateTimeOffset AirsUtc);

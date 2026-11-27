@@ -4,6 +4,7 @@ import { Dashboard, Movies, Series, Wanted, Activity, Settings, Migration } from
 import { useLoad } from "./common";
 import type { CommandNavigate } from "./command-center";
 import { Calendar } from "./calendar";
+import { ListImport } from "./lists";
 
 type Page = "dashboard" | "movies" | "series" | "wanted" | "calendar" | "activity" | "settings" | "migration";
 
@@ -23,7 +24,7 @@ const NAV_GROUPS: { num: string; heading: string; items: { id: Page; label: stri
   ] },
   { num: "03", heading: "System", items: [
     { id: "settings", label: "Settings" },
-    { id: "migration", label: "Migration Preview" },
+    { id: "migration", label: "Import & Migration" },
   ] },
 ];
 
@@ -97,7 +98,7 @@ export function App() {
         {page === "calendar" && <Calendar />}
         {page === "activity" && <Activity initialTab={activityTab} />}
         {page === "settings" && <Settings initialSection={settingsSection} />}
-        {page === "migration" && <Migration />}
+        {page === "migration" && <><Migration /><ListImport /></>}
       </main>
     </div>
   );

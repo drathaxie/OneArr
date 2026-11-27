@@ -1,9 +1,9 @@
 # OneArr status and roadmap
 
-Updated 2026-11-26, at `main` 3e92e8f plus branch `release-timing`. Latest release: v0.7.8.
+Updated 2026-11-27: `main` is v0.7.9, and branch `tv-movie-gaps` holds the work listed as **branch**.
 
-"Done" means on `main` and covered by tests. "Unverified" means it works in tests but has not been confirmed on the
-Windows PC with the real library. Local logs on that PC have not been reviewed from a cloud session (no folder shared).
+"Done" means on `main` and covered by tests. "Branch" means on `tv-movie-gaps`, covered by tests, not yet released.
+Nothing on the branch has been tried on the Windows PC with the real library, indexers or qBittorrent yet.
 
 ## Where we are
 
@@ -12,82 +12,73 @@ Windows PC with the real library. Local logs on that PC have not been reviewed f
 | Item | Status |
 |---|---|
 | TMDb search and add, movies and series | Done |
-| Fix match (rematch an entry, keeps episode ids and history) | Done |
-| Specials (season 0), unmonitored by default | Done; unverified against a live show |
-| Manual "Refresh metadata" | Done |
-| Scheduled refresh of series episode lists | **This branch** (every 5 min, 5 series, 12 h cycle) |
-| Air *times* | **This branch**: exact times from TVmaze (matched by TVDB/IMDb id, used only when within a day of TMDb's date); falls back to the date |
-| Movie digital/physical release dates | Missing |
+| Fix match, manual and scheduled metadata refresh | Done (v0.7.9) |
+| Exact air times from TVmaze | Done (v0.7.9) |
+| Specials (season 0) unmonitored by default, with their own monitor toggle | Done; labelled "Specials" on the branch |
+| Movie release dates (cinema, digital, disc); automatic search waits for digital or disc | Branch |
+| Alternate titles (TMDb), accent folding, "&" = "and" | Branch |
+| Anime: absolute episode numbers, per-series "anime numbering" switch | Branch |
+| Import from a TMDb list or IMDb ids (preview, then add chosen titles) | Branch |
+| Trakt lists | Not done: needs a Trakt app key |
+| Scheduled list sync (auto-add new list entries) | Not done, by choice: imports are one-off |
 
 ### Library
 
 | Item | Status |
 |---|---|
-| Reconcile existing files (preview, typed confirm, apply) | Done; used on the real library |
-| Automation pauses until the catalog is reviewed (fail closed) | Done |
-| Partial scans, offline shares, mid-scan drop-outs | Done (fake-disk tests; no real share outage tested) |
-| Docker path mappings, bulk root folders | Done |
-| "Find on TMDb" for unmatched shows and movies | Done |
-| Ignore list for extras (featurettes, webisodes) | Missing: they reappear on every scan |
+| Reconcile existing files (preview, typed confirm, apply) | Done |
+| Automation pauses until the catalog is reviewed | Done |
+| Extras skipped automatically (Featurettes, Trailers, … folders and suffixes) | Branch |
+| Ignore list for files and folders | Branch |
+| Anime files in a library scan ("Show - 05.mkv") | Not done: only downloads are matched by absolute number |
 
 ### Search and grab
 
 | Item | Status |
 |---|---|
-| Wanted search (scheduled, rate-limited, backoff) | Done |
-| New episodes searched before the backlog; hourly retries for 2 days after airing | **This branch** |
-| RSS sync (grab from indexers' recent feeds) | **This branch**: opt-in per indexer (off by default), every 15 min, single episodes and movies only |
-| Indexers: Torznab, Nyaa, generic RSS | Done |
-| TorrentLeech native | Partial |
-| Quality profiles | Partial: resolution only; no source tiers, size limits, custom formats |
-| Upgrades | Partial: resolution cutoff only, no replacement of an existing file |
+| Wanted search, new episodes first, hourly retries after airing | Done (v0.7.9) |
+| RSS sync, opt-in per indexer | Done (v0.7.9) |
+| Blocklist (manual, plus dead torrents after 24 h without progress) | Branch |
+| PROPER / REPACK / vN recognised and preferred | Branch |
+| Quality profiles: allowed sources, size limits, required/banned/preferred words | Branch |
+| Upgrades: opt-in per profile, old file moved to a recycle bin on the same drive | Branch |
 
 ### Downloads and import
 
 | Item | Status |
 |---|---|
-| qBittorrent, multiple clients, per-client path mapping | Done |
-| Automatic import (opt-in) | Done; v0.7.5 fixed held jobs hiding importable ones |
-| Visible hold reasons and empty-download explanations | Done (v0.7.8); unverified on the real queue |
-| Samples excluded from import and matching | Done |
-| Problems tab with Dismiss | Done |
-| Renaming on import (opt-in) | Done |
-| Free-space check before copy | Done |
-| Subtitles and other extras | Missing |
-| Upgrade replacement and recycle bin | Missing |
+| qBittorrent, multiple clients, path mapping, automatic import (opt-in) | Done |
+| Subtitles imported with their video, named after it | Branch |
+| Upgrade replacement through the recycle bin, rolled back if the import fails | Branch |
 
 ### Operations
 
 | Item | Status |
 |---|---|
-| Windows tray, self-install, release-based updates and rollback | Done |
-| CI on Linux and Windows, release workflow | Done |
-| Viewing logs from the app | Missing: diagnosing your PC needs logs pasted or a shared folder |
-| Notifications (new download, import failure) | Missing |
-| Calendar of upcoming episodes | Missing |
+| Windows tray, self-install, updates and rollback, CI, release workflow | Done |
+| Logs & Diagnostics page, and a diagnostics download without secrets | Branch |
+| Calendar page | Branch |
+| Notifications to a Discord webhook or any JSON endpoint | Branch |
 
-## Why South Park was not grabbed automatically
+## Defaults on the branch, after updating
 
-Three causes in the code; this branch fixes the first two and softens the third.
+Everything new that changes files or downloads is off until you switch it on:
 
-1. **Episode lists were never refreshed on their own.** If TMDb listed the new episode after the series was last fetched,
-   OneArr did not know it existed. Fixed: scheduled refresh.
-2. **New episodes waited behind the backlog.** The search queue was ordered by due time and each run searches 10
-   items, so any overdue backlog item went first. Fixed: recently aired, then never searched, then backlog.
-3. **"Aired" is a date, not a time.** An evening episode counted as aired that morning (UTC), was searched before
-   any release existed, and then waited 6 hours. Fixed: exact air times from TVmaze (South Park: 22:00 New York, which is
-   03:00 UTC the next day), plus hourly retries for 2 days after airing, plus RSS sync.
+- **Upgrades:** off for every profile. Turn on "upgrade existing files" in a profile *and* set a recycle bin folder under
+  Import paths.
+- **Anime numbering:** off for every series.
+- **Notifications:** off until a webhook is saved.
+- **Blocklist:** releases are only blocklisted when you press Blocklist, or when automatic grabbing is on and a torrent
+  has had no progress 24 hours after the grab. The torrent itself is never removed.
+- **Movie release dates and alternate titles:** filled in by the scheduled refresh, which now covers monitored movies as
+  well as series (10 items every 5 minutes, each at most every 12 hours). Until then a movie has no dates and is searched
+  as before.
+- **Subtitles:** on. They are copied next to the video, never overwriting anything.
+- **Extras:** skipped by the next library scan. That can lower the "unmatched" count you acknowledged before.
 
-## Next, in proposed order
+## Next
 
-1. ~~RSS sync~~: on this branch. Turn it on per indexer in Settings → Indexers → Edit → "RSS sync".
-2. **Log viewer and diagnostics export.** Show recent warnings and errors in the app, plus a "download diagnostics"
-   button, so problems on the PC can be read without sharing folders.
-3. ~~Air times~~: on this branch (TVmaze). Filled in by the next metadata refresh of each series (within 12 hours).
-4. **Ignore list for unmatched extras**, and a simple specials monitor toggle per season.
-5. **Quality profiles with source tiers and size limits**, then upgrades that replace a file safely (recycle bin).
-6. **Subtitles and extras on import.**
-7. **Calendar and notifications.**
-
-Decided 2026-11-26: use the best source for each job rather than TMDb for everything (TVmaze for air times); RSS sync
-runs only on indexers you mark for it.
+1. Try the branch on the PC: Calendar, Logs & Diagnostics, a list preview, and one upgrade on a test profile.
+2. Library scans that understand anime file names.
+3. Optional scheduled list sync, if wanted.
+4. Trakt, if you register a Trakt app.
