@@ -454,6 +454,31 @@ namespace OneArr.Infrastructure.Persistence.Migrations
                     b.ToTable("JobHistories");
                 });
 
+            modelBuilder.Entity("OneArr.Domain.LibraryIgnore", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PathKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PathKey")
+                        .IsUnique();
+
+                    b.ToTable("LibraryIgnores");
+                });
+
             modelBuilder.Entity("OneArr.Domain.LibraryRoot", b =>
                 {
                     b.Property<int>("Id")

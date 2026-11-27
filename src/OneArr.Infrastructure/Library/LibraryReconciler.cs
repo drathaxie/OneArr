@@ -41,7 +41,8 @@ public sealed record ScanPlan(
     string MappingsHash,
     IReadOnlyList<string> Warnings,
     int AmbiguousCount,
-    int UnmatchedCount);
+    int UnmatchedCount,
+    int IgnoredCount = 0);
 
 public sealed record ScanPlanResponse(int PlanId, ScanPlan Plan);
 
@@ -375,6 +376,9 @@ public sealed class LibraryReconciler
         await using var db = await _db.CreateDbContextAsync(ct);
 
         var roots = await db.LibraryRoots.AsNoTracking().Where(r => r.Enabled).OrderBy(r => r.Id).ToListAsync(ct);
+        var ignores = await db.LibraryIgnores.AsNoTracking().Select(i => i.PathKey).ToListAsync(ct);
+        var ignoredKeys = new HashSet<string>();
+        var ignoredCount = 0;
         var mappings = await db.PathMappings.AsNoTracking().ToListAsync(ct);
         var movieRows = await db.MediaItems.AsNoTracking().Where(m => m.MediaType == MediaType.Movie).ToListAsync(ct);
         var seriesRows = await db.MediaItems.AsNoTracking().Where(m => m.MediaType == MediaType.Series).Include(m => m.Episodes).ToListAsync(ct);
@@ -434,7 +438,18 @@ public sealed class LibraryReconciler
             if (scan.SkippedReparsePoints > 0)
                 warnings.Add($"Skipped {scan.SkippedReparsePoints} junction or symlink entries under '{root.Path}'. Their contents are not followed.");
             foreach (var file in scan.Files)
-                discovered.TryAdd(LibraryPaths.Key(file.FullPath, windows), (file, root.MediaType));
+            {
+                var fileKey = LibraryPaths.Key(file.FullPath, windows);
+                // Extras (Plex-style folders and suffixes) and files you chose to ignore are never matched or linked, so they
+                // cannot be mistaken for an episode or movie and do not come back as unmatched on every scan.
+                if (LibraryExtras.IsExtra(file.RelativePath) || ignores.Any(i => fileKey == i || LibraryPaths.IsWithin(fileKey, i, windows)))
+                {
+                    ignoredKeys.Add(fileKey);
+                    ignoredCount++;
+                    continue;
+                }
+                discovered.TryAdd(fileKey, (file, root.MediaType));
+            }
         }
 
         ct.ThrowIfCancellationRequested();
@@ -487,7 +502,7 @@ public sealed class LibraryReconciler
             if (row.MediaItemId is not int itemId || !typeById.TryGetValue(itemId, out var type)) continue;
             var scope = accessible.FirstOrDefault(a => LibraryPaths.IsWithin(row.PathKey, a.Key, windows));
             if (scope.Key is null) continue;
-            if (discovered.ContainsKey(row.PathKey) || row.Status == MediaFileStatus.Missing) continue;
+            if (discovered.ContainsKey(row.PathKey) || ignoredKeys.Contains(row.PathKey) || row.Status == MediaFileStatus.Missing) continue;
 
             // A file inside a folder that could not be read is undecidable, not missing.
             var unreadable = scope.Unreadable.Any(u => row.PathKey == u || LibraryPaths.IsWithin(row.PathKey, u, windows));
@@ -538,7 +553,8 @@ public sealed class LibraryReconciler
             MappingsHash: MappingsHash(mappings),
             Warnings: warnings,
             AmbiguousCount: ambiguousCount,
-            UnmatchedCount: unmatchedCount);
+            UnmatchedCount: unmatchedCount,
+            IgnoredCount: ignoredCount);
     }
 
     private static async Task<Dictionary<int, MediaFile>> LoadRowsAsync(OneArrDbContext db, IEnumerable<int> ids, CancellationToken ct)

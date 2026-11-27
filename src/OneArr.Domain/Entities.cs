@@ -217,6 +217,16 @@ public class DownloadJob
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>A library file or folder the scan skips: not matched, not linked, not counted as unmatched. Disk is never touched.</summary>
+public class LibraryIgnore
+{
+    public int Id { get; set; }
+    public string Path { get; set; } = "";
+    /// <summary>Path key (case-folded on Windows). A folder entry also covers everything below it.</summary>
+    public string PathKey { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 /// <summary>A release that must not be grabbed again, by info hash and by exact title.</summary>
 public class BlocklistEntry
 {

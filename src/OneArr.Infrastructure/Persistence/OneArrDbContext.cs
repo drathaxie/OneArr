@@ -29,6 +29,7 @@ public class OneArrDbContext : DbContext
     public DbSet<LibraryScanPlan> LibraryScanPlans => Set<LibraryScanPlan>();
     public DbSet<ProblemDismissal> ProblemDismissals => Set<ProblemDismissal>();
     public DbSet<BlocklistEntry> Blocklist => Set<BlocklistEntry>();
+    public DbSet<LibraryIgnore> LibraryIgnores => Set<LibraryIgnore>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -124,6 +125,7 @@ public class OneArrDbContext : DbContext
 
         b.Entity<ProblemDismissal>(e => e.HasIndex(x => x.Key).IsUnique());
         b.Entity<BlocklistEntry>(e => e.HasIndex(x => x.InfoHash));
+        b.Entity<LibraryIgnore>(e => e.HasIndex(x => x.PathKey).IsUnique());
         // Existing files are original releases (revision 1), not "revision 0", or every release would look like a proper of them.
         b.Entity<MediaFile>().Property(x => x.Revision).HasDefaultValue(1);
 

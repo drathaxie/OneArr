@@ -523,7 +523,7 @@ function MediaDetail({ mediaId, profiles, onBack }: { mediaId: number; profiles:
         return (
           <div key={s.seasonNumber} className="card">
             <div className="row spread">
-              <button className="series-season-toggle" aria-expanded={!isCollapsed} onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "▸" : "▾"} Season {s.seasonNumber}</button>
+              <button className="series-season-toggle" aria-expanded={!isCollapsed} onClick={() => toggleCollapsed(s.seasonNumber)}>{isCollapsed ? "▸" : "▾"} {s.seasonNumber === 0 ? "Specials" : `Season ${s.seasonNumber}`}</button>
               <div className="row">
                 <span className="badge">{s.monitored ? "Monitored" : "Unmonitored"}</span>
                 <span className="muted">{s.hasFileCount}/{s.episodeCount} have files · {s.wantedCount} wanted</span>

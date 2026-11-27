@@ -30,6 +30,7 @@ public static class ApiEndpoints
     public sealed record DownloadPathPreviewBody(string RemotePrefix, string LocalPrefix, string ReportedPath);
     public sealed record SettingsBody(string? TmdbApiKey, bool? DryRunImport, string? TorrentRoot, string? MediaRoot, bool? AutomaticGrabbing = null, string? DefaultMovieRoot = null, string? DefaultSeriesRoot = null, int? DefaultMovieProfileId = null, int? DefaultSeriesProfileId = null, bool? RenameOnImport = null, string? MovieNamingTemplate = null, string? SeriesNamingTemplate = null, bool? AutomaticImport = null, string? RecycleBin = null);
     public sealed record BlocklistBody(string? Reason);
+    public sealed record IgnoreBody(List<string>? Paths);
     // The newer fields are optional: null keeps the stored value on PUT and the default on POST, so older clients still work.
     public sealed record ProfileBody(string Name, int MinResolution, int CutoffResolution, bool AllowWebSources,
         string? AllowedSources = null, int? MinSizeMb = null, int? MaxSizeMb = null,
@@ -1013,6 +1014,39 @@ public static class ApiEndpoints
         });
 
         // Read-only preview. It stores the reviewed result and changes no media rows or files.
+        // Ignore list: files or folders the scan skips. Only OneArr's record; nothing on disk changes.
+        api.MapGet("/library/ignores", async (IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            return Results.Ok(await c.LibraryIgnores.AsNoTracking().OrderBy(i => i.Path).ToListAsync(ct));
+        });
+        api.MapPost("/library/ignores", async (IgnoreBody body, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            if (body.Paths is not { Count: > 0 and <= 2000 }) throw new ArgumentException("Give between 1 and 2000 paths to ignore");
+            await using var c = await db.CreateDbContextAsync(ct);
+            var windows = OperatingSystem.IsWindows();
+            var roots = await c.LibraryRoots.AsNoTracking().Select(r => r.Path).ToListAsync(ct);
+            var existing = (await c.LibraryIgnores.Select(i => i.PathKey).ToListAsync(ct)).ToHashSet();
+            var added = 0;
+            foreach (var raw in body.Paths.Select(p => p.Trim()).Distinct())
+            {
+                var key = LibraryPaths.Key(raw, windows);
+                // Only paths inside a library folder: the list is for library files, not arbitrary disk locations.
+                if (!roots.Any(r => LibraryPaths.IsWithin(key, LibraryPaths.Key(r, windows), windows)))
+                    throw new ArgumentException($"'{raw}' is not inside a library folder");
+                if (!existing.Add(key)) continue;
+                c.LibraryIgnores.Add(new LibraryIgnore { Path = raw, PathKey = key, CreatedAt = DateTimeOffset.UtcNow });
+                added++;
+            }
+            await c.SaveChangesAsync(ct);
+            return Results.Ok(new { added, message = $"Ignoring {added} path(s). Run a new scan preview to see the result." });
+        });
+        api.MapDelete("/library/ignores/{id:int}", async (int id, IDbContextFactory<OneArrDbContext> db, CancellationToken ct) =>
+        {
+            await using var c = await db.CreateDbContextAsync(ct);
+            return await c.LibraryIgnores.Where(i => i.Id == id).ExecuteDeleteAsync(ct) > 0 ? Results.NoContent() : Results.NotFound();
+        });
+
         api.MapPost("/library/preview", async (LibraryReconciler library, CancellationToken ct) => Results.Ok(await library.PreviewAsync(ct)));
 
         api.MapPost("/library/plans/{id:int}/apply", async (int id, ApplyBody? body, LibraryReconciler library, CancellationToken ct) =>

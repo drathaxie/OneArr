@@ -10,7 +10,7 @@ type Plan = {
   planId: number;
   plan: {
     roots: RootReport[]; links: (Entry & { sizeBytes: number; resolution?: number | null; mediaItemId: number; mediaFileId: number | null })[]; missing: (Entry & { mediaItemId?: number })[];
-    unknown: (Entry & { reason?: string; mediaItemId?: number })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number;
+    unknown: (Entry & { reason?: string; mediaItemId?: number })[]; ambiguous: Entry[]; unmatched: Entry[]; alreadyLinked: number; filesUnderUnavailableRoots: number; ignoredCount?: number;
     complete: boolean; warnings: string[];
   };
 };
@@ -172,11 +172,21 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
     })();
   }, [plan.planId]);
   const titleFor = (id?: number) => (id !== undefined && titles[id] ? titles[id] : undefined);
+  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const [ignoreMessage, setIgnoreMessage] = useState<string | null>(null);
+  async function ignore(paths: string[]) {
+    try {
+      const res = await api<{ message: string }>("POST", "/api/library/ignores", { paths });
+      setIgnored((prev) => new Set([...prev, ...paths]));
+      setIgnoreMessage(res.message);
+    } catch (e) { setIgnoreMessage((e as Error).message); }
+  }
   return (
     <div style={{ marginTop: ".75rem" }}>
       <p>
         <strong>{p.links.length}</strong> to link · <strong>{p.missing.length}</strong> to mark missing · {p.alreadyLinked} already linked ·{" "}
         {p.ambiguous.length} ambiguous · {p.unmatched.length} unmatched
+        {(p.ignoredCount ?? 0) > 0 && <> · {p.ignoredCount} extras or ignored (skipped)</>}
         {p.filesUnderUnavailableRoots > 0 && <> · {p.filesUnderUnavailableRoots} under unavailable folders (left unchanged)</>}
       </p>
       {p.warnings.map((w, i) => <p key={i} className="muted">{w}</p>)}
@@ -228,10 +238,16 @@ function PlanView({ plan, unchecked, onToggle, busy, onApply, acknowledge, onAck
           <ul>{p.unmatched.slice(0, PAGE_LIMIT).map((u) => (
             <li key={u.path} className="row spread">
               <span><span className="muted">{u.path}</span> — {u.reason}</span>
-              {u.suggestedTitle && <AddFromUnmatched entry={u} roots={roots} />}
+              <span className="row">
+                {u.suggestedTitle && <AddFromUnmatched entry={u} roots={roots} />}
+                <button className="small" disabled={ignored.has(u.path)} onClick={() => ignore([u.path])}>{ignored.has(u.path) ? "Ignored" : "Ignore"}</button>
+              </span>
             </li>
           ))}</ul>
           {p.unmatched.length > PAGE_LIMIT && <p className="muted">Showing the first {PAGE_LIMIT} of {p.unmatched.length}.</p>}
+          <button className="small" onClick={() => ignore(p.unmatched.slice(0, PAGE_LIMIT).map((u) => u.path))}>Ignore all listed</button>
+          {ignoreMessage && <p className="muted">{ignoreMessage}</p>}
+          <p className="muted">Ignored files are skipped by every later scan: not matched, not linked, not counted. Nothing on disk changes. Extras in Plex-style folders (Featurettes, Trailers, Behind The Scenes…) are skipped automatically.</p>
         </>
       )}
 
