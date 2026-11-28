@@ -470,7 +470,10 @@ public sealed class MediaService
                         Monitored = season.SeasonNumber != 0 && item.Monitored,
                     });
                     episodesAdded++;
-                    if (e.AirDate is not DateOnly aired || aired < today.AddDays(-RecentAirDays)) mayBeOnDisk = true;
+                    // Only an episode that could be grabbed and could already exist reopens the review: monitored, with a known
+                    // air date before the recent window. Specials (unmonitored) and undated future episodes cannot be either.
+                    if (season.SeasonNumber != 0 && item.Monitored && e.AirDate is DateOnly aired && aired < today.AddDays(-RecentAirDays))
+                        mayBeOnDisk = true;
                 }
                 else
                 {

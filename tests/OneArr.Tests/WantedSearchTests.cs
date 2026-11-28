@@ -327,4 +327,21 @@ public class WantedSearchTests
         Assert.Equal(0, summary.Considered);
         Assert.Empty(w.Indexer.Queries);
     }
+
+    [Fact]
+    public async Task An_entry_waiting_for_a_library_scan_is_skipped_and_the_rest_is_still_searched()
+    {
+        using var w = new TestWorld();
+        await w.ConfigureAsync();
+        await w.AddMovieAsync("The Matrix", 1999);
+        await w.ReconcileLibraryAsync();
+        // Added after the scan: it may already be on disk, so it waits, but it no longer pauses everything else.
+        await w.AddMovieAsync("Dune", 2021);
+
+        var summary = await w.Search.RunOnceAsync(Ct);
+
+        Assert.True(summary.Enabled);
+        Assert.Equal(1, summary.Searched);
+        Assert.Contains("Matrix", Decode(Assert.Single(w.Indexer.Queries)));
+    }
 }

@@ -217,3 +217,13 @@ public class RssSyncTests
         Assert.Contains(summary.Errors, e => e.StartsWith("fixture:"));
     }
 }
+
+public class TorrentLeechRecentTests
+{
+    [Theory]
+    [InlineData(true, true, true, "torrents/browse/list/categories/8,9,11,12,13,14,15,29,37,43,47,26,27,32,34,35,44/orderby/added/order/desc")]
+    [InlineData(false, true, true, "torrents/browse/list/categories/26,27,32,34,35,44/orderby/added/order/desc")]
+    [InlineData(false, true, false, "torrents/browse/list/orderby/added/order/desc")]
+    public void Latest_uploads_use_the_search_route_without_a_query(bool movies, bool tv, bool filtered, string expected) =>
+        Assert.Equal(expected, OneArr.Infrastructure.Providers.NativeTrackerClient.BuildRecentPath(movies, tv, filtered));
+}

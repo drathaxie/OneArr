@@ -47,7 +47,7 @@ public class LibraryFailClosedTests
     }
 
     [Fact]
-    public async Task A_catalog_imported_before_reconciliation_blocks_automation_even_with_folders_scanned()
+    public async Task An_entry_added_after_the_scan_waits_on_its_own_without_pausing_everything()
     {
         var world = await WorldAsync((MediaType.Movie, MovieRoot));
         var fs = OnlineFs(MovieRoot);
@@ -56,8 +56,9 @@ public class LibraryFailClosedTests
 
         var gate = await Reconciler(world, fs).CheckAutomationAsync(default);
 
-        Assert.False(gate.Allowed);
-        Assert.Contains("not been checked", gate.Reason, StringComparison.Ordinal);
+        // The gate stays open; the searches skip the unchecked entry itself (see WantedSearchTests).
+        Assert.True(gate.Allowed);
+        Assert.Contains("1 entry waits for the next library scan", gate.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

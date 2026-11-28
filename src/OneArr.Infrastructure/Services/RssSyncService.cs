@@ -164,7 +164,7 @@ public sealed class RssSyncService
 
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.MediaType == MediaType.Series && m.Monitored && e.Monitored && (!e.HasFile || upgradeProfiles.Contains(m.QualityProfileId)) && e.AirDate != null && e.AirDate <= tomorrow
+                              where m.MediaType == MediaType.Series && m.Monitored && m.LibraryReviewedUtc != null && e.Monitored && (!e.HasFile || upgradeProfiles.Contains(m.QualityProfileId)) && e.AirDate != null && e.AirDate <= tomorrow
                               select new { e.Id, MediaItemId = m.Id, m.Title, m.AlternateTitles, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc, m.IsAnime, e.AbsoluteNumber }).ToListAsync(ct);
         var byEpisode = new Dictionary<(string, int, int), (int, int?)>();
         var byAbsolute = new Dictionary<(string, int), (int, int?)>();
@@ -179,7 +179,7 @@ public sealed class RssSyncService
         }
 
         var movies = await db.MediaItems.AsNoTracking()
-            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && (!m.HasFile || upgradeProfiles.Contains(m.QualityProfileId)))
+            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && m.LibraryReviewedUtc != null && (!m.HasFile || upgradeProfiles.Contains(m.QualityProfileId)))
             .Select(m => new { m.Id, m.Title, m.Year, m.AlternateTitles, m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate }).ToListAsync(ct);
         var today = DateOnly.FromDateTime(now.UtcDateTime);
         var byMovie = new Dictionary<string, List<(int, int?)>>();

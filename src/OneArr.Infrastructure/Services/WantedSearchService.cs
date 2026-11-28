@@ -170,14 +170,15 @@ public sealed class WantedSearchService
         var tomorrow = today.AddDays(1);
 
         var movies = await db.MediaItems.AsNoTracking()
-            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile)
+            .Where(m => m.MediaType == MediaType.Movie && m.Monitored && !m.HasFile && m.LibraryReviewedUtc != null)
             .Select(m => new { m.Id, m.Title, m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate })
             .ToListAsync(ct);
         // A movie still only in cinemas has nothing but cam copies; it is searched once it is out digitally or on disc.
         movies = movies.Where(m => MediaItem.MovieAvailable(m.TheatricalReleaseDate, m.DigitalReleaseDate, m.PhysicalReleaseDate, today)).ToList();
         var episodes = await (from e in db.Episodes.AsNoTracking()
                               join m in db.MediaItems.AsNoTracking() on e.MediaItemId equals m.Id
-                              where m.Monitored && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
+                              // An entry not yet checked against the disk may already have this file: it waits for the next scan.
+                              where m.Monitored && m.LibraryReviewedUtc != null && e.Monitored && !e.HasFile && e.AirDate != null && e.AirDate <= tomorrow
                               select new { EpisodeId = e.Id, MediaItemId = m.Id, m.Title, e.SeasonNumber, e.EpisodeNumber, e.AirDate, e.AirDateUtc }).ToListAsync(ct);
         // An exact air time decides "aired" when known (an evening episode is not searched that morning); otherwise the date does.
         // Tomorrow's date is loaded because a show airing in Asia or Australia is already out the previous day in UTC.
@@ -230,7 +231,7 @@ public sealed class WantedSearchService
         var profiles = await db.QualityProfiles.AsNoTracking().Where(p => p.UpgradesAllowed).ToDictionaryAsync(p => p.Id, p => p.CutoffResolution, ct);
         if (profiles.Count == 0) return;
         var ids = profiles.Keys.ToList();
-        var items = await db.MediaItems.AsNoTracking().Where(m => m.Monitored && ids.Contains(m.QualityProfileId))
+        var items = await db.MediaItems.AsNoTracking().Where(m => m.Monitored && m.LibraryReviewedUtc != null && ids.Contains(m.QualityProfileId))
             .Select(m => new { m.Id, m.Title, m.MediaType, m.QualityProfileId, m.HasFile }).ToListAsync(ct);
         var itemIds = items.Select(i => i.Id).ToList();
         var files = await db.MediaFiles.AsNoTracking().Include(f => f.EpisodeLinks)

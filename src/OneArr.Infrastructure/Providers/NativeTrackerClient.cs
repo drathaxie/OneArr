@@ -257,6 +257,39 @@ public sealed class NativeTrackerClient
         return await ParseResponseAsync(indexer, response, search.Type, ct, "category-filtered");
     }
 
+    /// <summary>TorrentLeech's newest uploads in the enabled categories, newest first, for RSS sync. Same browse route as a
+    /// search without the query; on 404 retried once without categories, and filtered to movie/TV rows either way.</summary>
+    public static string BuildRecentPath(bool movies, bool tv, bool categoryFiltered)
+    {
+        var cats = new List<string>();
+        if (movies) cats.Add("8,9,11,12,13,14,15,29,37,43,47");
+        if (tv) cats.Add("26,27,32,34,35,44");
+        return "torrents/browse/list" + (categoryFiltered && cats.Count > 0 ? "/categories/" + string.Join(",", cats) : "") + "/orderby/added/order/desc";
+    }
+
+    public async Task<IReadOnlyList<ReleaseCandidate>> RecentAsync(IndexerConfig indexer, CancellationToken ct)
+    {
+        if (!indexer.MoviesEnabled && !indexer.TvEnabled) return [];
+        using var response = await AuthGetAsync(indexer, BuildRecentPath(indexer.MoviesEnabled, indexer.TvEnabled, true), ct);
+        HttpResponseMessage final = response;
+        HttpResponseMessage? fallback = null;
+        try
+        {
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                final = fallback = await AuthGetAsync(indexer, BuildRecentPath(indexer.MoviesEnabled, indexer.TvEnabled, false), ct);
+            if (!final.IsSuccessStatusCode)
+                throw new ExternalServiceException($"TorrentLeech latest-uploads list returned HTTP {(int)final.StatusCode}");
+            var data = await final.Content.ReadAsStringAsync(ct);
+            if (data.Length > 8_000_000) throw new ExternalServiceException("TorrentLeech response too large");
+            var origin = ValidateBase(indexer.BaseUrl);
+            return ParseSearch(data, indexer.Name)
+                .Where(item => (indexer.MoviesEnabled && item.Categories.Contains(2000)) || (indexer.TvEnabled && item.Categories.Contains(5000)))
+                .Select(item => item with { Link = new Uri(origin, item.Link).AbsoluteUri })
+                .ToList();
+        }
+        finally { fallback?.Dispose(); }
+    }
+
     private static async Task<IReadOnlyList<ReleaseCandidate>> ParseResponseAsync(
         IndexerConfig indexer, HttpResponseMessage response, MediaType expectedMedia, CancellationToken ct, string route)
     {

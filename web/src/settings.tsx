@@ -651,7 +651,7 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
     setErr(null); setBusy(true);
     try {
       const body = { name, baseUrl: url, apiKey: nativeId || protocol === "rss" ? "" : key,
-        enabled, moviesEnabled: movies, tvEnabled: tv, priority, rssSync: nativeId ? false : rssSync,
+        enabled, moviesEnabled: movies, tvEnabled: tv, priority, rssSync,
         protocol: nativeId ? undefined : protocol,
         ...(nativeId ? { trackerId: nativeId,
           trackerSettings: { username: trackerUsername, password: trackerPassword, alt2fatoken: trackerAlt2fa } } : {}) };
@@ -685,10 +685,8 @@ function IndexerDialog({ initial, suggestedName, suggestedUrl, suggestedNativeId
           <label className="inline"><input type="checkbox" checked={movies} onChange={(e) => setMovies(e.target.checked)} /> movies</label>
           <label className="inline"><input type="checkbox" checked={tv} onChange={(e) => setTv(e.target.checked)} /> TV</label>
           <label>Priority<input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
-          {!nativeId && <>
-            <label className="inline"><input type="checkbox" checked={rssSync} onChange={(e) => setRssSync(e.target.checked)} /> RSS sync</label>
-            <p className="muted">Every 15 minutes, read this indexer's newest releases and grab any that match a wanted episode or movie. Uses one request per sync. Needs automatic grabbing on.</p>
-          </>}
+          <label className="inline"><input type="checkbox" checked={rssSync} onChange={(e) => setRssSync(e.target.checked)} /> RSS sync</label>
+          <p className="muted">Every 15 minutes, read this indexer's newest releases and grab any that match a wanted episode or movie. Uses one request per sync. Needs automatic grabbing on.</p>
           <p className="muted">{nativeId ? "Test performs an actual website sign-in. Download links are retrieved with the authenticated session and sent to qBittorrent as torrent bytes." :
             initial ? "Lower priority is searched first. Testing checks these values without saving; a blank key tests the stored key." : "Lower priority is searched first. Testing checks these exact values without saving."}</p>
           <ErrorLine message={err} />

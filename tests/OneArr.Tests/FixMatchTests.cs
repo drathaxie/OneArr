@@ -197,11 +197,11 @@ public class FixMatchTests
             series.LibraryReviewedUtc = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
         }
-        // The show now has season 1 episode 4 and a season 0 special.
+        // The show now has an old season 1 episode 4 (it could already be on disk) and a season 0 special.
         meta.Catalog["555"] = ("Wrong Show", 2001,
         [
             new SeasonInfo(0, [new EpisodeInfo(1, "s1", "Special", null)]),
-            new SeasonInfo(1, [new EpisodeInfo(1, "e1", "Old 1", null), new EpisodeInfo(2, "e2", "Old 2", null), new EpisodeInfo(3, "e3", "Old 3", null), new EpisodeInfo(4, "e4", "New", null)]),
+            new SeasonInfo(1, [new EpisodeInfo(1, "e1", "Old 1", null), new EpisodeInfo(2, "e2", "Old 2", null), new EpisodeInfo(3, "e3", "Old 3", null), new EpisodeInfo(4, "e4", "New", new DateOnly(2002, 1, 1))]),
         ]);
 
         var result = await media.RefreshMetadataAsync(seriesId, default);
@@ -219,6 +219,33 @@ public class FixMatchTests
         Assert.False(episodes.Single(e => e.SeasonNumber == 0).Monitored, "specials are not monitored by default");
         Assert.Equal(1, await db2.MediaFileEpisodes.CountAsync(l => l.MediaFileId == fileId));
         Assert.True(await db2.DownloadJobs.AnyAsync(j => j.EpisodeId == ep1));
+    }
+
+    [Fact]
+    public async Task Specials_and_undated_episodes_do_not_reopen_the_review()
+    {
+        var (factory, keep, meta, media) = await SetupAsync();
+        using var _ = keep;
+        var (seriesId, _, _, _, _) = await SeedWrongMatchAsync(factory);
+        await using (var db = factory.CreateDbContext())
+        {
+            var series = await db.MediaItems.SingleAsync(m => m.Id == seriesId);
+            series.ProviderId = "555";
+            series.LibraryReviewedUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        meta.Catalog["555"] = ("Wrong Show", 2001,
+        [
+            new SeasonInfo(0, [new EpisodeInfo(1, "s1", "Old special", new DateOnly(2003, 5, 1))]),
+            new SeasonInfo(1, [new EpisodeInfo(1, "e1", "Old 1", null), new EpisodeInfo(2, "e2", "Old 2", null), new EpisodeInfo(3, "e3", "Old 3", null), new EpisodeInfo(4, "e4", "Announced", null)]),
+        ]);
+
+        var result = await media.RefreshMetadataAsync(seriesId, default);
+
+        Assert.Equal(2, result.EpisodesAdded);
+        Assert.False(result.NeedsLibraryScan);
+        await using var check = factory.CreateDbContext();
+        Assert.NotNull((await check.MediaItems.SingleAsync(m => m.Id == seriesId)).LibraryReviewedUtc);
     }
 
     [Fact]

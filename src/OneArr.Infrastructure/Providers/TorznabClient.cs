@@ -99,13 +99,15 @@ public sealed class TorznabClient : IIndexerClient
 
     /// <summary>
     /// Newest releases for RSS sync. Torznab: a query-less search in the TV and/or movie categories (Jackett and Prowlarr
-    /// answer it with their latest releases). Nyaa: the unfiltered feed. Generic RSS: the feed itself. Native trackers have
-    /// no recent feed here, so they return null and stay search-only.
+    /// answer it with their latest releases). Nyaa: the unfiltered feed. Generic RSS: the feed itself. TorrentLeech: its
+    /// newest uploads through the logged-in session.
     /// </summary>
     public async Task<IReadOnlyList<ReleaseCandidate>?> RecentAsync(IndexerConfig indexer, CancellationToken ct)
     {
         var baseUri = UrlGuard.RequireServiceUrl(indexer.BaseUrl);
-        if (TrackerSecretBox.IsNative(indexer.ApiKey)) return null;
+        // TorrentLeech: its newest uploads, read through the logged-in session like a search.
+        if (TrackerSecretBox.IsNative(indexer.ApiKey))
+            return _native is null ? null : await _native.RecentAsync(indexer, ct);
         if (IsDirectNyaa(baseUri))
         {
             var nyaa = _factory.CreateClient(OutboundHttp.TorznabClient);

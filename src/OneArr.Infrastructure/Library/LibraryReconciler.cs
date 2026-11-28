@@ -331,9 +331,9 @@ public sealed class LibraryReconciler
                 : new AutomationGate(false, "Add your library folders and apply a complete scan. Catalog entries have not been checked against your disk, so existing media would be downloaded again.");
         }
 
+        // Entries not yet checked against the disk (just added, or with new back-catalogue episodes) are skipped one by one by
+        // the searches; they no longer pause automatic grabbing for everything else.
         var unreviewed = await db.MediaItems.CountAsync(m => m.Monitored && m.LibraryReviewedUtc == null, ct);
-        if (unreviewed > 0)
-            return new AutomationGate(false, $"{unreviewed} monitored catalog entries have not been checked against your library. Preview and apply a complete scan first.");
 
         foreach (var root in roots)
         {
@@ -365,7 +365,9 @@ public sealed class LibraryReconciler
             if (check.State != LibraryRootState.Accessible)
                 return new AutomationGate(false, $"'{root.Path}' is not reachable ({check.Message}). Automatic searching is paused so nothing is treated as missing");
         }
-        return new AutomationGate(true, "Library reconciled and every folder is reachable");
+        return new AutomationGate(true, unreviewed > 0
+            ? $"Library reconciled and every folder is reachable. {unreviewed} entr{(unreviewed == 1 ? "y waits" : "ies wait")} for the next library scan and {(unreviewed == 1 ? "is" : "are")} not searched until then"
+            : "Library reconciled and every folder is reachable");
     }
 
     private async Task<ScanPlan> EvaluateAsync(CancellationToken ct)
